@@ -70,6 +70,46 @@ describe('one finger: look around', () => {
     expect(cam.yaw).toBe(settled);
   });
 
+  test('movement since the last frame is applied on release, not dropped', () => {
+    // A slow renderer may not tick between the last move and the release;
+    // the drag must still count in full.
+    const { cam, g } = setup(60, 1000, 500);
+    const hfov = cam.hfov;
+    g.down(1, 500, 250, 0);
+    g.move(1, 300, 250, 16);
+    g.up(1, 500);                   // no tick in between
+    g.tick(516);
+    expect(cam.yaw).toBeCloseTo(90 + hfov * 0.2, 6);
+  });
+
+  test('a second finger landing applies the first finger\'s pending movement first', () => {
+    const { cam, g } = setup(60, 1000, 500);
+    const hfov = cam.hfov;
+    g.down(1, 500, 250, 0);
+    g.move(1, 400, 250, 16);        // not yet ticked
+    g.down(2, 800, 250, 20);
+    g.tick(32);
+    expect(cam.yaw).toBeCloseTo(90 + hfov * 0.1, 6);
+  });
+
+  test('flick velocity is per unit of time, not per frame', () => {
+    // The same swipe at 60 fps and at 5 fps must carry on the same distance.
+    const fast = setup(60, 1000, 500);
+    fast.g.down(1, 500, 250, 0);
+    for (let i = 1; i <= 6; i++) { fast.g.move(1, 500 + 10 * i, 250, i * 16); fast.g.tick(i * 16); }
+    fast.g.up(1, 100);
+    for (let t = 116; t < 6000; t += 16) fast.g.tick(t);
+
+    const slow = setup(60, 1000, 500);
+    slow.g.down(1, 500, 250, 0);
+    slow.g.move(1, 560, 250, 96);   // the same 60 px in the same 96 ms, one frame
+    slow.g.tick(96);
+    slow.g.up(1, 100);
+    for (let t = 300; t < 6000; t += 200) slow.g.tick(t);
+
+    expect(slow.cam.yaw).toBeCloseTo(fast.cam.yaw, 0);
+  });
+
   test('a slow release is not a flick', () => {
     const { cam, g } = setup(60, 1000, 500);
     g.down(1, 500, 250, 0);

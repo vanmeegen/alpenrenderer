@@ -170,6 +170,7 @@ test.describe('controls', () => {
     await page.mouse.move(500, 300);
     await page.mouse.down();
     await page.mouse.move(300, 300, { steps: 5 });
+    await page.waitForTimeout(200);   // a deliberate release, not a flick
     await page.mouse.up();
     // Dragging left by 200 px brings the world from the right: yaw grows by a fifth of the hfov.
     await expect.poll(async () => hashNum(await hashOf(page), 'yaw'), { timeout: 30_000 })

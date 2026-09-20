@@ -27,7 +27,10 @@ export interface Size { width: number; height: number }
 
 /** Release within this many ms of the last move counts as a flick. */
 const FLICK_MS = 60;
+/** Inertia decays by this factor per 16 ms frame; integrated exactly over any dt. */
 const DECAY = 0.93;
+const LN_DECAY = Math.log(DECAY);
+const FRAME_MS = 16;
 const STOP_PX = 0.05;
 const KEY_STEP = 0.08;
 
@@ -41,12 +44,15 @@ export class GestureModel {
   private lastCentroid: Pointer | null = null;
   private pinchStart = 0;
   private fovStart = 0;
-  /** Velocity for inertia, in px per frame, and the last frame's delta. */
+  /** Velocity for inertia in px per 16 ms frame, and the last applied delta with its time span. */
   private vx = 0;
   private vy = 0;
   private lastDx = 0;
   private lastDy = 0;
+  private lastSpan = FRAME_MS;
+  private lastApply = 0;
   private lastMove = -Infinity;
+  private lastTick = 0;
 
   constructor(readonly camera: Camera, readonly size: () => Size) {}
 
@@ -94,9 +100,35 @@ export class GestureModel {
     }
   }
 
-  down(id: number, x: number, y: number, _t: number) {
+  /**
+   * Applies what the fingers did since the last frame: the pinch, then the
+   * centroid's travel. Called once per frame, and whenever the set of fingers
+   * is about to change, so a slow renderer never drops the tail of a drag.
+   */
+  private apply(t: number): boolean {
+    if (this.pointers.size === 0 || !this.lastCentroid) return false;
+    let changed = false;
+    if (this.pinchStart > 0) {
+      const spread = this.spread();
+      if (spread > 0) changed = this.setFov(this.fovStart * (this.pinchStart / spread)) || changed;
+    }
+    const c = this.centroid();
+    const dx = c.x - this.lastCentroid.x, dy = c.y - this.lastCentroid.y;
+    this.lastCentroid = c;
+    changed = this.turn(dx, dy) || changed;
+    if (dx !== 0 || dy !== 0) {
+      this.lastDx = dx; this.lastDy = dy;
+      this.lastSpan = Math.max(1, t - this.lastApply);
+    }
+    this.lastApply = t;
+    return changed;
+  }
+
+  down(id: number, x: number, y: number, t: number) {
+    if (this.apply(t)) this.onChange?.();
     this.pointers.set(id, { x, y });
     this.vx = this.vy = 0;
+    this.lastApply = t;
     this.rebase();
   }
 
@@ -108,9 +140,15 @@ export class GestureModel {
   }
 
   up(id: number, t: number) {
-    if (!this.pointers.delete(id)) return;
+    if (!this.pointers.has(id)) return;
+    if (this.apply(t)) this.onChange?.();
+    this.pointers.delete(id);
     if (this.pointers.size === 0 && t - this.lastMove < FLICK_MS) {
-      this.vx = this.lastDx; this.vy = this.lastDy;
+      // Velocity in px per frame from the last applied delta and its span,
+      // so a flick carries the same distance at any frame rate.
+      const k = FRAME_MS / this.lastSpan;
+      this.vx = this.lastDx * k; this.vy = this.lastDy * k;
+      this.lastTick = t;
     }
     this.rebase();
   }
@@ -136,25 +174,23 @@ export class GestureModel {
   }
 
   /** Once per frame: applies what the fingers did since the last frame, or inertia. */
-  tick(_t: number = 0) {
+  tick(t: number = 0) {
     let changed = false;
-    if (this.pointers.size > 0 && this.lastCentroid) {
-      if (this.pinchStart > 0) {
-        const spread = this.spread();
-        if (spread > 0) changed = this.setFov(this.fovStart * (this.pinchStart / spread)) || changed;
-      }
-      const c = this.centroid();
-      const dx = c.x - this.lastCentroid.x, dy = c.y - this.lastCentroid.y;
-      this.lastCentroid = c;
-      changed = this.turn(dx, dy) || changed;
-      this.lastDx = dx; this.lastDy = dy;
+    if (this.pointers.size > 0) {
+      changed = this.apply(t);
     } else if (Math.abs(this.vx) + Math.abs(this.vy) >= STOP_PX) {
-      changed = this.turn(this.vx, this.vy);
-      this.vx *= DECAY;
-      this.vy *= DECAY;
+      // Exact integral of an exponentially decaying velocity over the frame,
+      // whatever its length: the distance covered does not depend on fps.
+      const frames = Math.min(50, Math.max(0.05, (t - this.lastTick) / FRAME_MS));
+      const decay = Math.pow(DECAY, frames);
+      const travel = (decay - 1) / LN_DECAY;      // in frames' worth of velocity
+      changed = this.turn(this.vx * travel, this.vy * travel);
+      this.vx *= decay;
+      this.vy *= decay;
     } else {
       this.vx = this.vy = 0;
     }
+    this.lastTick = t;
     if (changed) this.onChange?.();
   }
 }
