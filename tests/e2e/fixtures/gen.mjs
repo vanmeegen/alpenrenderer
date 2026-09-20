@@ -46,7 +46,7 @@ const chunk = (type, data) => {
   const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
   return Buffer.concat([len, td, crc]);
 };
-function png(rgb, w, h) {
+function png(rgb, w, h, extra = []) {
   const raw = Buffer.alloc((w * 3 + 1) * h);
   for (let y = 0; y < h; y++) {
     raw[y * (w * 3 + 1)] = 0;
@@ -57,8 +57,113 @@ function png(rgb, w, h) {
   ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw, { level: 6 })), chunk('IEND', Buffer.alloc(0)),
+    chunk('IHDR', ihdr), ...extra, chunk('IDAT', deflateSync(raw, { level: 6 })), chunk('IEND', Buffer.alloc(0)),
   ]);
+}
+
+// --- a minimal EXIF (TIFF) writer: GPS, lens, time ---------------------------
+function tiff({ lon, lat, focal35, taken }) {
+  const entries = (list) => {
+    const all = list.sort((a, b) => a.tag - b.tag);
+    return (offset) => {
+      const head = 2 + all.length * 12 + 4;
+      const dir = Buffer.alloc(head);
+      const data = [];
+      let dataOff = offset + head;
+      dir.writeUInt16LE(all.length, 0);
+      all.forEach((e, i) => {
+        const o = 2 + i * 12;
+        dir.writeUInt16LE(e.tag, o); dir.writeUInt16LE(e.type, o + 2);
+        let payload;
+        if (e.type === 2) payload = Buffer.from(e.value + '\0', 'ascii');
+        else if (e.type === 3) { payload = Buffer.alloc(2 * e.value.length); e.value.forEach((x, k) => payload.writeUInt16LE(x, k * 2)); }
+        else if (e.type === 4) { payload = Buffer.alloc(4 * e.value.length); e.value.forEach((x, k) => payload.writeUInt32LE(x, k * 4)); }
+        else { payload = Buffer.alloc(8 * e.value.length); e.value.forEach(([n, d], k) => { payload.writeUInt32LE(n, k * 8); payload.writeUInt32LE(d, k * 8 + 4); }); }
+        const count = e.type === 2 ? payload.length : e.value.length;
+        dir.writeUInt32LE(count, o + 4);
+        if (payload.length <= 4) payload.copy(dir, o + 8);
+        else { dir.writeUInt32LE(dataOff, o + 8); data.push(payload); dataOff += payload.length; }
+      });
+      return { bytes: Buffer.concat([dir, ...data]), end: dataOff };
+    };
+  };
+  const dms = (deg) => {
+    const a = Math.abs(deg), d = Math.floor(a), m = Math.floor((a - d) * 60);
+    return [[d, 1], [m, 1], [Math.round(((a - d) * 60 - m) * 60 * 10000), 10000]];
+  };
+  const exifIfd = entries([{ tag: 0xa405, type: 3, value: [focal35] }, { tag: 0x9003, type: 2, value: taken }]);
+  const gpsIfd = entries([
+    { tag: 1, type: 2, value: lat >= 0 ? 'N' : 'S' }, { tag: 2, type: 5, value: dms(lat) },
+    { tag: 3, type: 2, value: lon >= 0 ? 'E' : 'W' }, { tag: 4, type: 5, value: dms(lon) },
+  ]);
+  const ifd0Size = 2 + 2 * 12 + 4;
+  const exif = exifIfd(8 + ifd0Size);
+  const gps = gpsIfd(exif.end);
+  const ifd0 = entries([{ tag: 0x8769, type: 4, value: [8 + ifd0Size] }, { tag: 0x8825, type: 4, value: [exif.end] }])(8);
+  return Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00]), ifd0.bytes, exif.bytes, gps.bytes]);
+}
+
+// --- the fixture photo: the range as a camera at PHOTO would see it ---------
+{
+  const P = T.PHOTO;
+  const DEG = Math.PI / 180;
+  const R_EFF = 6371008.8 / (1 - 0.13);
+  // The skyline per bearing, the same DEM march skylineRow uses.
+  const from = P.yaw - 45, span = 90, step = 0.25;
+  const prof = [];
+  for (let b = 0; b <= span / step; b++) {
+    const bearing = from + b * step;
+    let maxTan = -Infinity;
+    const steps = 6000, r0 = 1, r1 = 275000, k = Math.log(r1 / r0) / (steps - 1);
+    for (let i = 0; i < steps; i++) {
+      const r = r0 * Math.exp(i * k);
+      const up = T.heightAlong(bearing, r) - (T.PLAIN_M + 1.7) - (r * r) / (2 * R_EFF);
+      maxTan = Math.max(maxTan, up / r);
+    }
+    prof.push(Math.atan(maxTan) / DEG);
+  }
+  const profAt = (bearing) => {
+    const t = (bearing - from) / step;
+    const i = Math.floor(t);
+    if (i < 0 || i + 1 >= prof.length) return NaN;
+    return prof[i] * (1 - (t - i)) + prof[i + 1] * (t - i);
+  };
+  let seed = 4711;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const w = P.width, h = P.height;
+  const rgb = Buffer.alloc(w * h * 3);
+  const tanY = Math.tan(P.fovY * DEG / 2), tanX = tanY * (w / h);
+  const cy = Math.cos(P.yaw * DEG), sy = Math.sin(P.yaw * DEG);
+  const cp = Math.cos(P.pitch * DEG), sp = Math.sin(P.pitch * DEG);
+  const cr = Math.cos(P.roll * DEG), sr = Math.sin(P.roll * DEG);
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const u = ((px + 0.5) / w) * 2 - 1, v = 1 - ((py + 0.5) / h) * 2;
+      const cx0 = u * tanX, cz0 = v * tanY;
+      const cxr = cx0 * cr - cz0 * sr, czr = cx0 * sr + cz0 * cr;
+      const ry = cp - czr * sp, rz = sp + czr * cp;
+      const east = cxr * cy + ry * sy, north = -cxr * sy + ry * cy;
+      const bearing = Math.atan2(east, north) / DEG;
+      const elev = Math.atan2(rz, Math.hypot(east, north)) / DEG;
+      const model = profAt(bearing);
+      const isSky = Number.isNaN(model) || elev > model;
+      let lum;
+      if (isSky) lum = 148 + 42 * (1 - py / h) + 2 * (rnd() - 0.5);
+      else {
+        const depth = Math.max(0, model - elev);
+        lum = (depth < 2.2 ? 205 : 96) + 46 * (rnd() - 0.5) + 26 * Math.sin(px * 0.7) * Math.cos(py * 0.5);
+      }
+      const i = (py * w + px) * 3;
+      rgb[i] = rgb[i + 1] = rgb[i + 2] = Math.max(0, Math.min(255, Math.round(lum)));
+    }
+  }
+  const exif = chunk('eXIf', tiff({ lon: T.STAND.lon, lat: T.STAND.lat, focal35: P.focal35, taken: P.taken }));
+  writeFileSync(join(here, 'photo.png'), png(rgb, w, h, [exif]));
+  // And a photo that is nothing but fog, without any EXIF.
+  const fog = Buffer.alloc(w * h * 3);
+  for (let i = 0; i < fog.length; i++) fog[i] = 170 + Math.round(2 * (rnd() - 0.5));
+  writeFileSync(join(here, 'photo-fog.png'), png(fog, w, h));
+  console.log(`fixture photo: ${join(here, 'photo.png')} (${w}x${h}, yaw ${P.yaw}, pitch ${P.pitch}) and photo-fog.png`);
 }
 
 // --- tiles -------------------------------------------------------------------

@@ -32,8 +32,12 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   über das Kamerabild (weiß gewaschen, damit die Linien tragen), das
   Sichtfeld folgt dem Objektiv und lässt sich mit einem Regler korrigieren,
   „Foto“ speichert das Bild mit Labels und Quellenzeile als PNG.
-- Inkrement 3c (Foto mit Skyline-Abgleich) folgt. Der Plan:
-  [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
+- **Inkrement 3c** (Foto): „Foto laden“ legt die Grate und Namen über ein
+  Foto. Standpunkt und Objektiv kommen aus dem EXIF (GPS, Brennweite),
+  „Ausrichten“ legt die berechnete Skyline auf die des Fotos (Richtung,
+  Neigung, Rolle, bei unbekanntem Objektiv auch das Sichtfeld) und sagt, wie
+  sicher es sich ist; ein Finger korrigiert weiterhin von Hand.
+- Der Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
 
 ## Entwicklung
 
@@ -49,7 +53,8 @@ liegen in `tests/unit/` (Engine, Zustand, Gesten, Shader-Preprocessing),
 E2E-Tests in `tests/e2e/` (die gebaute App in Chromium mit Software-WebGL2,
 Gelände aus der Formel in `tests/e2e/fixtures/terrain.ts`, kein Netz; GPS und
 Orientierungssensoren werden emuliert bzw. als synthetische Events eingespeist,
-die Kamera ist Chromiums Fake-Gerät mit einem festen Y4M-Bild). CI
+die Kamera ist Chromiums Fake-Gerät mit einem festen Y4M-Bild, das Foto ein
+aus der Geländeformel gerendertes PNG mit eXIf-Chunk). CI
 (`.github/workflows/ci.yml`) führt beides auf jedem Push aus.
 
 Die Daten-Suite `tests/data/` prüft das Live-Material von Mapterhorn

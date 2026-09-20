@@ -6,6 +6,7 @@
  * and exposes the numbers the HUD shows.
  */
 
+import { AlignResult, DEFAULT_PROFILE, PHOTO_SKYLINE, alignPhoto, extractSkyline, horizonProfile } from '../engine/core/align';
 import { Camera } from '../engine/core/camera';
 import { computeVisibility } from '../engine/core/horizon';
 import { LabelTarget, PlacedLabel, buildTargets, layoutLabels, pickLabel } from '../engine/core/labels';
@@ -18,8 +19,9 @@ import { TileStore } from '../engine/sources/tilestore';
 import {
   Backend, GpuRenderer, QUALITY_HIGH, QUALITY_LOW, RendererDiagnostics,
 } from '../engine/render/gpu/renderer';
-import { CameraFeed, captureFilename, composeCapture, saveImage, SaveOutcome } from './cameraFeed';
+import { CameraFeed, DEFAULT_LENS_FOV, captureFilename, composeCapture, coverFovY, saveImage, SaveOutcome } from './cameraFeed';
 import { LookControls } from './controls';
+import { ExifInfo, fovFromExif, readExif } from './exif';
 import { LabelPainter } from './labelPainter';
 import { SensorLook } from './sensorLook';
 import { AppOptions, ViewState } from './state';
@@ -66,7 +68,24 @@ export interface ViewerStatus {
   sensors: { active: boolean; offsetYaw: number; offsetPitch: number };
   peaks: { total: number; visible: number; placed: number };
   camera: { active: boolean; fovY: number; fovSource: 'default' | 'reported' | 'manual'; width: number; height: number };
+  photo: PhotoStatus | null;
 }
+
+/** A loaded photo: the frame behind the outline, and what its EXIF said. */
+export interface PhotoStatus {
+  width: number;
+  height: number;
+  /** Vertical field of view of the lens over the whole frame, degrees. */
+  lensFov: number;
+  lensSource: 'exif' | 'default' | 'found' | 'manual';
+  /** The standpoint came from the photo's GPS. */
+  positioned: boolean;
+  taken?: string;
+}
+
+/** Longest side of the working copy of a photo, px. */
+const PHOTO_MAX_PX = 1600;
+const wrap360 = (deg: number) => deg - 360 * Math.floor(deg / 360);
 
 export class Viewer {
   readonly camera: Camera;
@@ -78,6 +97,7 @@ export class Viewer {
   readonly quality: 'high' | 'low';
   readonly catalog: PeakCatalog;
   readonly feed = new CameraFeed();
+  private photo: (PhotoStatus & { pixels: Uint8ClampedArray; exif: ExifInfo }) | null = null;
   private painter: LabelPainter | null;
   private peaks: Peak[] = [];
   private targets: LabelTarget[] = [];
@@ -180,6 +200,7 @@ export class Viewer {
    * Rejects with a readable message when the camera is refused.
    */
   async startCamera() {
+    if (this.photo) this.closePhoto();
     await this.feed.start();
     this.canvas.parentElement?.append(this.feed.video);
     this.renderer.attachVideo(this.feed.video);
@@ -192,6 +213,98 @@ export class Viewer {
     this.feed.video.remove();
     this.renderer.attachVideo(null);
     this.renderer.shaded = true;
+  }
+
+  /**
+   * A photo behind the outline. Its EXIF sets the standpoint (when it has
+   * GPS) and the lens; the heading is whatever it is until the user drags
+   * or asks for alignment.
+   */
+  async openPhoto(file: File): Promise<PhotoStatus> {
+    if (this.feed.status.active) this.stopCamera();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const exif = readExif(bytes);
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, PHOTO_MAX_PX / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale)), h = Math.max(1, Math.round(bitmap.height * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d')!;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    const pixels = ctx.getImageData(0, 0, w, h).data;
+    const lens = fovFromExif(exif, h > w);
+    const positioned = exif.lon !== undefined && exif.lat !== undefined;
+    this.photo = {
+      width: w, height: h, lensFov: lens ?? DEFAULT_LENS_FOV, lensSource: lens ? 'exif' : 'default',
+      positioned, taken: exif.taken, pixels, exif,
+    };
+    this.renderer.attachStill(pixels, w, h);
+    this.renderer.shaded = false;
+    if (positioned) await this.relocate({ lon: exif.lon!, lat: exif.lat!, alt: undefined });
+    this.applyPhotoFov();
+    return this.photoStatus()!;
+  }
+
+  closePhoto() {
+    if (!this.photo) return;
+    this.photo = null;
+    this.renderer.attachVideo(null);
+    this.renderer.shaded = true;
+    this.camera.set({ roll: 0 });
+    this.viewChanged();
+  }
+
+  /** The lens of the photo, corrected by hand. */
+  setPhotoLensFov(deg: number) {
+    if (!this.photo) return;
+    this.photo.lensFov = Math.max(10, Math.min(120, deg));
+    this.photo.lensSource = 'manual';
+    this.applyPhotoFov();
+  }
+
+  private applyPhotoFov() {
+    if (!this.photo) return;
+    const fov = coverFovY(this.photo.lensFov, this.photo.width, this.photo.height,
+      this.canvas.clientWidth, this.canvas.clientHeight);
+    this.camera.set({ fov });
+    this.viewChanged();
+  }
+
+  /**
+   * Lays the drawn skyline on the photo's: yaw, pitch and roll, and the lens
+   * when the EXIF did not say. Applied only when the match is trusted; the
+   * result says why not otherwise.
+   */
+  alignPhotoToTerrain(): AlignResult | null {
+    const p = this.photo;
+    if (!p) return null;
+    const hf = this.streamer.heightField;
+    const sky = extractSkyline(p.pixels, p.width, p.height, PHOTO_SKYLINE);
+    const profile = horizonProfile(hf, this.renderer.eyeAltitude,
+      { ...DEFAULT_PROFILE, from: this.camera.yaw - 100, span: 200 });
+    const lensKnown = p.lensSource !== 'default';
+    const view = {
+      yaw: this.camera.yaw, pitch: this.camera.pitch, roll: this.camera.roll,
+      fovY: p.lensFov, aspect: p.width / p.height,
+    };
+    const r = alignPhoto(sky, profile, view, lensKnown);
+    if (r.ok) {
+      this.camera.set({
+        yaw: wrap360(view.yaw + r.dYaw), pitch: view.pitch + r.dPitch, roll: view.roll + r.dRoll,
+      });
+      if (!lensKnown) { p.lensFov = r.fovY; p.lensSource = 'found'; }
+      this.applyPhotoFov();
+    }
+    return r;
+  }
+
+  private photoStatus(): PhotoStatus | null {
+    const p = this.photo;
+    return p ? {
+      width: p.width, height: p.height, lensFov: p.lensFov, lensSource: p.lensSource,
+      positioned: p.positioned, taken: p.taken,
+    } : null;
   }
 
   /** Corrects the lens angle by hand; the view follows at once. */
@@ -334,6 +447,7 @@ export class Viewer {
         active: this.feed.status.active, fovY: this.feed.status.fovY, fovSource: this.feed.status.fovSource,
         width: this.feed.status.width, height: this.feed.status.height,
       },
+      photo: this.photoStatus(),
     };
   }
 

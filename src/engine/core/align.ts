@@ -147,6 +147,13 @@ export const DEFAULT_SKYLINE: SkylineOptions = {
   floor: 0.06,
 };
 
+/**
+ * Working size for photos. The live view runs at 192 px for speed; a photo
+ * is a one-shot and at 192 px the ridge detail at the frame edges, which is
+ * what pins the roll, is lost.
+ */
+export const PHOTO_SKYLINE: SkylineOptions = { ...DEFAULT_SKYLINE, size: 288 };
+
 export interface Skyline {
   width: number;
   height: number;
@@ -347,6 +354,20 @@ export interface AlignOptions {
   minCoverage: number;
   minFit: number;
   minConfidence: number;
+  /**
+   * Half-width of the roll search, degrees; 0 leaves the roll as believed.
+   * A phone held up to the view is level to a degree or two, a photo taken
+   * one-handed is not, so the photo mode searches and the live view does not.
+   */
+  rollRange: number;
+  rollStep: number;
+  /**
+   * Field-of-view search, [min, max] degrees, for a photo whose lens is not
+   * known; null takes `view.fovY` as given. The coarse sweep runs once per
+   * candidate, then the fine one refines around the best.
+   */
+  fovRange: [number, number] | null;
+  fovStep: number;
 }
 
 export const DEFAULT_ALIGN: AlignOptions = {
@@ -359,6 +380,10 @@ export const DEFAULT_ALIGN: AlignOptions = {
   minCoverage: 0.35,
   minFit: 0.32,
   minConfidence: 0.18,
+  rollRange: 0,
+  rollStep: 1,
+  fovRange: null,
+  fovStep: 4,
 };
 
 export interface AlignResult {
@@ -367,6 +392,10 @@ export interface AlignResult {
   dYaw: number;
   /** Correction to add to the pitch offset, degrees. */
   dPitch: number;
+  /** Correction to add to the roll, degrees; 0 unless a roll search was asked for. */
+  dRoll: number;
+  /** Vertical field of view the match was made at: the one given, or the one found. */
+  fovY: number;
   /** Agreement at the winning pose, 0..1. */
   fit: number;
   /** How much the winner beat the best rival elsewhere, 0..1. */
@@ -390,42 +419,47 @@ export function matchSkyline(
   opt: AlignOptions = DEFAULT_ALIGN,
 ): AlignResult {
   const fail = (why: string): AlignResult => ({
-    ok: false, dYaw: 0, dPitch: 0, fit: 0, confidence: 0, coverage: sky.coverage, why,
+    ok: false, dYaw: 0, dPitch: 0, dRoll: 0, fovY: view.fovY, fit: 0, confidence: 0, coverage: sky.coverage, why,
   });
   if (sky.coverage < opt.minCoverage) {
     return fail(`only ${(sky.coverage * 100).toFixed(0)}% of the frame has a usable skyline`);
   }
 
-  // Each column's ray in the camera's own frame, fixed for the whole search:
-  // x right, y forward, z up, before any of the pose rotations.
   const n = sky.width;
-  const tanY = Math.tan(view.fovY * DEG / 2);
-  const tanX = tanY * view.aspect;
-  const rays = new Float32Array(n * 3);
   const wgt = new Float32Array(n);
   let wsum = 0;
-  for (let x = 0; x < n; x++) {
-    const u = ((x + 0.5) / sky.width) * 2 - 1;
-    const v = 1 - ((sky.row[x] + 0.5) / sky.height) * 2;
-    rays[x * 3] = u * tanX;
-    rays[x * 3 + 1] = 1;
-    rays[x * 3 + 2] = v * tanY;
-    wgt[x] = sky.strength[x];
-    wsum += wgt[x];
-  }
+  for (let x = 0; x < n; x++) { wgt[x] = sky.strength[x]; wsum += wgt[x]; }
   if (wsum <= 0) return fail('no column carried enough evidence');
 
-  const evaluate = (dYaw: number, dPitch: number): number => {
+  /**
+   * Each column's ray in the camera's own frame, x right, y forward, z up,
+   * before any of the pose rotations. Depends on the field of view only.
+   */
+  const raysFor = (fovY: number): Float32Array => {
+    const tanY = Math.tan(fovY * DEG / 2);
+    const tanX = tanY * view.aspect;
+    const rays = new Float32Array(n * 3);
+    for (let x = 0; x < n; x++) {
+      const u = ((x + 0.5) / sky.width) * 2 - 1;
+      const v = 1 - ((sky.row[x] + 0.5) / sky.height) * 2;
+      rays[x * 3] = u * tanX;
+      rays[x * 3 + 1] = 1;
+      rays[x * 3 + 2] = v * tanY;
+    }
+    return rays;
+  };
+
+  const evaluate = (rays: Float32Array, dYaw: number, dPitch: number, dRoll: number): number => {
     const y = (view.yaw + dYaw) * DEG;
     const p = (view.pitch + dPitch) * DEG;
-    const r = view.roll * DEG;
+    const r = (view.roll + dRoll) * DEG;
     const cy = Math.cos(y), sy = Math.sin(y);
     const cp = Math.cos(p), sp = Math.sin(p);
     const cr = Math.cos(r), sr = Math.sin(r);
     let acc = 0;
     for (let x = 0; x < n; x++) {
       if (wgt[x] <= 0) continue;
-      let cx = rays[x * 3], cyv = rays[x * 3 + 1], cz = rays[x * 3 + 2];
+      const cx = rays[x * 3], cyv = rays[x * 3 + 1], cz = rays[x * 3 + 2];
       // roll about the optical axis, then pitch, then yaw into ENU
       const rx = cx * cr - cz * sr;
       const rz = cx * sr + cz * cr;
@@ -443,15 +477,34 @@ export function matchSkyline(
     return acc / wsum;
   };
 
-  // Coarse sweep, then a fine one around the winner. The coarse grid also
-  // supplies the rival the confidence is measured against.
-  let bestFit = -1, bestYaw = 0, bestPitch = 0;
+  // Every candidate lens, every candidate roll: a coarse sweep over yaw and
+  // pitch for each, then a fine one around the overall winner. The coarse
+  // grid also supplies the rival the confidence is measured against.
+  const fovs: number[] = [];
+  if (opt.fovRange) {
+    for (let f = opt.fovRange[0]; f <= opt.fovRange[1] + 1e-9; f += opt.fovStep) fovs.push(f);
+  } else {
+    fovs.push(view.fovY);
+  }
+  const rolls: number[] = [];
+  if (opt.rollRange > 0) {
+    for (let r = -opt.rollRange; r <= opt.rollRange + 1e-9; r += opt.rollStep) rolls.push(r);
+  } else {
+    rolls.push(0);
+  }
+
+  let bestFit = -1, bestYaw = 0, bestPitch = 0, bestRoll = 0, bestFov = view.fovY;
   const grid: { yaw: number; pitch: number; fit: number }[] = [];
-  for (let dy = -opt.yawRange; dy <= opt.yawRange + 1e-9; dy += opt.coarseStep) {
-    for (let dp = -opt.pitchRange; dp <= opt.pitchRange + 1e-9; dp += opt.coarseStep) {
-      const f = evaluate(dy, dp);
-      grid.push({ yaw: dy, pitch: dp, fit: f });
-      if (f > bestFit) { bestFit = f; bestYaw = dy; bestPitch = dp; }
+  for (const fov of fovs) {
+    const rays = raysFor(fov);
+    for (const roll of rolls) {
+      for (let dy = -opt.yawRange; dy <= opt.yawRange + 1e-9; dy += opt.coarseStep) {
+        for (let dp = -opt.pitchRange; dp <= opt.pitchRange + 1e-9; dp += opt.coarseStep) {
+          const f = evaluate(rays, dy, dp, roll);
+          grid.push({ yaw: dy, pitch: dp, fit: f });
+          if (f > bestFit) { bestFit = f; bestYaw = dy; bestPitch = dp; bestRoll = roll; bestFov = fov; }
+        }
+      }
     }
   }
 
@@ -461,11 +514,22 @@ export function matchSkyline(
     if (g.fit > rival) rival = g.fit;
   }
 
+  // Fine pass: yaw and pitch at the fine step, roll and lens at a quarter of
+  // their coarse steps across one coarse step either side, all around the
+  // coarse winner.
   const span = opt.coarseStep;
-  for (let dy = bestYaw - span; dy <= bestYaw + span + 1e-9; dy += opt.fineStep) {
-    for (let dp = bestPitch - span; dp <= bestPitch + span + 1e-9; dp += opt.fineStep) {
-      const f = evaluate(dy, dp);
-      if (f > bestFit) { bestFit = f; bestYaw = dy; bestPitch = dp; }
+  const quarters = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
+  const fineRolls = opt.rollRange > 0 ? quarters.map((k) => bestRoll + k * opt.rollStep / 4) : [bestRoll];
+  const fineFovs = opt.fovRange ? quarters.map((k) => bestFov + k * opt.fovStep / 4) : [bestFov];
+  for (const fov of fineFovs) {
+    const rays = raysFor(fov);
+    for (const roll of fineRolls) {
+      for (let dy = bestYaw - span; dy <= bestYaw + span + 1e-9; dy += opt.fineStep) {
+        for (let dp = bestPitch - span; dp <= bestPitch + span + 1e-9; dp += opt.fineStep) {
+          const f = evaluate(rays, dy, dp, roll);
+          if (f > bestFit) { bestFit = f; bestYaw = dy; bestPitch = dp; bestRoll = roll; bestFov = fov; }
+        }
+      }
     }
   }
 
@@ -474,6 +538,8 @@ export function matchSkyline(
     ok: true,
     dYaw: bestYaw,
     dPitch: bestPitch,
+    dRoll: bestRoll,
+    fovY: bestFov,
     fit: bestFit,
     confidence,
     coverage: sky.coverage,
@@ -487,4 +553,44 @@ export function matchSkyline(
     res.why = `${(confidence * 100).toFixed(0)}% confidence — a ridge this even fits in several places`;
   }
   return res;
+}
+
+/**
+ * The staged search for a photo: yaw and pitch at full range, then the roll
+ * with yaw and pitch held near the winner, then the lens when it is not
+ * known, then yaw and pitch once more at full range so the confidence is
+ * measured against real rivals. A few thousand evaluations instead of the
+ * full four-dimensional grid, which would take tens of seconds.
+ *
+ * `view.roll` and `view.fovY` are the starting guesses; the result's `dRoll`
+ * and `fovY` are relative to and in place of them.
+ */
+export function alignPhoto(
+  sky: Skyline, profile: HorizonProfile, view: ViewGeometry, lensKnown: boolean,
+  base: AlignOptions = DEFAULT_ALIGN,
+): AlignResult {
+  const narrow: AlignOptions = { ...base, yawRange: 2, pitchRange: 2, coarseStep: 0.5 };
+  let cur: ViewGeometry = { ...view };
+  const step = (opt: AlignOptions) => {
+    const r = matchSkyline(sky, profile, cur, opt);
+    cur = { ...cur, yaw: cur.yaw + r.dYaw, pitch: cur.pitch + r.dPitch, roll: cur.roll + r.dRoll, fovY: r.fovY };
+    return r;
+  };
+  const rollStage = { ...narrow, rollRange: 8, rollStep: 0.5 };
+  step(base);
+  step(rollStage);
+  if (!lensKnown) {
+    // The roll found above was found with the wrong lens; once the lens is
+    // known, ask again.
+    step({ ...narrow, fovRange: [30, 80], fovStep: 2.5 });
+    step(rollStage);
+  }
+  const fin = step(base);
+  return {
+    ...fin,
+    dYaw: cur.yaw - view.yaw,
+    dPitch: cur.pitch - view.pitch,
+    dRoll: cur.roll - view.roll,
+    fovY: cur.fovY,
+  };
 }

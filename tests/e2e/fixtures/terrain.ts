@@ -101,3 +101,16 @@ export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, 
 export const CAMERA_TOP_Y = 204;
 export const CAMERA_BOTTOM_Y = 51;
 export const CAMERA_FRAME = { width: 640, height: 480 };
+
+/**
+ * The fixture photo: taken from the standpoint, pointed a little right of the
+ * Testhorn, slightly up, level, with a 26 mm-equivalent lens. The EXIF in the
+ * file carries the standpoint and the lens; the pose is what alignment must
+ * recover.
+ */
+export const PHOTO = {
+  width: 640, height: 480, yaw: 94, pitch: 2, roll: 0, focal35: 26,
+  taken: '2026:09:20 11:30:00',
+  /** Vertical field of view of that lens in landscape, degrees. */
+  fovY: (2 * Math.atan(12 / 26) * 180) / Math.PI,
+};

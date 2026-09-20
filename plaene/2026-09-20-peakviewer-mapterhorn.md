@@ -412,6 +412,27 @@ gewaschene Grauwerte im Composite, Grat-Tinte auf der berechneten Zeile,
 FOV aus dem Objektiv, Regler, PNG-Download mit Maßen, Verweigerung. Offen:
 Pinch als Objektiv-Korrektur, Zoom-Objektive, Zeitstempel im Foto.
 
+**Status 3c, Foto-Modus: umgesetzt (2026-09-20), test-first.** „Foto laden“
+liest das EXIF selbst (`src/app/exif.ts`, JPEG-APP1 und PNG-eXIf, ohne
+Abhängigkeit): GPS setzt den Standpunkt, Brennweite bzw. 35-mm-Äquivalent
+das Sichtfeld (`fovFromExif`, Hoch- und Querformat). Das Bild liegt als
+Standbild im Composite (`attachStill`, derselbe AR-Pfad wie die Kamera).
+„Ausrichten“ extrahiert die Skyline des Fotos (`extractSkyline`, für Fotos
+mit 288 px Arbeitsbild, weil 192 px die Rolle nicht mehr festlegen),
+rechnet das Horizontprofil aus dem DEM und sucht gestuft (`alignPhoto`):
+Richtung und Neigung, dann Rolle, bei unbekanntem Objektiv das Sichtfeld
+und die Rolle erneut, dann Richtung und Neigung nochmals für die Konfidenz.
+Angewandt wird nur ein vertrauter Treffer; sonst steht der Grund da, und der
+Finger bleibt die Instanz. Tests: `tests/unit/align.test.ts`
+(Charakterisierung als Port von `check_align`, dazu neu: Rolle und
+Sichtfeld als Suchparameter in `matchSkyline`, `alignPhoto`),
+`tests/unit/exif.test.ts` (handgebautes TIFF in JPEG und PNG),
+`tests/e2e/photo.spec.ts` (Fixture-Foto aus der Geländeformel mit eXIf:
+Standpunkt und Objektiv aus EXIF, Ausrichtung findet 94°/2° aus 90°/0°,
+Testhorn-Label auf der Foto-Spalte; Nebelfoto ohne EXIF wird abgelehnt).
+Offen: Stresstest mit echten Fotos (Arbeitspaket 7), PNG-Export mit Labels
+gibt es über „Speichern“.
+
 Arbeitspakete:
 
 1. **Gipfelkatalog.** `natural=peak` mit Namen aus OSM. Zwei Wege, beide

@@ -189,6 +189,8 @@ export class GpuRenderer {
   private blank!: RawTexture;
   private video: VideoTexture | null = null;
   private videoEl: HTMLVideoElement | null = null;
+  private still: RawTexture | null = null;
+  private stillSize: { width: number; height: number } | null = null;
   private lvlA = new Float32Array(MAX_LEVELS * 4);
   private lvlB = new Float32Array(MAX_LEVELS * 4);
   private uploaded: number[] = [];
@@ -583,14 +585,39 @@ export class GpuRenderer {
   eyeAltitude = 0;
 
   attachVideo(el: HTMLVideoElement | null) {
-    if (this.video) { this.video.dispose(); this.video = null; }
+    this.detachFrame();
     this.videoEl = el;
-    if (!el) { this.compositeMat.setTexture('videoTex', this.blank); return; }
+    if (!el) return;
     this.video = new VideoTexture('feed', el, this.scene, false, true,
       Texture.BILINEAR_SAMPLINGMODE, { autoPlay: false, autoUpdateTexture: true, loop: false });
     this.video.wrapU = Texture.CLAMP_ADDRESSMODE;
     this.video.wrapV = Texture.CLAMP_ADDRESSMODE;
     this.compositeMat.setTexture('videoTex', this.video);
+  }
+
+  /**
+   * A still image behind the outline instead of the camera: a photo. Same
+   * composite path as the video, same cover-crop, from RGBA pixels top-down.
+   */
+  attachStill(pixels: Uint8Array | Uint8ClampedArray, width: number, height: number) {
+    this.detachFrame();
+    const data = pixels instanceof Uint8Array ? pixels : new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength);
+    // The video path samples with v flipped (1 - uv.y); a top-down image
+    // wants the same orientation, so it is uploaded as is with invertY off.
+    this.still = RawTexture.CreateRGBATexture(data, width, height, this.scene, false, false,
+      Texture.BILINEAR_SAMPLINGMODE);
+    this.still.wrapU = Texture.CLAMP_ADDRESSMODE;
+    this.still.wrapV = Texture.CLAMP_ADDRESSMODE;
+    this.stillSize = { width, height };
+    this.compositeMat.setTexture('videoTex', this.still);
+  }
+
+  private detachFrame() {
+    if (this.video) { this.video.dispose(); this.video = null; }
+    if (this.still) { this.still.dispose(); this.still = null; }
+    this.videoEl = null;
+    this.stillSize = null;
+    this.compositeMat.setTexture('videoTex', this.blank);
   }
 
   // ----------------------------------------------------------------- render
@@ -719,9 +746,9 @@ export class GpuRenderer {
     m.setFloat('uWhiten', this.whiten);
     m.setFloat('uDesat', this.desaturate);
     m.setFloat('uLineDark', this.lineDark);
-    const vw = this.videoEl?.videoWidth ?? 0;
-    const vh = this.videoEl?.videoHeight ?? 0;
-    const ready = !!this.video && vw > 0 && vh > 0;
+    const vw = this.stillSize?.width ?? this.videoEl?.videoWidth ?? 0;
+    const vh = this.stillSize?.height ?? this.videoEl?.videoHeight ?? 0;
+    const ready = (!!this.video || !!this.still) && vw > 0 && vh > 0;
     m.setFloat('uHasVideo', ready ? 1 : 0);
     // Reproduce object-fit: cover, so the overlay lines up with the frame.
     let sx = 1, sy = 1;
@@ -791,6 +818,7 @@ export class GpuRenderer {
   dispose() {
     this.disposed = true;
     this.video?.dispose();
+    this.still?.dispose();
     this.scene?.dispose();
     this.engine?.dispose();
   }
