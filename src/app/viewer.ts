@@ -15,6 +15,7 @@ import {
   Backend, GpuRenderer, QUALITY_HIGH, QUALITY_LOW, RendererDiagnostics,
 } from '../engine/render/gpu/renderer';
 import { LookControls } from './controls';
+import { SensorLook } from './sensorLook';
 import { AppOptions, ViewState } from './state';
 
 const EYE_HEIGHT = 1.7;
@@ -35,6 +36,7 @@ export interface ViewerStatus {
   quality: 'high' | 'low';
   surveys: SurveyCredit[];
   diagnostics: RendererDiagnostics;
+  sensors: { active: boolean; offsetYaw: number; offsetPitch: number };
 }
 
 export class Viewer {
@@ -42,6 +44,7 @@ export class Viewer {
   readonly renderer: GpuRenderer;
   readonly streamer: ClipmapStreamer;
   readonly controls: LookControls;
+  readonly sensors: SensorLook;
   readonly source: TerrariumSource;
   readonly quality: 'high' | 'low';
   private coverage = new CoverageIndex();
@@ -71,6 +74,7 @@ export class Viewer {
     this.streamer.onUpdate = () => this.onLevel();
     this.controls = new LookControls(canvas, this.camera);
     this.controls.onChange = () => this.viewChanged();
+    this.sensors = new SensorLook(this.camera);
     this.camera.set({ yaw: view.yaw, pitch: view.pitch, fov: view.fov });
   }
 
@@ -90,6 +94,7 @@ export class Viewer {
     const loop = () => {
       if (this.disposed) return;
       this.controls.update();
+      if (this.sensors.tick(performance.now())) this.viewChanged();
       this.renderer.render();
       this.frames++;
       const now = performance.now();
@@ -106,6 +111,20 @@ export class Viewer {
 
   get current(): ViewState { return { ...this.view }; }
 
+  /**
+   * Follows the device's sensors; a drag then corrects the compass instead
+   * of turning the view. Rejects with a readable message when refused.
+   */
+  async startSensors() {
+    await this.sensors.start();
+    this.controls.model.turnHandler = (dYaw, dPitch) => this.sensors.nudge(dYaw, dPitch);
+  }
+
+  stopSensors() {
+    this.sensors.stop();
+    this.controls.model.turnHandler = null;
+  }
+
   /** Moves the standpoint; the clipmap refills around it. */
   async relocate(v: Partial<ViewState>) {
     this.view = { ...this.view, ...v };
@@ -113,6 +132,7 @@ export class Viewer {
       this.camera.set({ yaw: this.view.yaw, pitch: this.view.pitch, fov: this.view.fov });
     }
     this.applyAltitude();
+    this.sensors.setPosition(this.view.lon, this.view.lat);
     this.onView?.(this.current);
     void this.coverage.around(this.view.lon, this.view.lat).then((s) => { this.surveys = s; });
     await this.streamer.setCenter(this.view.lon, this.view.lat);
@@ -153,12 +173,16 @@ export class Viewer {
       quality: this.quality,
       surveys: this.surveys,
       diagnostics: this.renderer.diagnostics,
+      sensors: {
+        active: this.sensors.active, offsetYaw: this.sensors.offsetYaw, offsetPitch: this.sensors.offsetPitch,
+      },
     };
   }
 
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    this.sensors.stop();
     this.controls.dispose();
     this.streamer.cancel();
     this.renderer.dispose();

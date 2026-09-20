@@ -4,6 +4,7 @@ import { formatHash, PLACES, readHash, readOptions, ViewState } from './state';
 import { Viewer, ViewerStatus } from './viewer';
 import { MapPanel } from './MapPanel';
 import { PickedPosition } from './mapPicker';
+import { CompassRose } from './CompassRose';
 
 const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
 const compass = (yaw: number) => COMPASS[Math.round(yaw / 45) % 8];
@@ -19,6 +20,8 @@ export function App() {
   const [outline, setOutline] = useState(true);
   const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place'>('url');
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [sensors, setSensors] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -79,8 +82,26 @@ export function App() {
     setPanel('none');
   };
 
+  /** Follow the device's sensors, or stop. A refusal is shown, not thrown. */
+  const toggleSensors = async () => {
+    const v = viewerRef.current;
+    if (!v) return;
+    setNote(null);
+    if (sensors) { v.stopSensors(); setSensors(false); return; }
+    try {
+      await v.startSensors();
+      setSensors(true);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const loading = status && status.levelsReady < status.levels;
   const d = status?.diagnostics;
+  const offsetYaw = status?.sensors.offsetYaw ?? 0;
+  const offsetPitch = status?.sensors.offsetPitch ?? 0;
+  const corrected = sensors && (Math.abs(offsetYaw) > 0.05 || Math.abs(offsetPitch) > 0.05);
+  const signed = (x: number) => `${x > 0 ? '+' : ''}${x.toFixed(1)}°`;
 
   return (
     <div className="relative h-full w-full">
@@ -101,6 +122,7 @@ export function App() {
             <span className="tabular-nums">{view.lat.toFixed(4)}, {view.lon.toFixed(4)}</span>
             {positionSource === 'gps' && <span> (GPS{gpsAccuracy !== null ? `, ±${Math.round(gpsAccuracy)} m` : ''})</span>}
             {positionSource === 'map' && <span> (Karte)</span>}
+            {sensors && <span> · Sensoren{corrected ? `, Korrektur ${signed(offsetYaw)} / ${signed(offsetPitch)}` : ''}</span>}
             {status && (
               <span> · Auge {Math.round(status.eyeAltitude)} m
                 {status.altitudeSource === 'dem' ? ' (Boden + 1,7 m)' : ''}</span>
@@ -108,6 +130,7 @@ export function App() {
           </div>
           <div className="mt-0.5 text-neutral-600">
             {error && <span className="whitespace-pre-wrap text-red-700">{error}</span>}
+            {note && !error && <span className="text-red-700">{note} </span>}
             {!error && !status && 'Renderer startet…'}
             {status && loading && (
               <span>Lade Gelände: Tiles {status.tilesDone}/{status.tilesTotal}, Level {status.levelsReady}/{status.levels}
@@ -121,6 +144,10 @@ export function App() {
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel('map')}>Karte</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'places' ? 'none' : 'places')}>Standpunkt</button>
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void toggleSensors()}>{sensors ? 'Sensoren aus' : 'Sensoren'}</button>
+            {corrected && (
+              <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => viewerRef.current?.sensors.resetOffset()}>Korrektur zurücksetzen</button>
+            )}
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setOutline(!outline)}>Umrisse {outline ? 'aus' : 'an'}</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'credits' ? 'none' : 'credits')}>Quellen</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'check' ? 'none' : 'check')}>Check</button>
@@ -178,13 +205,18 @@ export function App() {
         )}
       </div>
 
+      <div className="pointer-events-none absolute right-2"
+        style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}>
+        <CompassRose yaw={view.yaw} offset={offsetYaw} sensors={sensors} />
+      </div>
+
       {panel === 'map' && (
         <MapPanel lon={view.lon} lat={view.lat} yaw={view.yaw} onPick={pick} onClose={() => setPanel('none')} />
       )}
 
       <div className="pointer-events-none absolute inset-x-2 bottom-2 text-center text-[11px] text-white drop-shadow"
         style={{ bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-        1 Finger: umschauen · 2 Finger: zoomen · Gelände © Mapterhorn und Quellen
+        {sensors ? '1 Finger: Kompass korrigieren' : '1 Finger: umschauen'} · 2 Finger: zoomen · Gelände © Mapterhorn und Quellen
       </div>
     </div>
   );

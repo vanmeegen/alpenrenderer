@@ -66,7 +66,8 @@ const RAD = 180 / Math.PI;
 /** Magnetic declination at a point, degrees east of true north (WMM). */
 export function declinationAt(lon: number, lat: number, when = new Date()): number {
   try {
-    return geomagnetism.model(when).point([lat, lon]).decl;
+    const d = geomagnetism.model(when).point([lat, lon]).decl;
+    return Number.isFinite(d) ? d : 0;
   } catch {
     return 0;
   }
@@ -334,7 +335,10 @@ export class PoseTracker {
       this.status.compassAccuracy = e.webkitCompassAccuracy ?? null;
       alpha = 360 - e.webkitCompassHeading;
     } else {
-      this.status.headingIsTrue = fromAbsolute || e.absolute === true;
+      // Android's absolute alpha is measured from magnetic north (Chromium
+      // passes the rotation-vector sensor through without a declination
+      // correction), so it still needs the WMM term in `sample`.
+      this.status.headingIsTrue = false;
     }
     this.feedOrientation(alpha, e.beta, e.gamma, screen);
   }
@@ -419,6 +423,25 @@ export class PoseTracker {
     o.roll = this.rollFilter.filter(t.roll, dt);
     this.opt.onOrientation?.(o);
     return o;
+  }
+
+  /**
+   * Forgets the fused state, so the next reading is taken whole: after the
+   * sensors were off for a while, easing in from the old heading would swing
+   * the view across the compass instead of just showing where the phone points.
+   */
+  resetFusion() {
+    this.target = null;
+    this.gyro = null;
+    this.yawStarted = false;
+    this.lastCompass = null;
+    this.distrust = 0;
+    this.lastSample = 0;
+    this.status.hasOrientation = false;
+    this.status.hasGyro = false;
+    this.pitchFilter.reset();
+    this.rollFilter.reset();
+    this.compassFilter.reset();
   }
 
   /**

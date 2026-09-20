@@ -311,7 +311,25 @@ und per GPS („Mein Standort“ mit Genauigkeit im HUD). E2E-Tests routen die
 OSM-Kacheln auf ein festes PNG und emulieren GPS bzw. dessen Verweigerung;
 `locateDevice` hat einen Watchdog, weil der Browser-Timeout erst nach
 erteilter Berechtigung läuft. Offen in 2a: Ortssuche, Standpunkt-Verlauf,
-„Standpunkt anheben“. **2b, Sichtachse per Sensoren:** offen.
+„Standpunkt anheben“.
+
+**Status 2b, Sichtachse per Sensoren: umgesetzt (2026-09-20), test-first.**
+„Sensoren“ im HUD folgt dem Gerät: `PoseTracker` aus peakviewer (Kompass plus
+Gyro, One-Euro-Filter, WMM-Deklination, iOS-Berechtigungsfluss) treibt die
+Kamera einmal pro Frame über das neue Modell `src/app/sensorLook.ts`. Ein
+Finger korrigiert in diesem Modus den Kompass statt die Kamera zu drehen
+(`GestureModel.turnHandler`); die Korrektur steht im HUD, an der Kompassrose
+und im `localStorage`, überlebt also einen Reload. „Sensoren aus“ lässt den
+Blick stehen. Tests: `tests/unit/pose.test.ts` charakterisiert die Fusion
+(Port von `check_pose`, dabei zwei Befunde behoben: `declinationAt` gab bei
+ungültigen Koordinaten NaN, und Androids magnetische `absolute`-Richtung
+bekam keine Deklination), `tests/unit/sensorLook.test.ts` das Modell,
+`tests/e2e/sensors.spec.ts` speist synthetische
+`deviceorientationabsolute`-Events ein und prüft, dass das Testhorn auf der
+berechneten Bildzeile landet, die Korrektur gegen den Kompass besteht und
+eine Verweigerung gemeldet wird. Rolle wird bewusst noch nicht angewandt;
+sie kommt mit dem Kamerabild in Inkrement 3. Offen: Eingabe von Azimut und
+Neigung, „Richtung Gipfel X“.
 
 Ziel: Der Nutzer bestimmt, wo er steht und wohin er schaut, auf Desktop
 manuell, auf Mobil per Sensoren.
