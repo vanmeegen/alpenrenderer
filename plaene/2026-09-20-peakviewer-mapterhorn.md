@@ -327,7 +327,13 @@ bekam keine Deklination), `tests/unit/sensorLook.test.ts` das Modell,
 `tests/e2e/sensors.spec.ts` speist synthetische
 `deviceorientationabsolute`-Events ein und prüft, dass das Testhorn auf der
 berechneten Bildzeile landet, die Korrektur gegen den Kompass besteht und
-eine Verweigerung gemeldet wird. Rolle wird bewusst noch nicht angewandt;
+eine Verweigerung gemeldet wird. Befund aus CI: Chrome 153 gewährt die
+Sensoren wie iOS erst nach `requestPermission` und antwortet headless mit
+`prompt`; die Engine wertete das als Verweigerung. Jetzt zählt nur ein
+explizites `denied` als Nein, und ein fehlschlagender Motion-Aufruf entwertet
+die Orientierungs-Erlaubnis nicht mehr (beides per Unit-Test rot → grün); die
+E2E-Sensortests injizieren die Erlaubnis wie der Verweigerungstest die
+Ablehnung. Rolle wird bewusst noch nicht angewandt;
 sie kommt mit dem Kamerabild in Inkrement 3. Offen: Eingabe von Azimut und
 Neigung, „Richtung Gipfel X“.
 

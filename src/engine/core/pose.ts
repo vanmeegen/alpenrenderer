@@ -456,10 +456,18 @@ export class PoseTracker {
       if (typeof dev.requestPermission === 'function') {
         // Must be reached from a user gesture; see app/permissions.ts, which
         // owns the full flow and the ordering rule this depends on.
+        // 'granted', 'denied', or 'prompt' when the browser could not or did
+        // not ask (Chrome 153 answers that headless). Only an explicit refusal
+        // is one; otherwise listen, and the events decide.
         const r = await dev.requestPermission();
-        this.status.permission = r === 'granted' ? 'granted' : 'denied';
-        if (typeof mot.requestPermission === 'function') await mot.requestPermission();
-        return r === 'granted';
+        this.status.permission = r === 'granted' ? 'granted' : r === 'denied' ? 'denied' : 'unknown';
+        // The gyro is a bonus: once the first await has spent the user
+        // activation this second request may be rejected, and that must
+        // not read as a refusal of the orientation the view needs.
+        if (typeof mot.requestPermission === 'function') {
+          try { await mot.requestPermission(); } catch { /* orientation is what matters */ }
+        }
+        return r !== 'denied';
       }
       this.status.permission = 'granted';
       return true;

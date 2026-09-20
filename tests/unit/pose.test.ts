@@ -187,3 +187,43 @@ describe('PoseTracker', () => {
     expect(calls).toBe(60);
   });
 });
+
+describe('PoseTracker.requestPermission', () => {
+  type Req = { requestPermission?: () => Promise<string> };
+  const g = globalThis as unknown as { DeviceOrientationEvent?: Req; DeviceMotionEvent?: Req; window?: unknown };
+
+  test('a platform without the gate (Android, desktop) is granted at once', async () => {
+    g.DeviceOrientationEvent = {};
+    g.window = { DeviceMotionEvent: {} };
+    const p = new PoseTracker({});
+    expect(await p.requestPermission()).toBe(true);
+    expect(p.status.permission).toBe('granted');
+  });
+
+  test('a refused orientation request is denied', async () => {
+    g.DeviceOrientationEvent = { requestPermission: async () => 'denied' };
+    g.window = { DeviceMotionEvent: {} };
+    const p = new PoseTracker({});
+    expect(await p.requestPermission()).toBe(false);
+    expect(p.status.permission).toBe('denied');
+  });
+
+  test('"prompt" (the browser could not ask, as Chrome 153 answers headless) is not a refusal', async () => {
+    g.DeviceOrientationEvent = { requestPermission: async () => 'prompt' };
+    g.window = { DeviceMotionEvent: { requestPermission: async () => 'prompt' } };
+    const p = new PoseTracker({});
+    expect(await p.requestPermission()).toBe(true);
+    expect(p.status.permission).toBe('unknown');
+  });
+
+  test('a failing motion request does not revoke a granted orientation permission', async () => {
+    // Orientation is what the view needs; the motion (gyro) request is a
+    // bonus and, once the first await has spent the user activation, may
+    // well be rejected. That must not read as a refusal.
+    g.DeviceOrientationEvent = { requestPermission: async () => 'granted' };
+    g.window = { DeviceMotionEvent: { requestPermission: async () => { throw new Error('needs a user gesture'); } } };
+    const p = new PoseTracker({});
+    expect(await p.requestPermission()).toBe(true);
+    expect(p.status.permission).toBe('granted');
+  });
+});

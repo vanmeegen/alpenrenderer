@@ -73,6 +73,16 @@ const yawClose = (page: Page, yaw: number, tol = 0.6) =>
   }, { timeout: 30_000 }).toBeLessThan(tol);
 
 test.describe('sensors', () => {
+  // Chrome 153 gates the sensors behind requestPermission like iOS does; a
+  // headless browser answers "prompt" because nobody can be asked. This is
+  // the phone's owner tapping "Allow".
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      (DeviceOrientationEvent as any).requestPermission = () => Promise.resolve('granted');
+      (DeviceMotionEvent as any).requestPermission = () => Promise.resolve('granted');
+    });
+  });
+
   test('the view follows the device: pointed at the Testhorn, the summit is dead centre', async ({ page }) => {
     await page.goto(url());
     const s = await ready(page);
