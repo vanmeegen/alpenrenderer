@@ -28,8 +28,12 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   Refraktion), Tippen öffnet Höhe, Entfernung, Peilung und Wikipedia. Der
   Katalog liegt statisch als Zellen unter `public/peaks/` (Build:
   `node tools/build_peaks.mjs`), die App fragt Overpass nie selbst.
-- Inkrement 3b (Live-Kamera) und 3c (Foto mit Skyline-Abgleich) folgen. Der
-  Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
+- **Inkrement 3b** (Live-Kamera): „Kamera“ legt die Grate und Gipfelnamen
+  über das Kamerabild (weiß gewaschen, damit die Linien tragen), das
+  Sichtfeld folgt dem Objektiv und lässt sich mit einem Regler korrigieren,
+  „Foto“ speichert das Bild mit Labels und Quellenzeile als PNG.
+- Inkrement 3c (Foto mit Skyline-Abgleich) folgt. Der Plan:
+  [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
 
 ## Entwicklung
 
@@ -44,7 +48,8 @@ Gearbeitet wird test-first (Red-Green), siehe `CLAUDE.md`. Unit-Tests
 liegen in `tests/unit/` (Engine, Zustand, Gesten, Shader-Preprocessing),
 E2E-Tests in `tests/e2e/` (die gebaute App in Chromium mit Software-WebGL2,
 Gelände aus der Formel in `tests/e2e/fixtures/terrain.ts`, kein Netz; GPS und
-Orientierungssensoren werden emuliert bzw. als synthetische Events eingespeist). CI
+Orientierungssensoren werden emuliert bzw. als synthetische Events eingespeist,
+die Kamera ist Chromiums Fake-Gerät mit einem festen Y4M-Bild). CI
 (`.github/workflows/ci.yml`) führt beides auf jedem Push aus.
 
 Die Daten-Suite `tests/data/` prüft das Live-Material von Mapterhorn

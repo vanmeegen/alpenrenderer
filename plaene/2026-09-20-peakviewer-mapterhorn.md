@@ -398,6 +398,20 @@ Hinterhorn dahinter ohne Label, Gratspitze nach Norden mit Krümmung,
 Gipfelkarte, Schalter). Offen: Overpass zur Laufzeit als Fallback, Prominenz
 für Gipfel ohne Tag, Label-Dichte auf dem Handy.
 
+**Status 3b, Live-Kamera: umgesetzt (2026-09-20), test-first.** „Kamera“
+öffnet die Rückkamera (`CameraFeed`, Port aus peakviewer), der Renderer
+schaltet auf den AR-Pfad (Kamerabild entsättigt und weiß gewaschen, Grate als
+Tinte darüber, Labels auf dem Overlay). Das Sichtfeld ist das des Objektivs,
+cover-gecroppt in die Canvas (`coverFovY`), mit Regler „Objektiv“ zur
+Handkorrektur, weil kein Browser das Objektiv-FOV meldet. „Foto“ rendert das
+Composite samt Labels und Quellenzeile in ein PNG und geht über die
+Share-API in die Fotos-App, sonst als Download. Tests: `tests/unit/camera.test.ts`
+(Cover-Crop-Mathematik, Dateiname), `tests/e2e/camera.spec.ts` mit Chromiums
+Fake-Kamera aus einer festen Y4M-Datei (oben helles, unten dunkles Grau):
+gewaschene Grauwerte im Composite, Grat-Tinte auf der berechneten Zeile,
+FOV aus dem Objektiv, Regler, PNG-Download mit Maßen, Verweigerung. Offen:
+Pinch als Objektiv-Korrektur, Zoom-Objektive, Zeitstempel im Foto.
+
 Arbeitspakete:
 
 1. **Gipfelkatalog.** `natural=peak` mit Namen aus OSM. Zwei Wege, beide

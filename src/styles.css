@@ -27,3 +27,14 @@ canvas.labels {
   height: 100%;
   pointer-events: none;
 }
+
+/* The camera feed is sampled as a texture; the element itself stays out of sight but not display:none, which would stall decoding. */
+video.feed {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+}

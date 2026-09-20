@@ -1,5 +1,9 @@
 import { defineConfig } from '@playwright/test';
 
+/** Software WebGL2 for every test; the camera spec adds Chromium's fake media device. */
+export const CHROMIUM_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
+export const EXECUTABLE = process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {};
+
 /**
  * E2E: the built app in Chromium with software WebGL2, against the synthetic
  * fixture terrain. No network. Run `bun run build` first; the fixture tiles
@@ -21,10 +25,7 @@ export default defineConfig({
     baseURL: 'http://localhost:4173',
     viewport: { width: 1000, height: 600 },
     deviceScaleFactor: 1,
-    launchOptions: {
-      ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
-      args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-    },
+    launchOptions: { ...EXECUTABLE, args: CHROMIUM_ARGS },
     trace: 'retain-on-failure',
   },
   webServer: {

@@ -18,6 +18,7 @@ import { TileStore } from '../engine/sources/tilestore';
 import {
   Backend, GpuRenderer, QUALITY_HIGH, QUALITY_LOW, RendererDiagnostics,
 } from '../engine/render/gpu/renderer';
+import { CameraFeed, captureFilename, composeCapture, saveImage, SaveOutcome } from './cameraFeed';
 import { LookControls } from './controls';
 import { LabelPainter } from './labelPainter';
 import { SensorLook } from './sensorLook';
@@ -64,6 +65,7 @@ export interface ViewerStatus {
   diagnostics: RendererDiagnostics;
   sensors: { active: boolean; offsetYaw: number; offsetPitch: number };
   peaks: { total: number; visible: number; placed: number };
+  camera: { active: boolean; fovY: number; fovSource: 'default' | 'reported' | 'manual'; width: number; height: number };
 }
 
 export class Viewer {
@@ -75,6 +77,7 @@ export class Viewer {
   readonly source: TerrariumSource;
   readonly quality: 'high' | 'low';
   readonly catalog: PeakCatalog;
+  readonly feed = new CameraFeed();
   private painter: LabelPainter | null;
   private peaks: Peak[] = [];
   private targets: LabelTarget[] = [];
@@ -139,6 +142,7 @@ export class Viewer {
       if (this.disposed) return;
       this.controls.update();
       if (this.sensors.tick(performance.now())) this.viewChanged();
+      if (this.feed.status.active) this.applyLensFov();
       this.renderer.render();
       this.drawLabels();
       this.frames++;
@@ -168,6 +172,49 @@ export class Viewer {
   stopSensors() {
     this.sensors.stop();
     this.controls.model.turnHandler = null;
+  }
+
+  /**
+   * The camera image behind the outline: the terrain is drawn as ridge
+   * lines over the washed frame, and the field of view is the lens's.
+   * Rejects with a readable message when the camera is refused.
+   */
+  async startCamera() {
+    await this.feed.start();
+    this.canvas.parentElement?.append(this.feed.video);
+    this.renderer.attachVideo(this.feed.video);
+    this.renderer.shaded = false;
+    this.applyLensFov();
+  }
+
+  stopCamera() {
+    this.feed.stop();
+    this.feed.video.remove();
+    this.renderer.attachVideo(null);
+    this.renderer.shaded = true;
+  }
+
+  /** Corrects the lens angle by hand; the view follows at once. */
+  setLensFov(deg: number) {
+    this.feed.setLensFov(deg);
+    if (this.feed.status.active) this.applyLensFov();
+  }
+
+  private applyLensFov() {
+    const fov = this.feed.renderFovY(this.canvas.clientWidth, this.canvas.clientHeight);
+    if (Math.abs(fov - this.camera.fov) < 0.01) return;
+    this.camera.set({ fov });
+    this.viewChanged();
+  }
+
+  /** A PNG of the view with its labels, saved through the share sheet or as a download. */
+  async snapshot(): Promise<SaveOutcome> {
+    const gpu = await this.renderer.capture();
+    if (!gpu) return 'failed';
+    const stamp = `alpenrenderer · ${this.view.lat.toFixed(4)}, ${this.view.lon.toFixed(4)} · Gelände © Mapterhorn und Quellen · Gipfel © OpenStreetMap`;
+    const blob = await composeCapture(gpu, this.painter?.canvas ?? null, stamp);
+    if (!blob) return 'failed';
+    return saveImage(blob, captureFilename(this.view.lon, this.view.lat, this.view.yaw));
   }
 
   /** Moves the standpoint; the clipmap refills around it. */
@@ -283,12 +330,17 @@ export class Viewer {
         active: this.sensors.active, offsetYaw: this.sensors.offsetYaw, offsetPitch: this.sensors.offsetPitch,
       },
       peaks: { total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length },
+      camera: {
+        active: this.feed.status.active, fovY: this.feed.status.fovY, fovSource: this.feed.status.fovSource,
+        width: this.feed.status.width, height: this.feed.status.height,
+      },
     };
   }
 
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    this.feed.stop();
     this.sensors.stop();
     this.controls.dispose();
     this.streamer.cancel();

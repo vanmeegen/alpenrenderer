@@ -95,3 +95,17 @@ const peaksDir = join(here, 'peaks');
 mkdirSync(peaksDir, { recursive: true });
 writeFileSync(join(peaksDir, '10_47.json'), JSON.stringify(T.PEAKS));
 console.log(`fixture peaks: ${T.PEAKS.length} in ${peaksDir}/10_47.json`);
+
+// The fake camera: one 640x480 frame, light grey above, dark grey below (Y4M
+// 4:2:0, no chroma, so no colour-matrix ambiguity). Chromium plays it as the
+// device camera with --use-file-for-fake-video-capture.
+{
+  const w = 640, h = 480;
+  const Y = Buffer.alloc(w * h);
+  for (let y = 0; y < h; y++) Y.fill(y < h / 2 ? T.CAMERA_TOP_Y : T.CAMERA_BOTTOM_Y, y * w, (y + 1) * w);
+  const C = Buffer.alloc((w / 2) * (h / 2), 128);
+  const header = Buffer.from(`YUV4MPEG2 W${w} H${h} F30:1 Ip A1:1 C420jpeg\n`, 'ascii');
+  const frame = Buffer.concat([Buffer.from('FRAME\n', 'ascii'), Y, C, C]);
+  writeFileSync(join(here, 'camera.y4m'), Buffer.concat([header, frame, frame, frame]));
+  console.log(`fixture camera: ${join(here, 'camera.y4m')}`);
+}

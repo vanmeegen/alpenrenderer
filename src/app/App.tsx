@@ -25,6 +25,8 @@ export function App() {
   const [sensors, setSensors] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [labelsOn, setLabelsOn] = useState(true);
+  const [camera, setCamera] = useState(false);
+  const [lensFov, setLensFov] = useState(51);
   const [peak, setPeak] = useState<PeakInfo | null>(null);
 
   useEffect(() => {
@@ -101,6 +103,31 @@ export function App() {
     }
   };
 
+  /** The camera behind the outline, or back to the shaded view. */
+  const toggleCamera = async () => {
+    const v = viewerRef.current;
+    if (!v) return;
+    setNote(null);
+    if (camera) { v.stopCamera(); setCamera(false); return; }
+    try {
+      await v.startCamera();
+      setLensFov(v.feed.status.fovY);
+      setCamera(true);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const lens = (deg: number) => {
+    setLensFov(deg);
+    viewerRef.current?.setLensFov(deg);
+  };
+
+  const photo = async () => {
+    const r = await viewerRef.current?.snapshot();
+    if (r === 'failed') setNote('Foto konnte nicht gespeichert werden.');
+  };
+
   const loading = status && status.levelsReady < status.levels;
   const d = status?.diagnostics;
   const offsetYaw = status?.sensors.offsetYaw ?? 0;
@@ -129,6 +156,7 @@ export function App() {
             {positionSource === 'gps' && <span> (GPS{gpsAccuracy !== null ? `, ±${Math.round(gpsAccuracy)} m` : ''})</span>}
             {positionSource === 'map' && <span> (Karte)</span>}
             {sensors && <span> · Sensoren{corrected ? `, Korrektur ${signed(offsetYaw)} / ${signed(offsetPitch)}` : ''}</span>}
+            {camera && <span> · Kamera</span>}
             {status && (
               <span> · Auge {Math.round(status.eyeAltitude)} m
                 {status.altitudeSource === 'dem' ? ' (Boden + 1,7 m)' : ''}</span>
@@ -152,6 +180,8 @@ export function App() {
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel('map')}>Karte</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'places' ? 'none' : 'places')}>Standpunkt</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void toggleSensors()}>{sensors ? 'Sensoren aus' : 'Sensoren'}</button>
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void toggleCamera()}>{camera ? 'Kamera aus' : 'Kamera'}</button>
+            {camera && <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void photo()}>Foto</button>}
             {corrected && (
               <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => viewerRef.current?.sensors.resetOffset()}>Korrektur zurücksetzen</button>
             )}
@@ -161,6 +191,17 @@ export function App() {
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'check' ? 'none' : 'check')}>Check</button>
           </div>
         </div>
+
+        {camera && (
+          <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur">
+            <label className="flex items-center gap-2">
+              <span>Objektiv {lensFov.toFixed(0)}°</span>
+              <input type="range" min={25} max={90} step={0.5} value={lensFov} aria-label="Objektiv"
+                onChange={(e) => lens(Number(e.target.value))} className="flex-1" />
+            </label>
+            <div className="mt-0.5 text-neutral-500">Regler schieben, bis die gezeichneten Grate auf den echten liegen.</div>
+          </div>
+        )}
 
         {panel === 'places' && (
           <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur">
@@ -241,7 +282,7 @@ export function App() {
 
       <div className="pointer-events-none absolute inset-x-2 bottom-2 text-center text-[11px] text-white drop-shadow"
         style={{ bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-        {sensors ? '1 Finger: Kompass korrigieren' : '1 Finger: umschauen'} · 2 Finger: zoomen · Gelände © Mapterhorn und Quellen
+        {sensors ? '1 Finger: Kompass korrigieren' : '1 Finger: umschauen'}{camera ? ' · Zoom: Objektiv-Regler' : ' · 2 Finger: zoomen'} · Gelände © Mapterhorn und Quellen
       </div>
     </div>
   );

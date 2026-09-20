@@ -92,3 +92,12 @@ export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, 
   }
   return height / 2 - (height / 2) * (maxTan / Math.cos(b)) / tanV;
 }
+
+/**
+ * The fake camera frame: luma values (0..255, full range) of the light upper
+ * and dark lower half. Grey only, so what the renderer samples does not
+ * depend on the browser's YUV matrix.
+ */
+export const CAMERA_TOP_Y = 204;
+export const CAMERA_BOTTOM_Y = 51;
+export const CAMERA_FRAME = { width: 640, height: 480 };
