@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
 import { formatHash, PLACES, readHash, readOptions, ViewState } from './state';
 import { Viewer, ViewerStatus } from './viewer';
+import { MapPanel } from './MapPanel';
+import { PickedPosition } from './mapPicker';
 
 const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
 const compass = (yaw: number) => COMPASS[Math.round(yaw / 45) % 8];
@@ -13,8 +15,10 @@ export function App() {
   const [status, setStatus] = useState<ViewerStatus | null>(null);
   const [view, setView] = useState<ViewState>(() => readHash());
   const [error, setError] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check'>('none');
+  const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'map'>('none');
   const [outline, setOutline] = useState(true);
+  const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place'>('url');
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -63,6 +67,15 @@ export function App() {
     const p = PLACES.find((x) => x.id === id);
     if (!p) return;
     void viewerRef.current?.relocate({ lon: p.lon, lat: p.lat, alt: undefined, yaw: p.yaw, pitch: 0, fov: 60 });
+    setPositionSource('place');
+    setPanel('none');
+  };
+
+  /** From the map or the GPS: stand there on the ground, keep looking the same way. */
+  const pick = (p: PickedPosition) => {
+    void viewerRef.current?.relocate({ lon: p.lon, lat: p.lat, alt: undefined });
+    setPositionSource(p.source);
+    setGpsAccuracy(p.source === 'gps' ? p.accuracy ?? null : null);
     setPanel('none');
   };
 
@@ -86,6 +99,8 @@ export function App() {
           </div>
           <div className="mt-0.5 text-neutral-600">
             <span className="tabular-nums">{view.lat.toFixed(4)}, {view.lon.toFixed(4)}</span>
+            {positionSource === 'gps' && <span> (GPS{gpsAccuracy !== null ? `, ±${Math.round(gpsAccuracy)} m` : ''})</span>}
+            {positionSource === 'map' && <span> (Karte)</span>}
             {status && (
               <span> · Auge {Math.round(status.eyeAltitude)} m
                 {status.altitudeSource === 'dem' ? ' (Boden + 1,7 m)' : ''}</span>
@@ -104,6 +119,7 @@ export function App() {
             )}
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel('map')}>Karte</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'places' ? 'none' : 'places')}>Standpunkt</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setOutline(!outline)}>Umrisse {outline ? 'aus' : 'an'}</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'credits' ? 'none' : 'credits')}>Quellen</button>
@@ -161,6 +177,10 @@ export function App() {
           </div>
         )}
       </div>
+
+      {panel === 'map' && (
+        <MapPanel lon={view.lon} lat={view.lat} yaw={view.yaw} onPick={pick} onClose={() => setPanel('none')} />
+      )}
 
       <div className="pointer-events-none absolute inset-x-2 bottom-2 text-center text-[11px] text-white drop-shadow"
         style={{ bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>

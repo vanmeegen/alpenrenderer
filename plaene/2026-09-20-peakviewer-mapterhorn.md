@@ -305,6 +305,14 @@ swisstopo.
 
 ## 7. Inkrement 2: Eigene Position und Sichtachse festlegen
 
+**Status 2a, Position: umgesetzt (2026-09-20), test-first.** Standpunkt per
+OpenStreetMap-Karte (Leaflet, Tippen plus „Panorama von hier“, Blick bleibt)
+und per GPS („Mein Standort“ mit Genauigkeit im HUD). E2E-Tests routen die
+OSM-Kacheln auf ein festes PNG und emulieren GPS bzw. dessen Verweigerung;
+`locateDevice` hat einen Watchdog, weil der Browser-Timeout erst nach
+erteilter Berechtigung läuft. Offen in 2a: Ortssuche, Standpunkt-Verlauf,
+„Standpunkt anheben“. **2b, Sichtachse per Sensoren:** offen.
+
 Ziel: Der Nutzer bestimmt, wo er steht und wohin er schaut, auf Desktop
 manuell, auf Mobil per Sensoren.
 
