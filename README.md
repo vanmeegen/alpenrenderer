@@ -18,8 +18,13 @@ Live: https://vanmeegen.github.io/alpenrenderer/
 - **Inkrement 2a** (Standpunkt wählen): „Karte“ öffnet OpenStreetMap, mit den
   Fingern verschieben und zoomen, Punkt antippen, „Panorama von hier“;
   „Mein Standort“ nimmt die GPS-Position. Der Blick bleibt dabei erhalten.
-- Inkrement 2b (Sichtachse per Sensoren) und 3 (Gipfel aus Foto erkennen und
-  beschriften) folgen. Der Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
+- **Inkrement 2b** (Sichtachse per Sensoren): „Sensoren“ lässt das Panorama
+  dem Handy folgen (Kompass plus Gyro, Deklination aus dem Weltmagnetmodell).
+  Weil der Kompass in den Bergen oft daneben liegt, korrigiert ein Finger in
+  diesem Modus die Richtung; die Korrektur bleibt gespeichert und steht an
+  der Kompassrose.
+- Inkrement 3 (Gipfel aus Foto erkennen und beschriften) folgt. Der Plan:
+  [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
 
 ## Entwicklung
 
@@ -33,7 +38,8 @@ Live: https://vanmeegen.github.io/alpenrenderer/
 Gearbeitet wird test-first (Red-Green), siehe `CLAUDE.md`. Unit-Tests
 liegen in `tests/unit/` (Engine, Zustand, Gesten, Shader-Preprocessing),
 E2E-Tests in `tests/e2e/` (die gebaute App in Chromium mit Software-WebGL2,
-Gelände aus der Formel in `tests/e2e/fixtures/terrain.ts`, kein Netz). CI
+Gelände aus der Formel in `tests/e2e/fixtures/terrain.ts`, kein Netz; GPS und
+Orientierungssensoren werden emuliert bzw. als synthetische Events eingespeist). CI
 (`.github/workflows/ci.yml`) führt beides auf jedem Push aus.
 
 Die Daten-Suite `tests/data/` prüft das Live-Material von Mapterhorn

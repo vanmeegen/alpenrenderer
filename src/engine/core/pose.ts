@@ -66,7 +66,8 @@ const RAD = 180 / Math.PI;
 /** Magnetic declination at a point, degrees east of true north (WMM). */
 export function declinationAt(lon: number, lat: number, when = new Date()): number {
   try {
-    return geomagnetism.model(when).point([lat, lon]).decl;
+    const d = geomagnetism.model(when).point([lat, lon]).decl;
+    return Number.isFinite(d) ? d : 0;
   } catch {
     return 0;
   }
@@ -334,7 +335,10 @@ export class PoseTracker {
       this.status.compassAccuracy = e.webkitCompassAccuracy ?? null;
       alpha = 360 - e.webkitCompassHeading;
     } else {
-      this.status.headingIsTrue = fromAbsolute || e.absolute === true;
+      // Android's absolute alpha is measured from magnetic north (Chromium
+      // passes the rotation-vector sensor through without a declination
+      // correction), so it still needs the WMM term in `sample`.
+      this.status.headingIsTrue = false;
     }
     this.feedOrientation(alpha, e.beta, e.gamma, screen);
   }
@@ -422,6 +426,25 @@ export class PoseTracker {
   }
 
   /**
+   * Forgets the fused state, so the next reading is taken whole: after the
+   * sensors were off for a while, easing in from the old heading would swing
+   * the view across the compass instead of just showing where the phone points.
+   */
+  resetFusion() {
+    this.target = null;
+    this.gyro = null;
+    this.yawStarted = false;
+    this.lastCompass = null;
+    this.distrust = 0;
+    this.lastSample = 0;
+    this.status.hasOrientation = false;
+    this.status.hasGyro = false;
+    this.pitchFilter.reset();
+    this.rollFilter.reset();
+    this.compassFilter.reset();
+  }
+
+  /**
    * iOS gates the motion sensors behind a user gesture. Call this from a click
    * handler; on every other platform it resolves immediately.
    */
@@ -433,10 +456,18 @@ export class PoseTracker {
       if (typeof dev.requestPermission === 'function') {
         // Must be reached from a user gesture; see app/permissions.ts, which
         // owns the full flow and the ordering rule this depends on.
+        // 'granted', 'denied', or 'prompt' when the browser could not or did
+        // not ask (Chrome 153 answers that headless). Only an explicit refusal
+        // is one; otherwise listen, and the events decide.
         const r = await dev.requestPermission();
-        this.status.permission = r === 'granted' ? 'granted' : 'denied';
-        if (typeof mot.requestPermission === 'function') await mot.requestPermission();
-        return r === 'granted';
+        this.status.permission = r === 'granted' ? 'granted' : r === 'denied' ? 'denied' : 'unknown';
+        // The gyro is a bonus: once the first await has spent the user
+        // activation this second request may be rejected, and that must
+        // not read as a refusal of the orientation the view needs.
+        if (typeof mot.requestPermission === 'function') {
+          try { await mot.requestPermission(); } catch { /* orientation is what matters */ }
+        }
+        return r !== 'denied';
       }
       this.status.permission = 'granted';
       return true;

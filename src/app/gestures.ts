@@ -36,6 +36,12 @@ const KEY_STEP = 0.08;
 
 export class GestureModel {
   onChange: (() => void) | null = null;
+  /**
+   * When set, turning is reported here in degrees instead of applied to the
+   * camera: in sensor mode a drag corrects the compass rather than fighting
+   * it. Zoom is never redirected.
+   */
+  turnHandler: ((dYaw: number, dPitch: number) => void) | null = null;
   minFov = 8;
   maxFov = 100;
 
@@ -65,8 +71,13 @@ export class GestureModel {
   private turn(dxPx: number, dyPx: number): boolean {
     if (dxPx === 0 && dyPx === 0) return false;
     const s = this.degPerPx();
-    const yaw = this.camera.yaw - dxPx * s.x;
-    this.camera.set({ yaw: yaw - 360 * Math.floor(yaw / 360), pitch: this.camera.pitch + dyPx * s.y });
+    return this.turnBy(-dxPx * s.x, dyPx * s.y);
+  }
+
+  private turnBy(dYaw: number, dPitch: number): boolean {
+    if (this.turnHandler) { this.turnHandler(dYaw, dPitch); return true; }
+    const yaw = this.camera.yaw + dYaw;
+    this.camera.set({ yaw: yaw - 360 * Math.floor(yaw / 360), pitch: this.camera.pitch + dPitch });
     return true;
   }
 
@@ -161,10 +172,10 @@ export class GestureModel {
   key(key: string): boolean {
     const step = this.camera.fov * KEY_STEP;
     switch (key) {
-      case 'ArrowLeft': this.camera.set({ yaw: this.camera.yaw - step }); break;
-      case 'ArrowRight': this.camera.set({ yaw: this.camera.yaw + step }); break;
-      case 'ArrowUp': this.camera.set({ pitch: this.camera.pitch + step }); break;
-      case 'ArrowDown': this.camera.set({ pitch: this.camera.pitch - step }); break;
+      case 'ArrowLeft': this.turnBy(-step, 0); break;
+      case 'ArrowRight': this.turnBy(step, 0); break;
+      case 'ArrowUp': this.turnBy(0, step); break;
+      case 'ArrowDown': this.turnBy(0, -step); break;
       case '+': case '=': this.setFov(this.camera.fov * 0.8); break;
       case '-': case '_': this.setFov(this.camera.fov * 1.25); break;
       default: return false;

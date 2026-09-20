@@ -216,3 +216,40 @@ describe('wheel and keys', () => {
     expect(n).toBe(3);
   });
 });
+
+describe('with a turn handler (sensor mode)', () => {
+  test('a drag reports degrees to the handler and leaves the camera alone', () => {
+    const { cam, g } = setup(60, 1000, 500);
+    const got: [number, number][] = [];
+    g.turnHandler = (dYaw, dPitch) => { got.push([dYaw, dPitch]); };
+    g.down(1, 100, 100, 0);
+    g.move(1, 1100, 350, 16);
+    g.tick(16);
+    expect(cam.yaw).toBe(90);
+    expect(cam.pitch).toBe(0);
+    expect(got.length).toBe(1);
+    expect(got[0][0]).toBeCloseTo(-cam.hfov, 6);   // finger right: view turns left
+    expect(got[0][1]).toBeCloseTo(30, 6);          // finger down: view tilts up
+  });
+
+  test('a pinch still zooms the camera directly', () => {
+    const { cam, g } = setup(60, 1000, 500);
+    g.turnHandler = () => {};
+    g.down(1, 400, 250, 0);
+    g.down(2, 600, 250, 0);
+    g.move(1, 300, 250, 16);
+    g.move(2, 700, 250, 16);
+    g.tick(16);
+    expect(cam.fov).toBeCloseTo(30, 6);
+  });
+
+  test('arrow keys go through the handler too', () => {
+    const { cam, g } = setup(60, 1000, 500);
+    const got: [number, number][] = [];
+    g.turnHandler = (dYaw, dPitch) => { got.push([dYaw, dPitch]); };
+    expect(g.key('ArrowRight')).toBe(true);
+    expect(g.key('ArrowUp')).toBe(true);
+    expect(cam.yaw).toBe(90);
+    expect(got).toEqual([[60 * 0.08, 0], [0, 60 * 0.08]]);
+  });
+});
