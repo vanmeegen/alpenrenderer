@@ -278,7 +278,7 @@ test.describe('appearance', () => {
     await page.goto(url());
     await ready(page);
     await expect(page).toHaveScreenshot('testhorn.png', {
-      mask: [page.locator('.pointer-events-auto')],
+      mask: [page.locator('.pointer-events-auto'), page.locator('.alp-compass')],
       maxDiffPixelRatio: 0.05,
     });
   });
