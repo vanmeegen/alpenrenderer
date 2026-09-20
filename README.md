@@ -1,12 +1,61 @@
 # alpenrenderer
-renders the alps in 3d using publicly available map data
 
-## Spikes
+Die Alpen in 3D aus offenen Höhendaten, im Browser, PeakVisor-ähnlich:
+Panorama von jedem Standpunkt, Gipfelnamen, später AR über dem Kamerabild.
+Nur frei verfügbare Daten.
 
-- [Zugspitze 3D](spike/zugspitze/) – Mapterhorn-Tiles als WebGL-Heightmap mit Touch-Orbit.
-  Nach dem Merge auf `main` unter https://vanmeegen.github.io/alpenrenderer/zugspitze/
-  (Pages-Workflow in `.github/workflows/pages.yml`).
+Live: https://vanmeegen.github.io/alpenrenderer/
 
-## Pläne
+## Stand
 
-- [peakviewer-Engine + Mapterhorn-Terrain, drei Inkremente](plaene/2026-09-20-peakviewer-mapterhorn.md)
+- **Inkrement 0** (Spike, Vorcheck): [Zugspitze 3D](spike/zugspitze/) als
+  WebGL-Heightmap mit Karten-Gesten, live unter
+  https://vanmeegen.github.io/alpenrenderer/spike/zugspitze/.
+- **Inkrement 1** (3D-Panorama): die App. Schattiertes Panorama bis 270 km
+  von einem Standpunkt aus, Mapterhorn-Terrain (LiDAR-Auflösung in D/A/CH),
+  Krümmung und Refraktion, ein Finger schaut um, zwei Finger zoomen.
+  Standpunkt und Blick stehen in der URL.
+- Inkrement 2 (eigene Position und Sichtachse) und 3 (Gipfel aus Foto
+  erkennen und beschriften) folgen. Der Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
+
+## Entwicklung
+
+    bun install
+    bun run dev            # http://localhost:5173
+    bun run check          # tsc, WGSL-Preprocessor-Check, Geometrie-Check
+    bun run build          # -> dist/
+
+Für Offline-Tests und Headless-Renders einen lokalen Tile-Cache füllen und
+der App per `?tiles=` mitgeben:
+
+    bun run cache:tiles                        # -> tile-cache/ (Gornergrat, Zugspitze)
+    python3 -m http.server 8765
+    # http://localhost:8765/dist/?tiles=/tile-cache/#lon=7.78472&lat=45.98333&yaw=232
+    node tools/shot.mjs "http://localhost:8765/dist/?tiles=/tile-cache/#lon=7.78472&lat=45.98333&yaw=232" shots/gornergrat.png
+
+URL-Parameter: `#lon`, `lat`, `alt` (absolute Augenhöhe, sonst Boden + 1,7 m),
+`yaw`, `pitch`, `fov`, `p=<ort>` für einen der Standpunkte im Menü;
+`?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität.
+
+## Aufbau
+
+    src/engine/     Terrain-Engine, aus peakviewer übernommen (MIT): Geodäsie,
+                    Clipmap, Renderer (WGSL + GLSL), Tile-Quellen, Labels, Pose
+    src/app/        React-Shell: Viewer, Steuerung, URL-Zustand, HUD
+    spike/          Wegwerf-Prototypen (Inkrement 0)
+    tools/          Checks und Headless-Renders
+    plaene/         Pläne
+
+Die Engine stammt aus [peakviewer](https://github.com/pascalbayer/peakviewer)
+von Pascal Bayer (MIT, siehe `src/engine/LICENSE-peakviewer`), umgestellt auf
+512-px-Tiles von [Mapterhorn](https://mapterhorn.com) und um einen
+Shading-Pass erweitert.
+
+## Daten und Lizenzen
+
+- Gelände: [Mapterhorn](https://mapterhorn.com/attribution), ein Komposit
+  offener nationaler Höhenmodelle (swissALTI3D, BEV, Bayern DGM1, Südtirol,
+  Aosta, IGN …) mit Copernicus GLO-30 als globalem Fallback. Die Quellen
+  unter dem jeweiligen Standpunkt zeigt die App unter „Quellen“.
+- Gipfel: © OpenStreetMap contributors, ODbL.
+- Code: MIT. Drittkomponenten in `THIRD-PARTY-NOTICES.md`.

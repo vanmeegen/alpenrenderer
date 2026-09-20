@@ -196,6 +196,9 @@ Matterhorn-DEM-Gipfel im Heightfield ≥ 4470 m, Kaltstart Gornergrat unter
 
 ## 5. Inkrement 0: Spike als Vorcheck (vor allem anderen)
 
+**Status: bestanden (2026-09-20).** Der Spike läuft auf dem iPad, die Daten
+rendern sauber, die Karten-Gesten funktionieren; Inkrement 1 wurde begonnen.
+
 Bevor Engine, Shell und Umstellung angefasst werden, muss ein Wegwerf-Spike
 drei Fragen auf dem echten Gerät beantworten. Erst wenn alle drei mit Ja
 beantwortet sind, beginnt Inkrement 1. Sonst wird an dieser Stelle
@@ -236,6 +239,19 @@ Ergebnis des Vorchecks ist eine kurze Notiz unter „Ergebnis der Prüfung“ in
 selbst wird danach nicht weiterentwickelt.
 
 ## 6. Inkrement 1: 3D-Panorama darstellen
+
+**Status: umgesetzt (2026-09-20), Gerätetest offen.** Was steht:
+Vite/React/Tailwind-Shell unter Bun, Engine aus peakviewer in `src/engine/`,
+Mapterhorn-Umstellung mit Pixel-/Tile-Zoom-Trennung (`tools/check_clipmap.mjs`
+prüft die 256/512-Abbildung), Shading-Pass in WGSL und GLSL (Normale aus dem
+DEM pro Fragment, hypsometrische Tönung, Schnee nach Höhe und Neigung,
+Luftperspektive, Himmelsgradient nach Blickwinkel, Umrisse zuschaltbar),
+Look-Around-Steuerung mit Trägheit, URL-Hash, HUD mit Standpunkten, Quellen
+aus dem Coverage-Index und Diagnostik, Pages-Deploy der gebauten App.
+Headless in Chromium (WebGL2, SwiftShader) für Gornergrat und Zugspitze
+gerendert: alle Pipelines kompilieren, 8 Level, 43 Tiles, 8 MB, keine
+Frame-Fehler. Offen: Bildrate und Gestengefühl auf iPad und Handy, Feintuning
+von Farben, Sonne und Mesh-Budget nach dem ersten Blick auf dem Gerät.
 
 Ziel: Im Browser (Desktop und Mobil) ein schattiertes 3D-Panorama der Alpen
 von einem Standpunkt aus, mit der Maus oder dem Finger umschauen, ohne

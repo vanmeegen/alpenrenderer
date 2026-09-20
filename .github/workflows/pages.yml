@@ -1,9 +1,8 @@
-name: Deploy spikes to GitHub Pages
+name: Build and deploy to GitHub Pages
 
 on:
   push:
     branches: [main]
-    paths: ['spike/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -23,11 +22,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - uses: oven-sh/setup-bun@v2
         with:
-          enablement: true
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run build
+      # The spikes stay reachable next to the app.
+      - run: cp -r spike dist/spike
+      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: spike
+          path: dist
       - id: deployment
         uses: actions/deploy-pages@v4
