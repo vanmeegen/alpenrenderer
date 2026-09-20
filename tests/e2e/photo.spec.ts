@@ -17,7 +17,7 @@ const W = 1000, H = 600;
 
 function url(hash: Record<string, number | string> = {}) {
   const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, q: 'high' });
-  const h = new URLSearchParams(Object.entries({ lon: STAND.lon + 0.01, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
+  const h = new URLSearchParams(Object.entries({ lon: STAND.lon + 0.01, lat: STAND.lat, yaw: 90, pitch: 3, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;
 }
@@ -65,7 +65,7 @@ test.describe('photo mode', () => {
     await ready(page);
     await expect.poll(async () => { const t = await rgb(page, 100, 20, 40, 20); return Math.abs(t[2] - t[0]); }, { timeout: 30_000 }).toBeLessThan(0.03);
 
-    // Alignment: from the URL's 90° / 0° to the photo's 94° / 2°.
+    // Alignment: from the URL's 90° / 3° to the photo's 94° / 8°.
     await page.getByRole('button', { name: 'Ausrichten' }).click();
     await expect(page.locator('.alp-align')).toContainText(/Ausgerichtet: Fit \d+ %/, { timeout: 60_000 });
     await expect.poll(() => hashNum(page, 'yaw'), { timeout: 30_000 }).toBeCloseTo(PHOTO.yaw, 0);

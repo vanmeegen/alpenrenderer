@@ -109,7 +109,7 @@ export const CAMERA_FRAME = { width: 640, height: 480 };
  * recover.
  */
 export const PHOTO = {
-  width: 640, height: 480, yaw: 94, pitch: 2, roll: 0, focal35: 26,
+  width: 640, height: 480, yaw: 94, pitch: 8, roll: 0, focal35: 26,
   taken: '2026:09:20 11:30:00',
   /** Vertical field of view of that lens in landscape, degrees. */
   fovY: (2 * Math.atan(12 / 26) * 180) / Math.PI,
