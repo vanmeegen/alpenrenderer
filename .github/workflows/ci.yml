@@ -1,7 +1,9 @@
 name: CI
 
+# Once per commit: pushes to main, and pull requests for everything else.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
