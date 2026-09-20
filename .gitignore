@@ -1,0 +1,5 @@
+node_modules/
+dist/
+tile-cache/
+shots/
+.DS_Store

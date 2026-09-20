@@ -1,0 +1,417 @@
+/**
+ * WGSL for the three passes, in Babylon's dialect.
+ *
+ * Babylon preprocesses these: `attribute`/`uniform`/`varying` declarations
+ * become bindings, inputs arrive as `vertexInputs`/`fragmentInputs`, and
+ * outputs are written to `vertexOutputs`/`fragmentOutputs`. A texture declared
+ * as `foo` is paired with a sampler named `fooSampler`.
+ *
+ * Custom uniforms are declared with `uniform name : type;` but *read* through
+ * the generated `uniforms` struct. Babylon strips the declarations and gathers
+ * them into a uniform buffer during finalisation, so a bare reference is simply
+ * an undeclared identifier and the shader will not compile on a device.
+ *
+ * Every texture here is rgba8unorm on purpose. Float and integer texture
+ * formats carry filterability and bind-group-layout conditions that vary by
+ * device, and a viewer that fails to start on a mid-range Android is worse
+ * than one that spends three bytes per height sample.
+ *
+ * Passes:
+ *   terrain   the polar mesh into a range buffer (log distance, sky in alpha);
+ *   shade     the same mesh into a colour buffer: normal from the DEM, sun,
+ *             hypsometric tint, snow, aerial perspective;
+ *   composite a fullscreen quad that lays sky, colour, outline and (in AR)
+ *             the camera image together.
+ */
+
+/**
+ * Uniform names each material declares. Kept next to the shader source so the
+ * build check can prove the two agree — a name that appears in one and not the
+ * other fails silently at runtime as an unset uniform.
+ */
+export const TERRAIN_UNIFORMS = [
+  'uAzStep', 'uRadial', 'uRadialB', 'uSinLat0', 'uCosLat0', 'uEyeAlt',
+  'uRadius', 'uRefRadius', 'uDropScale', 'uLevelCount', 'uTexSize',
+  'uLevelPx', 'uViewProj', 'uFar', 'uLvlA', 'uLvlB',
+] as const;
+
+/** The shade material takes every terrain uniform plus these. */
+export const SHADE_UNIFORMS = [
+  ...TERRAIN_UNIFORMS,
+  'uSun', 'uSnowLine', 'uFogRange', 'uHorizonColor',
+] as const;
+
+export const COMPOSITE_UNIFORMS = [
+  'uTexel', 'uEdgeLow', 'uEdgeHigh', 'uEdgeWidth', 'uWhiten',
+  'uDesat', 'uHasVideo', 'uVideoScale', 'uLineDark',
+  'uShade', 'uOutline', 'uCamFwd', 'uCamRight', 'uCamUp', 'uTanHalf',
+  'uSkyTop', 'uHorizonColor',
+] as const;
+
+/** Height packing shared by the CPU uploader and both shaders. */
+export const HEIGHT_BIAS = -1000;
+
+/** Range packing: 24-bit log distance plus a terrain/sky flag in alpha. */
+const RANGE_CODEC = /* wgsl */ `
+const RANGE_MIN : f32 = 8.0;
+const LOG_MIN   : f32 = 2.0794415;
+const LOG_SPAN  : f32 = 10.8198;      // log(4.0e5) - log(8)
+
+fn packRange(range : f32, hit : f32) -> vec4<f32> {
+  let t = clamp((log(max(range, RANGE_MIN)) - LOG_MIN) / LOG_SPAN, 0.0, 1.0);
+  let v = t * 16777215.0;
+  let r = floor(v / 65536.0);
+  let g = floor((v - r * 65536.0) / 256.0);
+  let b = v - r * 65536.0 - g * 256.0;
+  return vec4<f32>(r / 255.0, g / 255.0, b / 255.0, hit);
+}
+
+fn unpackLogRange(p : vec4<f32>) -> f32 {
+  let v = round(p.r * 255.0) * 65536.0 + round(p.g * 255.0) * 256.0 + round(p.b * 255.0);
+  return LOG_MIN + (v / 16777215.0) * LOG_SPAN;
+}
+`;
+
+/**
+ * Clipmap sampling, shared by the vertex stage (heights) and the shade
+ * fragment stage (normals). Needs uLvlA/uLvlB/uTexSize/uLevelPx and the
+ * `heights` texture in scope.
+ */
+const CLIPMAP_SAMPLER = /* wgsl */ `
+/** One exact texel out of the stacked clipmap atlas. */
+fn texel(lv : i32, x : f32, y : f32) -> f32 {
+  let px = clamp(x, 0.0, uniforms.uLevelPx - 1.0);
+  let py = clamp(y, 0.0, uniforms.uLevelPx - 1.0) + f32(lv) * uniforms.uLevelPx;
+  let uv = vec2<f32>((px + 0.5) / uniforms.uTexSize.x, (py + 0.5) / uniforms.uTexSize.y);
+  let c = textureSampleLevel(heights, heightsSampler, uv, 0.0);
+  return round(c.r * 255.0) * 256.0 + round(c.g * 255.0);
+}
+
+fn sampleLevel(lv : i32, dLon : f32, dIso : f32) -> f32 {
+  let A = uniforms.uLvlA[lv];
+  let B = uniforms.uLvlB[lv];
+  let u = A.x + dLon * A.z;
+  let v = A.y - dIso * A.z;
+  let f = vec2<f32>(u, v) - vec2<f32>(0.5, 0.5);   // raster pixels are area samples
+  let p0 = floor(f);
+  let t = f - p0;
+  let h00 = texel(lv, p0.x, p0.y);
+  let h10 = texel(lv, p0.x + 1.0, p0.y);
+  let h01 = texel(lv, p0.x, p0.y + 1.0);
+  let h11 = texel(lv, p0.x + 1.0, p0.y + 1.0);
+  let h = mix(mix(h00, h10, t.x), mix(h01, h11, t.x), t.y);
+  return h * B.x + B.y;
+}
+
+/** Finest level that still covers a ground range. */
+fn levelFor(r : f32) -> i32 {
+  var lv : i32 = i32(uniforms.uLevelCount) - 1;
+  for (var i : i32 = 0; i < 8; i = i + 1) {
+    if (f32(i) >= uniforms.uLevelCount) { break; }
+    if (r <= uniforms.uLvlA[i].w) { lv = i; break; }
+  }
+  return lv;
+}
+`;
+
+const VARYINGS = /* wgsl */ `
+varying vRange : f32;
+varying vDLon  : f32;
+varying vDIso  : f32;
+varying vH     : f32;
+`;
+
+export const TERRAIN_VERTEX = /* wgsl */ `
+// x = azimuth index, y = radial row index. Everything else is derived.
+attribute position : vec3<f32>;
+
+uniform uAzStep    : f32;
+uniform uRadial    : vec4<f32>;   // jNear, logRatioNear, jSplit, logRatioFar
+uniform uRadialB   : vec4<f32>;   // r0, rNearEnd, stepMid, rSplit
+uniform uSinLat0   : f32;
+uniform uCosLat0   : f32;
+uniform uEyeAlt    : f32;
+uniform uRadius    : f32;
+uniform uRefRadius : f32;
+uniform uDropScale : f32;
+uniform uLevelCount : f32;
+uniform uTexSize   : vec2<f32>;
+uniform uLevelPx   : f32;         // pixels per clipmap level in the stacked atlas
+uniform uViewProj  : mat4x4<f32>;
+uniform uFar       : f32;
+uniform uLvlA      : array<vec4<f32>, 8>;   // cx, cy, pxPerRad, maxRange
+uniform uLvlB      : array<vec4<f32>, 8>;   // quant, bias, w, h
+
+var heightsSampler : sampler;
+var heights        : texture_2d<f32>;
+
+${VARYINGS}
+
+/**
+ * log(1+x) without the cancellation. |x| stays well under 0.12 for the ranges
+ * this renderer covers, where six terms are good to about 4e-7.
+ */
+fn log1p(x : f32) -> f32 {
+  return x * (1.0 - x * (0.5 - x * (0.3333333 - x * (0.25 - x * (0.2 - x * 0.1666667)))));
+}
+
+/**
+ * Sample spacing along a ray, in three segments: geometric near, so the ground
+ * at your feet is not one enormous triangle; one DEM post per step through the
+ * middle; geometric again far out, tracking the angular step so screen-space
+ * triangle size stays roughly constant to the far plane.
+ */
+fn radiusAt(f : f32) -> f32 {
+  if (f < uniforms.uRadial.x) { return uniforms.uRadialB.x * exp(f * uniforms.uRadial.y); }
+  if (f < uniforms.uRadial.z) { return uniforms.uRadialB.y + (f - uniforms.uRadial.x) * uniforms.uRadialB.z; }
+  return uniforms.uRadialB.w * exp((f - uniforms.uRadial.z) * uniforms.uRadial.w);
+}
+
+${CLIPMAP_SAMPLER}
+
+@vertex
+fn main(input : VertexInputs) -> FragmentInputs {
+  let alpha = vertexInputs.position.x * uniforms.uAzStep;
+  let r = radiusAt(vertexInputs.position.y);
+  let sinA = sin(alpha);
+  let cosA = cos(alpha);
+
+  // Great-circle destination at bearing alpha, ground range r — kept entirely
+  // in offsets from the observer. Forming sin(lat) and then subtracting
+  // sin(lat0), or forming the isometric latitude and subtracting the
+  // observer's, cancels two f32 values near 0.93 and then multiplies the
+  // wreckage by ~1.7e5 pixels per radian.
+  let delta = r / uniforms.uRadius;
+  let sinD = sin(delta);
+  let cosD = cos(delta);
+  let hs = sin(0.5 * delta);
+  let hav = hs * hs;
+  let ds = uniforms.uCosLat0 * sinD * cosA - 2.0 * uniforms.uSinLat0 * hav;   // sin(lat) - sin(lat0)
+  let sinP = clamp(uniforms.uSinLat0 + ds, -1.0, 1.0);
+  let dLon = atan2(sinA * sinD * uniforms.uCosLat0, cosD - uniforms.uSinLat0 * sinP);
+  // d/dphi of the isometric latitude is sec(phi); in terms of s = sin(phi) the
+  // integral is 0.5*log((1+s)/(1-s)), so the offset falls out of ds alone.
+  let dIso = 0.5 * (log1p(ds / (1.0 + uniforms.uSinLat0)) - log1p(-ds / (1.0 - uniforms.uSinLat0)));
+
+  // Finest level that still covers this range, cross-faded into the next so an
+  // LOD change never shows up as a step in the skyline.
+  let lv = levelFor(r);
+  var h = sampleLevel(lv, dLon, dIso);
+  if (f32(lv) + 1.0 < uniforms.uLevelCount) {
+    let outer = uniforms.uLvlA[lv].w;
+    let fade = smoothstep(outer * 0.86, outer, r);
+    if (fade > 0.0) { h = mix(h, sampleLevel(lv + 1, dLon, dIso), fade); }
+  }
+
+  let horiz = (uniforms.uRadius + h) * sinD;
+  let s = sin(r / (2.0 * uniforms.uRefRadius));
+  let drop = 2.0 * (uniforms.uRefRadius + h) * s * s * uniforms.uDropScale;
+
+  let enu = vec3<f32>(horiz * sinA, horiz * cosA, (h - uniforms.uEyeAlt) - drop);
+  vertexOutputs.vRange = length(enu);
+  vertexOutputs.vDLon = dLon;
+  vertexOutputs.vDIso = dIso;
+  vertexOutputs.vH = h;
+
+  var clip = uniforms.uViewProj * vec4<f32>(enu, 1.0);
+  // Logarithmic depth, mapped to WebGPU's [0,1] clip range. One 24-bit buffer
+  // has to separate a boulder three metres away from a ridge 270 km away.
+  clip.z = (log2(max(1e-6, 1.0 + clip.w)) / log2(1.0 + uniforms.uFar)) * clip.w;
+  vertexOutputs.position = clip;
+}
+`;
+
+export const TERRAIN_FRAGMENT = /* wgsl */ `
+${VARYINGS}
+${RANGE_CODEC}
+
+@fragment
+fn main(input : FragmentInputs) -> FragmentOutputs {
+  fragmentOutputs.color = packRange(fragmentInputs.vRange, 1.0);
+}
+`;
+
+/**
+ * Shaded terrain. The normal is not interpolated from the mesh: it is taken
+ * from the elevation model at the fragment, central differences one post
+ * apart on the level the vertex stage used for that range. Shading is therefore
+ * as sharp as the data wherever the mesh is coarser than the data, which along
+ * a ray is most of the way to the horizon.
+ */
+export const TERRAIN_SHADE_FRAGMENT = /* wgsl */ `
+${VARYINGS}
+
+uniform uLevelCount : f32;
+uniform uTexSize    : vec2<f32>;
+uniform uLevelPx    : f32;
+uniform uRadius     : f32;
+uniform uCosLat0    : f32;
+uniform uLvlA       : array<vec4<f32>, 8>;
+uniform uLvlB       : array<vec4<f32>, 8>;
+uniform uSun        : vec3<f32>;      // towards the sun, ENU, unit
+uniform uSnowLine   : f32;            // metres
+uniform uFogRange   : f32;            // metres to 1/e of the terrain colour
+uniform uHorizonColor : vec3<f32>;
+
+var heightsSampler : sampler;
+var heights        : texture_2d<f32>;
+
+${CLIPMAP_SAMPLER}
+
+/** d(height)/d(east), d(height)/d(north) at one level, metres per metre. */
+fn gradient(lv : i32, dLon : f32, dIso : f32) -> vec2<f32> {
+  let A = uniforms.uLvlA[lv];
+  let dp = 1.0 / A.z;                                    // one pixel, radians
+  let mpp = uniforms.uRadius * uniforms.uCosLat0 / A.z;  // one pixel, metres
+  let hE = sampleLevel(lv, dLon + dp, dIso);
+  let hW = sampleLevel(lv, dLon - dp, dIso);
+  let hN = sampleLevel(lv, dLon, dIso + dp);
+  let hS = sampleLevel(lv, dLon, dIso - dp);
+  return vec2<f32>((hE - hW) / (2.0 * mpp), (hN - hS) / (2.0 * mpp));
+}
+
+@fragment
+fn main(input : FragmentInputs) -> FragmentOutputs {
+  let r = fragmentInputs.vRange;
+  let dLon = fragmentInputs.vDLon;
+  let dIso = fragmentInputs.vDIso;
+  let h = fragmentInputs.vH;
+
+  let lv = levelFor(r);
+  var g = gradient(lv, dLon, dIso);
+  if (f32(lv) + 1.0 < uniforms.uLevelCount) {
+    let outer = uniforms.uLvlA[lv].w;
+    let fade = smoothstep(outer * 0.86, outer, r);
+    if (fade > 0.0) { g = mix(g, gradient(lv + 1, dLon, dIso), fade); }
+  }
+  let n = normalize(vec3<f32>(-g.x, -g.y, 1.0));
+  let slope = 1.0 - n.z;                 // 0 flat .. 1 vertical
+
+  // Hypsometric tint with slope-dependent rock and snow.
+  let valley = vec3<f32>(0.47, 0.60, 0.33);
+  let forest = vec3<f32>(0.28, 0.43, 0.24);
+  let meadow = vec3<f32>(0.58, 0.60, 0.38);
+  let rock   = vec3<f32>(0.52, 0.50, 0.47);
+  let snow   = vec3<f32>(0.94, 0.96, 0.99);
+  var col = mix(valley, forest, smoothstep(700.0, 1100.0, h));
+  col = mix(col, meadow, smoothstep(1500.0, 1900.0, h));
+  col = mix(col, rock, smoothstep(1950.0, 2350.0, h));
+  col = mix(col, rock, smoothstep(0.35, 0.6, slope) * 0.85);
+  let snowy = smoothstep(uniforms.uSnowLine - 350.0, uniforms.uSnowLine + 50.0, h)
+            * (1.0 - smoothstep(0.45, 0.7, slope));
+  col = mix(col, snow, snowy);
+
+  // Sun plus a soft sky term that keeps north faces readable.
+  let diff = max(dot(n, uniforms.uSun), 0.0);
+  let shade = 0.26 + 0.12 * n.z + 0.66 * diff;
+  col = col * shade;
+
+  // Aerial perspective: distant ridges recede into the horizon colour but
+  // never vanish into it, so the skyline stays a skyline.
+  let fog = 1.0 - exp(-r / uniforms.uFogRange);
+  col = mix(col, uniforms.uHorizonColor, fog * 0.88);
+
+  fragmentOutputs.color = vec4<f32>(col, 1.0);
+}
+`;
+
+export const COMPOSITE_VERTEX = /* wgsl */ `
+attribute position : vec3<f32>;
+varying vUV : vec2<f32>;
+
+@vertex
+fn main(input : VertexInputs) -> FragmentInputs {
+  // A fullscreen quad in clip space; no camera is involved.
+  vertexOutputs.vUV = vertexInputs.position.xy * 0.5 + vec2<f32>(0.5, 0.5);
+  vertexOutputs.position = vec4<f32>(vertexInputs.position.xy, 0.0, 1.0);
+}
+`;
+
+export const COMPOSITE_FRAGMENT = /* wgsl */ `
+varying vUV : vec2<f32>;
+
+uniform uTexel     : vec2<f32>;
+uniform uEdgeLow   : f32;
+uniform uEdgeHigh  : f32;
+uniform uEdgeWidth : f32;
+uniform uWhiten    : f32;   // how far the camera image is washed towards white
+uniform uDesat     : f32;
+uniform uHasVideo  : f32;
+uniform uVideoScale : vec2<f32>;   // cover-crop of the video inside the canvas
+uniform uLineDark  : f32;
+uniform uShade     : f32;   // 1 = shaded 3D view, 0 = AR outline over the camera
+uniform uOutline   : f32;   // 0..1 strength of ridge lines in the shaded view
+uniform uCamFwd    : vec3<f32>;   // ENU view basis, for the sky gradient
+uniform uCamRight  : vec3<f32>;
+uniform uCamUp     : vec3<f32>;
+uniform uTanHalf   : vec2<f32>;   // tan of half the horizontal / vertical fov
+uniform uSkyTop    : vec3<f32>;
+uniform uHorizonColor : vec3<f32>;
+
+var rangeTexSampler : sampler;
+var rangeTex        : texture_2d<f32>;
+var colorTexSampler : sampler;
+var colorTex        : texture_2d<f32>;
+var videoTexSampler : sampler;
+var videoTex        : texture_2d<f32>;
+
+${RANGE_CODEC}
+
+const LOG_SKY : f32 = 13.5;   // "beyond the far plane", so the skyline is an edge too
+
+fn logAt(uv : vec2<f32>) -> f32 {
+  let p = textureSample(rangeTex, rangeTexSampler, uv);
+  if (p.a > 0.5) { return unpackLogRange(p); }
+  return LOG_SKY;
+}
+
+@fragment
+fn main(input : FragmentInputs) -> FragmentOutputs {
+  let uv = fragmentInputs.vUV;
+
+  // --- silhouette ------------------------------------------------------
+  let e = uniforms.uTexel * uniforms.uEdgeWidth;
+  let lc = logAt(uv);
+  let lL = logAt(uv - vec2<f32>(e.x, 0.0));
+  let lR = logAt(uv + vec2<f32>(e.x, 0.0));
+  let lD = logAt(uv - vec2<f32>(0.0, e.y));
+  let lU = logAt(uv + vec2<f32>(0.0, e.y));
+  // Second difference: an even slope cancels, one ridge in front of another
+  // does not. The outline therefore comes from the geometry, not the lighting.
+  let lap = abs(lL + lR - 2.0 * lc) + abs(lU + lD - 2.0 * lc);
+  let edge = smoothstep(uniforms.uEdgeLow, uniforms.uEdgeHigh, lap);
+
+  if (uniforms.uShade > 0.5) {
+    // --- the shaded view ------------------------------------------------
+    let c = textureSample(colorTex, colorTexSampler, uv);
+    // Sky by the elevation of the view ray through this pixel.
+    let ndc = uv * 2.0 - vec2<f32>(1.0, 1.0);
+    let dir = uniforms.uCamFwd + uniforms.uCamRight * (ndc.x * uniforms.uTanHalf.x)
+            + uniforms.uCamUp * (ndc.y * uniforms.uTanHalf.y);
+    let elev = dir.z / length(dir);            // sin of the elevation angle
+    var sky = mix(uniforms.uHorizonColor, uniforms.uSkyTop, smoothstep(0.0, 0.5, elev));
+    // Below the horizon with nothing drawn (past the far plane): dim ground.
+    sky = mix(sky, uniforms.uHorizonColor * 0.72, smoothstep(0.0, -0.15, elev));
+    var ground = mix(sky, c.rgb, c.a);
+    let ink = ground * (1.0 - 0.7 * uniforms.uOutline);
+    ground = mix(ground, ink, edge * uniforms.uOutline);
+    fragmentOutputs.color = vec4<f32>(ground, 1.0);
+    return fragmentOutputs;
+  }
+
+  // --- the AR view: outline over the camera image -------------------------
+  var ground = vec3<f32>(1.0, 1.0, 1.0);
+  if (uniforms.uHasVideo > 0.5) {
+    // The video is drawn cover-cropped, matching the CSS object-fit the
+    // element would have used, so the overlay geometry lines up with it.
+    let cuv = (uv - vec2<f32>(0.5, 0.5)) * uniforms.uVideoScale + vec2<f32>(0.5, 0.5);
+    var cam = textureSample(videoTex, videoTexSampler, vec2<f32>(cuv.x, 1.0 - cuv.y)).rgb;
+    let luma = dot(cam, vec3<f32>(0.2126, 0.7152, 0.0722));
+    cam = mix(cam, vec3<f32>(luma, luma, luma), uniforms.uDesat);
+    ground = mix(cam, vec3<f32>(1.0, 1.0, 1.0), uniforms.uWhiten);
+  }
+
+  let ink = vec3<f32>(uniforms.uLineDark, uniforms.uLineDark, uniforms.uLineDark);
+  fragmentOutputs.color = vec4<f32>(mix(ground, ink, edge), 1.0);
+}
+`;
