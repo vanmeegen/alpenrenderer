@@ -45,3 +45,37 @@ export function summitScreenY(eye: number, fov: number): number {
   const tanHalf = Math.tan((fov * Math.PI / 180) / 2);
   return 0.5 - 0.5 * (Math.tan(elev) / tanHalf);
 }
+
+const R_EFF = 6371008.8 / (1 - 0.13);   // the renderer's refracted earth radius
+
+/** Height at a bearing and ground range from the standpoint, metres. */
+export function heightAlong(bearingDeg: number, range: number): number {
+  const b = (bearingDeg * Math.PI) / 180;
+  const lon = STAND.lon + (range * Math.sin(b)) / M_PER_DEG_LON;
+  const lat = STAND.lat + (range * Math.cos(b)) / M_PER_DEG_LAT;
+  return heightAt(lon, lat);
+}
+
+/**
+ * The skyline in one screen column, as a row from the top: the highest
+ * apparent elevation along the sightline at that column's bearing (a DEM
+ * march with the renderer's curvature and refraction), projected with the
+ * camera's perspective. This is the reference the rendered range buffer is
+ * held against.
+ */
+export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, width: number, height: number): number {
+  const tanV = Math.tan((fov * Math.PI) / 360);
+  const tanH = tanV * (width / height);
+  const ndcX = (x + 0.5) / width * 2 - 1;
+  const b = Math.atan(ndcX * tanH);                       // azimuth offset of the column
+  const bearing = yawDeg + (b * 180) / Math.PI;
+  let maxTan = -Infinity;
+  const steps = 6000, r0 = 1, r1 = 275000;
+  const k = Math.log(r1 / r0) / (steps - 1);
+  for (let i = 0; i < steps; i++) {
+    const r = r0 * Math.exp(i * k);
+    const up = heightAlong(bearing, r) - eye - (r * r) / (2 * R_EFF);
+    maxTan = Math.max(maxTan, up / r);
+  }
+  return height / 2 - (height / 2) * (maxTan / Math.cos(b)) / tanV;
+}

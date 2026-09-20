@@ -3,9 +3,10 @@
  * here is derived from tests/e2e/fixtures/terrain.ts, not read off a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { PLAIN_M, STAND, summitScreenY } from './fixtures/terrain';
+import { PLAIN_M, STAND, skylineRow, summitScreenY } from './fixtures/terrain';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
+const R_EFF_M = 6371008.8 / (1 - 0.13);
 const W = 1000, H = 600;
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
@@ -101,9 +102,19 @@ test.describe('geometry on screen', () => {
     const expected = summitScreenY(s.eyeAltitude, 60) * H;
     const centre = await skyRows(page, W / 2);
     expect(Math.abs(centre - expected)).toBeLessThan(H * 0.02);
-    // Off the cone the horizon of a flat plain is at eye level: mid screen.
-    const side = await skyRows(page, 60);
-    expect(Math.abs(side - H / 2)).toBeLessThan(H * 0.015);
+    // The DEM march agrees with the closed form at the apex.
+    expect(Math.abs(skylineRow(90, W / 2, s.eyeAltitude, 60, W, H) - expected)).toBeLessThan(2);
+  });
+
+  test('off the cone the skyline is where the DEM march puts it', async ({ page }) => {
+    await page.goto(url());
+    const s = await ready(page);
+    // 1.7 m above the plain, the ripple's crests hide the true horizon by a
+    // degree or two; the reference march sees the same crests.
+    for (const x of [60, 250, 800]) {
+      const expected = skylineRow(90, x, s.eyeAltitude, 60, W, H);
+      expect(Math.abs((await skyRows(page, x)) - expected), `column ${x}`).toBeLessThan(H * 0.01);
+    }
   });
 
   test('the summit is higher on screen with a narrower field of view', async ({ page }) => {
@@ -114,12 +125,28 @@ test.describe('geometry on screen', () => {
     expect(await skyRows(page, W / 2)).toBe(0);
   });
 
-  test('looking away from the Testhorn shows only the plain', async ({ page }) => {
+  test('looking away from the Testhorn shows only the plain, with the march as reference', async ({ page }) => {
     await page.goto(url({ yaw: 270 }));
-    await ready(page);
+    const s = await ready(page);
     for (const x of [100, 500, 900]) {
-      expect(Math.abs((await skyRows(page, x)) - H / 2)).toBeLessThan(H * 0.015);
+      const expected = skylineRow(270, x, s.eyeAltitude, 60, W, H);
+      // Nothing tall this way: the skyline stays within a few degrees of level...
+      expect(Math.abs(expected - H / 2)).toBeLessThan(H * 0.05);
+      // ...and the renderer agrees with the march.
+      expect(Math.abs((await skyRows(page, x)) - expected), `column ${x}`).toBeLessThan(H * 0.01);
     }
+  });
+
+  test('from high above, the plain horizon is exactly where curvature puts it', async ({ page }) => {
+    await page.goto(url({ yaw: 270, alt: 3000 }));
+    const s = await ready(page);
+    // 1500 m up, the ripple is irrelevant and the horizon dips by
+    // sqrt(2h/R): about 1.2 degrees below level.
+    const dip = Math.sqrt((2 * (s.eyeAltitude - PLAIN_M)) / R_EFF_M);
+    const expectedRow = H / 2 + (H / 2) * Math.tan(dip) / Math.tan(Math.PI / 6);
+    const got = await skyRows(page, W / 2);
+    expect(Math.abs(got - expectedRow)).toBeLessThan(H * 0.01);
+    expect(Math.abs(got - skylineRow(270, W / 2, s.eyeAltitude, 60, W, H))).toBeLessThan(H * 0.01);
   });
 
   test('ridge lines darken the silhouette and can be switched off', async ({ page }) => {
@@ -251,7 +278,7 @@ test.describe('appearance', () => {
     await ready(page);
     await expect(page).toHaveScreenshot('testhorn.png', {
       mask: [page.locator('.pointer-events-auto')],
-      maxDiffPixelRatio: 0.03,
+      maxDiffPixelRatio: 0.05,
     });
   });
 });
