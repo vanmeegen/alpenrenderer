@@ -7,7 +7,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CAMERA_BOTTOM_Y, CAMERA_FRAME, CAMERA_TOP_Y, STAND, summitScreenY } from './fixtures/terrain';
+import { CAMERA_BOTTOM_Y, CAMERA_FRAME, CAMERA_TOP_Y, STAND, skylineRow } from './fixtures/terrain';
 import { CHROMIUM_ARGS, EXECUTABLE } from './playwright.config';
 import { coverFovY } from '../../src/app/cameraFeed';
 
@@ -58,6 +58,19 @@ async function rgb(page: Page, x0: number, y0: number, w: number, h: number): Pr
   }, [x0, y0, w, h]);
 }
 
+/** Darkest luminance (0..1) in a column segment of the composited image. */
+async function darkest(page: Page, x: number, y0: number, h: number): Promise<number> {
+  return page.evaluate(async ([x, y0, h]) => {
+    const c = await (window as any).alp.renderer.capture();
+    let best = 1;
+    for (let y = y0; y < y0 + h; y++) {
+      const o = (y * c.width + x) * 4;
+      best = Math.min(best, (0.2126 * c.pixels[o] + 0.7152 * c.pixels[o + 1] + 0.0722 * c.pixels[o + 2]) / 255);
+    }
+    return best;
+  }, [x, y0, h]);
+}
+
 const hashNum = async (page: Page, key: string) =>
   Number(new URLSearchParams((await page.evaluate(() => location.hash)).slice(1)).get(key));
 
@@ -81,10 +94,13 @@ test.describe('camera mode', () => {
     const bottom = await rgb(page, 100, 560, 40, 20);
     expect(Math.abs(top[0] - top[2])).toBeLessThan(0.03);          // no blue sky tint any more
     expect(bottom[1]).toBeCloseTo(washed(CAMERA_BOTTOM_Y), 1);
-    // The Testhorn's silhouette is still drawn, as ink, on its computed row.
-    const apex = summitScreenY(s.eyeAltitude, fov) * H;
-    const ink = await rgb(page, W / 2 - 2, Math.round(apex) - 1, 5, 4);
-    expect(ink[1]).toBeLessThan(0.45);
+    // The Testhorn's silhouette is still drawn, as ink, where the DEM march
+    // puts the skyline: at this narrower field of view the apex is above the
+    // frame, so the flank is checked, a quarter of the way in.
+    const flank = skylineRow(90, 250, s.eyeAltitude, fov, W, H);
+    expect(flank).toBeGreaterThan(10);
+    expect(await darkest(page, 250, Math.round(flank) - 4, 9)).toBeLessThan(0.45);
+    expect(await darkest(page, 250, 10, 9)).toBeGreaterThan(0.8);   // and only there
 
     await page.getByRole('button', { name: 'Kamera aus' }).click();
     await expect(page.getByRole('button', { name: 'Kamera', exact: true })).toBeVisible();
