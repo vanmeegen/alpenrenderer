@@ -123,6 +123,17 @@ Was fehlt oder nicht passt:
 Empfehlung: peakviewer-Kern als Engine, Mapterhorn als Daten, eigene
 React-Shell. MapLibre höchstens später als 2D/3D-Karte zum Standpunkt wählen.
 
+### 2.5 Spike: Zugspitze im Browser
+
+`spike/zugspitze/index.html` rendert ein 20-km-Fenster aus z12-Tiles als
+schattierte WebGL-Heightmap mit Touch-Orbit (three.js). Headless geprüft für
+Zugspitze, Großglockner, Matterhorn und Watzmann; DEM-Gipfel liegen 3 bis
+7 m unter den Katalogwerten, die DE/AT-Naht an der Zugspitze zeigt keine
+Stufe. Details in `spike/zugspitze/README.md`. Der Spike ist ein
+Orbit-Viewer um einen Gipfel und bewusst nicht die Panorama-Architektur aus
+Inkrement 1; er belegt Datenqualität und Mobil-Tauglichkeit, nicht die
+Reichweite bis 200 km.
+
 ## 3. Zielarchitektur im Repo
 
     alpenrenderer/
