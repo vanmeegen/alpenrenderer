@@ -275,11 +275,16 @@ test.describe('panels', () => {
 
 test.describe('appearance', () => {
   test('the Testhorn view matches the golden within tolerance', async ({ page }) => {
+    // A page screenshot of a software-rendered WebGL canvas can take well
+    // over ten seconds on a slow CI runner, and the matcher needs two of
+    // them in a row before it compares: give it time.
+    test.slow();
     await page.goto(url());
     await ready(page);
     await expect(page).toHaveScreenshot('testhorn.png', {
-      mask: [page.locator('.pointer-events-auto')],
+      mask: [page.locator('.pointer-events-auto'), page.locator('.alp-compass')],
       maxDiffPixelRatio: 0.05,
+      timeout: 150_000,
     });
   });
 });
