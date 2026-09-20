@@ -5,6 +5,9 @@
  * to 12) whose "tiles" are JSON objects mapping source id to survey metadata.
  * Reading the z12 cells around the observer gives the list the Credits panel
  * has to show, in the order the licences would want: finest survey first.
+ *
+ * The archive access is injectable so the merging can be tested without the
+ * network, and so a bundled index could stand in for the live one offline.
  */
 
 import { PMTiles } from 'pmtiles';
@@ -24,7 +27,7 @@ export interface SurveyCredit {
   resolution: number;
 }
 
-interface RawEntry {
+export interface RawEntry {
   name?: string;
   producer?: string;
   producer_short?: string;
@@ -33,21 +36,33 @@ interface RawEntry {
   resolution?: number;
 }
 
-export class CoverageIndex {
-  private archive: PMTiles | null = null;
-  private cells = new Map<string, Record<string, RawEntry>>();
+export type CellFetcher = (z: number, x: number, y: number) => Promise<Record<string, RawEntry> | null>;
 
-  constructor(private url = COVERAGE_INDEX_URL) {}
+/** Reads one cell of the PMTiles coverage index. */
+export function pmtilesFetcher(url = COVERAGE_INDEX_URL): CellFetcher {
+  let archive: PMTiles | null = null;
+  return async (z, x, y) => {
+    archive ??= new PMTiles(url);
+    const t = await archive.getZxy(z, x, y);
+    return t ? JSON.parse(new TextDecoder().decode(t.data)) : null;
+  };
+}
+
+export class CoverageIndex {
+  private cells = new Map<string, Record<string, RawEntry>>();
+  private fetcher: CellFetcher;
+
+  constructor(fetcher: CellFetcher = pmtilesFetcher()) {
+    this.fetcher = fetcher;
+  }
 
   private async cell(x: number, y: number): Promise<Record<string, RawEntry>> {
     const id = `${x}/${y}`;
     const hit = this.cells.get(id);
     if (hit) return hit;
-    this.archive ??= new PMTiles(this.url);
     let out: Record<string, RawEntry> = {};
     try {
-      const t = await this.archive.getZxy(INDEX_ZOOM, x, y);
-      if (t) out = JSON.parse(new TextDecoder().decode(t.data));
+      out = (await this.fetcher(INDEX_ZOOM, x, y)) ?? {};
     } catch { /* offline or blocked: an empty cell just shows the fixed credits */ }
     this.cells.set(id, out);
     return out;

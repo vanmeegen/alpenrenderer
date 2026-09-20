@@ -3,3 +3,6 @@ dist/
 tile-cache/
 shots/
 .DS_Store
+tests/e2e/fixtures/tiles/
+test-results/
+playwright-report/

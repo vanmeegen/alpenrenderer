@@ -393,7 +393,37 @@ Fertig, wenn: Ein Handyfoto vom Gornergrat mit EXIF-GPS ergibt ohne manuelle
 Korrektur ein Overlay, bei dem Matterhorn, Dent Blanche und Weisshorn richtig
 beschriftet sind, und der Live-Modus auf iOS und Android läuft.
 
-## 9. Risiken und offene Punkte
+## 9. Arbeitsweise: Test first, automatisiert, deterministisch
+
+Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):
+
+- **Red-Green-TDD** für jede Verhaltensänderung: Test schreiben, rot sehen,
+  kleinste Implementierung, grün, Refactoring. Bestehendes bekommt zuerst
+  Charakterisierungstests.
+- **Unit** (`bun test`, `tests/unit/`): Geodäsie gegen den Shader-Spiegel,
+  Clipmap-Fill für 256- und 512-px-Tiles, WGSL-Preprocessing aller drei
+  Shader-Paare plus GLSL-Uniform-Parität, Heightfield, Tile-Quellen,
+  URL-Zustand, Gestenmodell (reine Logik, pro Frame angewandt),
+  Coverage-Index mit injizierbarem Fetcher.
+- **E2E** (`@playwright/test`, `tests/e2e/`): die gebaute App in Chromium
+  mit Software-WebGL2 gegen ein synthetisches Gelände aus einer Formel
+  (Ebene 1500 m, „Testhorn“ 4000 m in 5 km, Grat 2600 m in 20 km). Erwartete
+  Bildzeilen werden aus der Formel gerechnet und gegen den Range-Puffer
+  geprüft; dazu Gesten (Maus, Rad, Tastatur, Touch-Pinch per CDP),
+  URL-Roundtrip, Standpunktwechsel, Panels und ein Screenshot-Golden mit
+  Toleranz. Kein Netz.
+- **Daten** (`tests/data/`, nur manuell per Workflow): Live-Prüfung des
+  Mapterhorn-Materials gegen `reference.json` (Format, Header, Losslessness,
+  Gipfelhöhen mit Toleranz, Coverage-Index, Attribution).
+- **CI** auf jedem Push: Typecheck, Unit, Build, E2E. Pages-Deploy nur nach
+  grünem Check.
+
+Die Inkremente 2 und 3 werden entsprechend geplant: erst die Tests für
+Positionsquellen, Sensor-Fusion (peakviewer bringt `check_pose` mit, wird
+nach `tests/unit/` portiert), Skyline-Matching (`check_align`, ebenso) und
+Foto-Import, dann die Implementierung.
+
+## 10. Risiken und offene Punkte
 
 - **Tileserver ohne SLA.** Mapterhorn ist ein Community-Projekt auf
   Cloudflare. Gegenmaßnahme: IndexedDB-Cache, AWS-Terrarium als
@@ -418,7 +448,7 @@ beschriftet sind, und der Live-Modus auf iOS und Android läuft.
   gewünscht: MapLibre-Karte als separater Modus, nicht in den
   Panorama-Renderer einbauen.
 
-## 10. Reihenfolge und Aufwand (grob)
+## 11. Reihenfolge und Aufwand (grob)
 
 | Schritt | Aufwand |
 |---|---|
