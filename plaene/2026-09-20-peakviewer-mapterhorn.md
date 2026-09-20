@@ -12,7 +12,9 @@ Einschränkungen, die den Plan prägen: peakviewer rendert heute **nur Umrisse**
 (Kantenfilter über einen Distanzpuffer, keine Schattierung), und es ist eine
 **AR-first-App ohne Desktop-3D-Modus**. Inkrement 1 („nur 3D darstellen“) ist
 deshalb nicht nur ein Datenquellentausch, sondern braucht einen neuen
-Shading-Pass und eine eigene Shell.
+Shading-Pass und eine eigene Shell. Davor steht ein Vorcheck (Inkrement 0):
+ein Wegwerf-Spike, der auf iPad und Handy zeigt, dass die Daten sauber
+rendern, die Bildrate reicht und die Fingersteuerung gut anfühlt.
 
 ## 2. Verifikation
 
@@ -123,17 +125,6 @@ Was fehlt oder nicht passt:
 Empfehlung: peakviewer-Kern als Engine, Mapterhorn als Daten, eigene
 React-Shell. MapLibre höchstens später als 2D/3D-Karte zum Standpunkt wählen.
 
-### 2.5 Spike: Zugspitze im Browser
-
-`spike/zugspitze/index.html` rendert ein 20-km-Fenster aus z12-Tiles als
-schattierte WebGL-Heightmap mit Touch-Orbit (three.js). Headless geprüft für
-Zugspitze, Großglockner, Matterhorn und Watzmann; DEM-Gipfel liegen 3 bis
-7 m unter den Katalogwerten, die DE/AT-Naht an der Zugspitze zeigt keine
-Stufe. Details in `spike/zugspitze/README.md`. Der Spike ist ein
-Orbit-Viewer um einen Gipfel und bewusst nicht die Panorama-Architektur aus
-Inkrement 1; er belegt Datenqualität und Mobil-Tauglichkeit, nicht die
-Reichweite bis 200 km.
-
 ## 3. Zielarchitektur im Repo
 
     alpenrenderer/
@@ -203,7 +194,48 @@ Matterhorn-DEM-Gipfel im Heightfield ≥ 4470 m, Kaltstart Gornergrat unter
 15 MB, Level-Übergänge ohne Stufe in der Skyline (Screenshot-Vergleich mit
 `tools/shots.mjs`).
 
-## 5. Inkrement 1: 3D-Panorama darstellen
+## 5. Inkrement 0: Spike als Vorcheck (vor allem anderen)
+
+Bevor Engine, Shell und Umstellung angefasst werden, muss ein Wegwerf-Spike
+drei Fragen auf dem echten Gerät beantworten. Erst wenn alle drei mit Ja
+beantwortet sind, beginnt Inkrement 1. Sonst wird an dieser Stelle
+nachgesteuert (andere Auflösung, anderes Rendering, andere Daten), solange es
+noch billig ist.
+
+Der Spike liegt in `spike/zugspitze/` (ein HTML-File, three.js vom CDN,
+Details in `spike/zugspitze/README.md`) und wird über GitHub Pages
+veröffentlicht, damit er auf iPad und Handy im Browser läuft. Er ist ein
+Orbit-Viewer über einem 20-km-Fenster um einen Gipfel und bewusst nicht die
+Panorama-Architektur aus Inkrement 1.
+
+Die drei Fragen und ihre Kriterien:
+
+1. **Werden die Daten sauber gerendert?** Grenzübergreifend an der
+   Zugspitze (Bayern DGM1 gegen BEV ALS-DGM), am Watzmann (DE/AT) und am
+   Matterhorn (swissALTI3D gegen Aosta-DTM). Kriterium: keine Stufen, Kanten
+   oder Löcher an den Nähten, Gipfelhöhen innerhalb von 10 m der
+   Katalogwerte. Headless bereits geprüft: Zugspitze 2957 m (2962),
+   Großglockner 3795 m (3798), Matterhorn 4472 m (4478), Watzmann 2706 m
+   (2713), keine Naht sichtbar. Auf dem Gerät gegenprüfen.
+2. **Ist es performant auf dem iPad und Handy?** Kriterium: mindestens
+   30 fps beim Drehen und Zoomen mit dem 768²-Gitter auf dem iPad und dem
+   512²-Gitter auf dem Handy, Ladezeit unter 5 s bei WLAN, kein Absturz des
+   WebGL-Kontexts beim Wechsel zwischen den Orten. Die fps stehen im
+   Kopfbereich der Seite. Fällt das iPad unter 30 fps, ist die Gitterdichte
+   der erste Hebel, danach die Pixelrate (`devicePixelRatio` auf 1,5 klemmen).
+3. **Ist es schön steuerbar?** Karten-Schema: ein Finger verschiebt den
+   Standort über das Gelände, zwei Finger zoomen (Pinch), drehen (seitlich)
+   und kippen (hoch/runter). Kriterium: keine Sprünge beim Loslassen, der
+   Drehpunkt bleibt auf dem Boden, der Blick geht nie unter das Gelände, und
+   die Dämpfung fühlt sich wie in einer Karten-App an. Was hier an Gefühl
+   und Parametern (Dämpfung, Geschwindigkeiten, Grenzen) gut ist, wird in
+   Inkrement 1 übernommen.
+
+Ergebnis des Vorchecks ist eine kurze Notiz unter „Ergebnis der Prüfung“ in
+`spike/zugspitze/README.md` mit Gerät, Browser, fps und Befund. Der Spike
+selbst wird danach nicht weiterentwickelt.
+
+## 6. Inkrement 1: 3D-Panorama darstellen
 
 Ziel: Im Browser (Desktop und Mobil) ein schattiertes 3D-Panorama der Alpen
 von einem Standpunkt aus, mit der Maus oder dem Finger umschauen, ohne
@@ -255,7 +287,7 @@ schattiert mit korrekter Silhouette bis 200 km, 30 fps auf einem
 Mittelklasse-Handy, Kaltstart unter 10 s bei 20 Mbit/s, Attribution zeigt
 swisstopo.
 
-## 6. Inkrement 2: Eigene Position und Sichtachse festlegen
+## 7. Inkrement 2: Eigene Position und Sichtachse festlegen
 
 Ziel: Der Nutzer bestimmt, wo er steht und wohin er schaut, auf Desktop
 manuell, auf Mobil per Sensoren.
@@ -294,7 +326,7 @@ Fertig, wenn: Auf dem Handy am Fenster dreht sich das Panorama mit dem Gerät,
 auf dem Desktop lässt sich jeder Standpunkt in den Alpen per Karte oder Suche
 setzen und die URL reproduziert die Ansicht.
 
-## 7. Inkrement 3: Berge aus Position und Bild identifizieren und labeln
+## 8. Inkrement 3: Berge aus Position und Bild identifizieren und labeln
 
 Ziel: Aus einer Position und einem Bild (Live-Kamera oder hochgeladenes Foto)
 die Gipfel bestimmen und beschriften.
@@ -345,7 +377,7 @@ Fertig, wenn: Ein Handyfoto vom Gornergrat mit EXIF-GPS ergibt ohne manuelle
 Korrektur ein Overlay, bei dem Matterhorn, Dent Blanche und Weisshorn richtig
 beschriftet sind, und der Live-Modus auf iOS und Android läuft.
 
-## 8. Risiken und offene Punkte
+## 9. Risiken und offene Punkte
 
 - **Tileserver ohne SLA.** Mapterhorn ist ein Community-Projekt auf
   Cloudflare. Gegenmaßnahme: IndexedDB-Cache, AWS-Terrarium als
@@ -370,10 +402,11 @@ beschriftet sind, und der Live-Modus auf iOS und Android läuft.
   gewünscht: MapLibre-Karte als separater Modus, nicht in den
   Panorama-Renderer einbauen.
 
-## 9. Reihenfolge und Aufwand (grob)
+## 10. Reihenfolge und Aufwand (grob)
 
 | Schritt | Aufwand |
 |---|---|
+| Inkrement 0: Spike auf iPad und Handy prüfen, Notiz schreiben | 0,5 bis 1 Tag |
 | Repo-Setup, Engine übernehmen, Checks laufen | 1 bis 2 Tage |
 | Mapterhorn-Umstellung inkl. Tuning | 2 bis 3 Tage |
 | Shading-Pass, Himmel, Luftperspektive | 3 bis 5 Tage |
@@ -381,6 +414,7 @@ beschriftet sind, und der Live-Modus auf iOS und Android läuft.
 | Inkrement 2 | 4 bis 6 Tage |
 | Inkrement 3 | 8 bis 12 Tage |
 
-Erster konkreter Schritt: peakviewer nach `src/engine/` übernehmen,
+Erster konkreter Schritt: den Spike auf dem iPad und dem Handy gegen die drei
+Kriterien aus Inkrement 0 prüfen. Danach peakviewer nach `src/engine/` übernehmen,
 `bun run check` grün bekommen, dann `MapterhornSource` mit `tileSize`-Umbau
 und den Matterhorn-Test aus Abschnitt 2.1 als automatisierten Check.

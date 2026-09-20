@@ -21,8 +21,13 @@ flüssig drehen lassen. Kein Teil der späteren App.
    (zentrale Differenzen), färbt nach Höhe und Hangneigung (Tal, Wald,
    Matte, Fels, Schnee), beleuchtet mit Lambert und blendet mit der
    Entfernung in die Himmelsfarbe.
-5. `OrbitControls` von three.js: ein Finger dreht, zwei Finger zoomen und
-   verschieben, Mausrad zoomt. Der Blick kann nicht unter den Boden.
+5. Steuerung im Karten-Schema (three.js `OrbitControls` mit angepasster
+   Belegung): **ein Finger verschiebt** den Standort über das Gelände,
+   **zwei Finger** zoomen (Pinch), drehen (seitlich ziehen) und kippen
+   (hoch/runter ziehen). Maus: links verschieben, rechts oder Strg+links
+   drehen und kippen, Rad zoomt zur Mausposition. Der Drehpunkt liegt
+   immer auf dem Boden, der Blick kann nicht unter den Boden, und der
+   Standort bleibt im geladenen Fenster.
 6. Die sichtbaren Datenquellen kommen aus Mapterhorns
    `coverage-index.pmtiles` und werden als Attribution angezeigt.
 

@@ -19,7 +19,7 @@
   a { color: #0b57d0; text-decoration: none; }
   a.sel { font-weight: 700; text-decoration: underline; }
   #status { color: #444; }
-  #sources { font-size: 12px; color: #333; }
+  #sources, #hint { font-size: 12px; color: #333; }
   #err { color: #b00020; white-space: pre-wrap; }
 </style>
 </head>
@@ -33,6 +33,7 @@
       · Ort: <a href="?p=zugspitze">Zugspitze</a> <a href="?p=grossglockner">Großglockner</a>
       <a href="?p=matterhorn">Matterhorn</a> <a href="?p=watzmann">Watzmann</a>
     </div>
+    <div id="hint">1 Finger: verschieben · 2 Finger: zoomen, drehen, kippen · Maus: links verschieben, rechts drehen, Rad zoomen</div>
     <div id="sources">Quellen: …</div>
     <div id="err"></div>
   </div>
@@ -168,8 +169,33 @@ controls.dampingFactor = 0.12;
 controls.minDistance = 300;
 controls.maxDistance = 60000;
 controls.maxPolarAngle = 88 * DEG;   // never below the ground plane
-controls.screenSpacePanning = false;
-controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+controls.screenSpacePanning = false;   // panning slides along the ground plane
+// Map-style gestures: one finger moves, two fingers zoom (pinch), rotate
+// (horizontal) and tilt (vertical). Mouse: left drag moves, right drag or
+// ctrl+left rotates and tilts, wheel zooms.
+controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+controls.panSpeed = 1.0;
+controls.rotateSpeed = 0.6;
+controls.zoomSpeed = 1.2;
+controls.zoomToCursor = true;
+
+// The orbit pivot stays on the ground: after a pan, snap the target to the
+// terrain under it and move the camera by the same amount, and keep it
+// inside the loaded window so nobody scrolls off into the void.
+const limit = (WIN / 2 - 8) * mpp;
+function snapTarget() {
+  const t = controls.target;
+  const x = Math.max(-limit, Math.min(limit, t.x));
+  const z = Math.max(-limit, Math.min(limit, t.z));
+  const px = x / mpp + WIN / 2, py = z / mpp + WIN / 2;
+  const y = heightAt(Math.round(px), Math.round(py));
+  const dx = x - t.x, dy = y - t.y, dz = z - t.z;
+  if (dx || dy || dz) {
+    t.set(x, y, z);
+    camera.position.x += dx; camera.position.y += dy; camera.position.z += dz;
+  }
+}
 
 const VERT = /* glsl */`
 precision highp float;
@@ -283,6 +309,7 @@ function buildGrid(segs) {
 let frames = 0, tFps = performance.now();
 function loop() {
   controls.update();
+  snapTarget();
   uniforms.uEye.value.copy(camera.position);
   renderer.render(scene, camera);
   frames++;
