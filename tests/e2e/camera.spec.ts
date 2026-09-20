@@ -119,14 +119,14 @@ test.describe('camera mode', () => {
     await expect.poll(() => hashNum(page, 'fov'), { timeout: 30_000 }).toBeCloseTo(fov, 0);
   });
 
-  test('"Foto" saves a PNG of the view with the labels', async ({ page }) => {
+  test('"Speichern" saves a PNG of the view with the labels', async ({ page }) => {
     await page.goto(url());
     await ready(page);
     await page.getByRole('button', { name: 'Kamera', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Foto' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: 'Speichern' })).toBeVisible({ timeout: 30_000 });
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.getByRole('button', { name: 'Foto' }).click(),
+      page.getByRole('button', { name: 'Speichern' }).click(),
     ]);
     expect(download.suggestedFilename()).toMatch(/^alpen-\d{8}-\d{6}-47\.0000_10\.0000-90deg\.png$/);
     const path = await download.path();
