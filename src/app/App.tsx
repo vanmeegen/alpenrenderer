@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
 import { formatHash, PLACES, readHash, readOptions, ViewState } from './state';
-import { Viewer, ViewerStatus } from './viewer';
+import { PeakInfo, Viewer, ViewerStatus } from './viewer';
+import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
 import { PickedPosition } from './mapPicker';
 import { CompassRose } from './CompassRose';
@@ -12,6 +13,7 @@ const fmtBytes = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Mat
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const [status, setStatus] = useState<ViewerStatus | null>(null);
   const [view, setView] = useState<ViewState>(() => readHash());
@@ -22,6 +24,8 @@ export function App() {
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [sensors, setSensors] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [labelsOn, setLabelsOn] = useState(true);
+  const [peak, setPeak] = useState<PeakInfo | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -30,7 +34,7 @@ export function App() {
     let hashTimer = 0;
     const opt = readOptions();
 
-    Viewer.create(canvas, opt, readHash()).then((v) => {
+    Viewer.create(canvas, opt, readHash(), overlayRef.current).then((v) => {
       if (cancelled) { v.dispose(); return; }
       viewer = v;
       viewerRef.current = v;
@@ -39,6 +43,7 @@ export function App() {
         const now = performance.now();
         if (now - lastStatus > 250) { lastStatus = now; setStatus({ ...s }); }
       };
+      v.onSelect = (p) => setPeak(p);
       v.onView = (nv) => {
         setView(nv);
         clearTimeout(hashTimer);
@@ -63,7 +68,7 @@ export function App() {
 
   useEffect(() => {
     const v = viewerRef.current;
-    if (v) v.renderer.outline = outline ? 0.35 : 0;
+    if (v) { v.renderer.outline = outline ? 0.35 : 0; v.showLabels = labelsOn; }
   });
 
   const go = (id: string) => {
@@ -106,6 +111,7 @@ export function App() {
   return (
     <div className="relative h-full w-full">
       <canvas ref={canvasRef} className="view" />
+      <canvas ref={overlayRef} className="labels" />
 
       {/* HUD */}
       <div className="pointer-events-none absolute inset-x-2 top-2 flex flex-col gap-2"
@@ -138,7 +144,8 @@ export function App() {
             )}
             {status && !loading && (
               <span>{status.levels} Level · {fmtBytes(status.bytes)} · {status.backend}
-                {status.failed > 0 ? ` · ${status.failed} Tiles fehlgeschlagen` : ''}</span>
+                {status.failed > 0 ? ` · ${status.failed} Tiles fehlgeschlagen` : ''}
+                {status.peaks.total > 0 ? ` · Gipfel ${status.peaks.visible}/${status.peaks.total}` : ''}</span>
             )}
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
@@ -148,6 +155,7 @@ export function App() {
             {corrected && (
               <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => viewerRef.current?.sensors.resetOffset()}>Korrektur zurücksetzen</button>
             )}
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setLabelsOn(!labelsOn)}>Gipfel {labelsOn ? 'aus' : 'an'}</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setOutline(!outline)}>Umrisse {outline ? 'aus' : 'an'}</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'credits' ? 'none' : 'credits')}>Quellen</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'check' ? 'none' : 'check')}>Check</button>
@@ -209,6 +217,23 @@ export function App() {
         style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}>
         <CompassRose yaw={view.yaw} offset={offsetYaw} sensors={sensors} />
       </div>
+
+      {peak && (
+        <div className="alp-peak-card pointer-events-auto absolute left-2 max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur"
+          style={{ bottom: 'max(2rem, calc(env(safe-area-inset-bottom) + 1.5rem))' }}>
+          <div className="flex items-baseline gap-3">
+            <b className="text-[15px] font-semibold">{peak.name}</b>
+            <span className="tabular-nums text-neutral-600">
+              {peak.ele !== undefined ? `${Math.round(peak.ele)} m · ` : ''}{fmtRange(peak.range)} · {peak.compass} {peak.bearing.toFixed(0)}°
+            </span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap gap-x-3">
+            {peak.wikipedia && <a className="text-blue-700 hover:underline" href={peak.wikipedia} target="_blank" rel="noopener">Wikipedia</a>}
+            {peak.wikidata && <a className="text-blue-700 hover:underline" href={peak.wikidata} target="_blank" rel="noopener">Wikidata</a>}
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => viewerRef.current?.clearSelection()}>Schließen</button>
+          </div>
+        </div>
+      )}
 
       {panel === 'map' && (
         <MapPanel lon={view.lon} lat={view.lat} yaw={view.yaw} onPick={pick} onClose={() => setPanel('none')} />

@@ -79,6 +79,8 @@ export interface AppOptions {
   quality: 'high' | 'low' | 'auto';
   /** Tile URL template override, e.g. a local cache for offline checks. */
   tiles?: string;
+  /** Summit catalogue cell template; by default the cells built next to the app. */
+  peaks: string;
 }
 
 export function readOptions(search = location.search): AppOptions {
@@ -86,9 +88,11 @@ export function readOptions(search = location.search): AppOptions {
   const b = q.get('backend');
   const ql = q.get('q');
   const tiles = q.get('tiles');
+  const peaks = q.get('peaks') || 'peaks';
   return {
     backend: b === 'webgpu' ? 'webgpu' : 'webgl2',
     quality: ql === 'high' || ql === 'low' ? ql : 'auto',
     tiles: tiles ? (tiles.endsWith('/') ? tiles : tiles + '/') + '{z}/{x}/{y}.webp' : undefined,
+    peaks: (peaks.endsWith('/') ? peaks : peaks + '/') + '{x}_{y}.json',
   };
 }

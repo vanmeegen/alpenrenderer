@@ -23,7 +23,8 @@ Data:
 - Global fallback terrain: Copernicus DEM GLO-30, © DLR e.V. 2010-2014 and
   © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the
   European Union and ESA.
-- Summit names and positions: © OpenStreetMap contributors, ODbL.
+- Summit names and positions (`public/peaks/`, built from `natural=peak` nodes
+  via Overpass by `tools/build_peaks.mjs`): © OpenStreetMap contributors, ODbL.
 - Standpoint map tiles: © OpenStreetMap contributors, ODbL, served by the
   OpenStreetMap Foundation's standard tile layer under its
   [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).

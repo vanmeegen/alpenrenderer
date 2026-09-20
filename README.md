@@ -23,8 +23,13 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   Weil der Kompass in den Bergen oft daneben liegt, korrigiert ein Finger in
   diesem Modus die Richtung; die Korrektur bleibt gespeichert und steht an
   der Kompassrose.
-- Inkrement 3 (Gipfel aus Foto erkennen und beschriften) folgt. Der Plan:
-  [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
+- **Inkrement 3a** (Gipfelnamen): Gipfel aus OpenStreetMap stehen als Label
+  im Panorama, verdeckte bleiben weg (DEM-Marsch mit Krümmung und
+  Refraktion), Tippen öffnet Höhe, Entfernung, Peilung und Wikipedia. Der
+  Katalog liegt statisch als Zellen unter `public/peaks/` (Build:
+  `node tools/build_peaks.mjs`), die App fragt Overpass nie selbst.
+- Inkrement 3b (Live-Kamera) und 3c (Foto mit Skyline-Abgleich) folgen. Der
+  Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
 
 ## Entwicklung
 
@@ -59,7 +64,8 @@ der App per `?tiles=` mitgeben:
 
 URL-Parameter: `#lon`, `lat`, `alt` (absolute Augenhöhe, sonst Boden + 1,7 m),
 `yaw`, `pitch`, `fov`, `p=<ort>` für einen der Standpunkte im Menü;
-`?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität.
+`?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität,
+`?peaks=<verzeichnis>` für einen anderen Gipfelkatalog (Zellen `{x}_{y}.json`).
 
 ## Aufbau
 
@@ -81,6 +87,7 @@ Shading-Pass erweitert.
   offener nationaler Höhenmodelle (swissALTI3D, BEV, Bayern DGM1, Südtirol,
   Aosta, IGN …) mit Copernicus GLO-30 als globalem Fallback. Die Quellen
   unter dem jeweiligen Standpunkt zeigt die App unter „Quellen“.
-- Gipfel und Standpunkt-Karte: © OpenStreetMap contributors, ODbL; die
-  Kartenkacheln kommen vom Standard-Tile-Layer der OpenStreetMap Foundation.
+- Gipfel (`public/peaks/`, `natural=peak` mit Namen, per Overpass gebaut) und
+  Standpunkt-Karte: © OpenStreetMap contributors, ODbL; die Kartenkacheln
+  kommen vom Standard-Tile-Layer der OpenStreetMap Foundation.
 - Code: MIT. Drittkomponenten in `THIRD-PARTY-NOTICES.md`.

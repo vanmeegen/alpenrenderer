@@ -29,6 +29,19 @@ export function heightAt(lon: number, lat: number): number {
   return PLAIN_M + Math.max(cone, ridge) + ripple;
 }
 
+/**
+ * The summit catalogue of the range, as the cell file the app loads. The
+ * Hinterhorn stands on the plain 12 km east, straight behind the Testhorn:
+ * catalogued at 3500 m, but the DEM knows only the plain there, so it is
+ * hidden and must never get a label.
+ */
+export const PEAKS = [
+  { i: 1, n: 'Testhorn', o: TESTHORN.lon, a: TESTHORN.lat, e: TESTHORN.summit, p: 2500, w: 'Q1', k: 'de:Testhorn' },
+  { i: 2, n: 'Gratspitze', o: STAND.lon, a: RIDGE.lat, e: RIDGE.height },
+  { i: 3, n: 'Hinterhorn', o: STAND.lon + 12000 / M_PER_DEG_LON, a: STAND.lat, e: 3500 },
+];
+export const RIDGE_RANGE = 20000;
+
 /** Bearing from the standpoint to the Testhorn summit, degrees. */
 export const TESTHORN_BEARING = 90;
 /** Ground range to the Testhorn summit, metres. */

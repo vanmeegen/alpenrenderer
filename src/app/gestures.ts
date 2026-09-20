@@ -33,6 +33,9 @@ const LN_DECAY = Math.log(DECAY);
 const FRAME_MS = 16;
 const STOP_PX = 0.05;
 const KEY_STEP = 0.08;
+/** A touch that moves less than this and lifts within this time is a tap. */
+const TAP_PX = 8;
+const TAP_MS = 300;
 
 export class GestureModel {
   onChange: (() => void) | null = null;
@@ -42,6 +45,8 @@ export class GestureModel {
    * it. Zoom is never redirected.
    */
   turnHandler: ((dYaw: number, dPitch: number) => void) | null = null;
+  /** A short single touch that did not move: a tap at that point. */
+  onTap: ((x: number, y: number) => void) | null = null;
   minFov = 8;
   maxFov = 100;
 
@@ -59,6 +64,8 @@ export class GestureModel {
   private lastApply = 0;
   private lastMove = -Infinity;
   private lastTick = 0;
+  /** Where and when the single finger went down, until it moves or a second one joins. */
+  private tapStart: { x: number; y: number; t: number } | null = null;
 
   constructor(readonly camera: Camera, readonly size: () => Size) {}
 
@@ -138,6 +145,7 @@ export class GestureModel {
   down(id: number, x: number, y: number, t: number) {
     if (this.apply(t)) this.onChange?.();
     this.pointers.set(id, { x, y });
+    this.tapStart = this.pointers.size === 1 ? { x, y, t } : null;
     this.vx = this.vy = 0;
     this.lastApply = t;
     this.rebase();
@@ -148,12 +156,16 @@ export class GestureModel {
     if (!p) return;
     p.x = x; p.y = y;
     this.lastMove = t;
+    if (this.tapStart && Math.hypot(x - this.tapStart.x, y - this.tapStart.y) > TAP_PX) this.tapStart = null;
   }
 
   up(id: number, t: number) {
     if (!this.pointers.has(id)) return;
     if (this.apply(t)) this.onChange?.();
     this.pointers.delete(id);
+    const tap = this.tapStart;
+    this.tapStart = null;
+    if (tap && t - tap.t < TAP_MS) this.onTap?.(tap.x, tap.y);
     if (this.pointers.size === 0 && t - this.lastMove < FLICK_MS) {
       // Velocity in px per frame from the last applied delta and its span,
       // so a flick carries the same distance at any frame rate.

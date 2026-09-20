@@ -89,3 +89,9 @@ for (const z of LEVELS) {
   }
 }
 console.log(`fixture tiles: ${written} written, ${kept} kept in ${out}`);
+
+// The summit catalogue for the range: one cell file, in the app's own format.
+const peaksDir = join(here, 'peaks');
+mkdirSync(peaksDir, { recursive: true });
+writeFileSync(join(peaksDir, '10_47.json'), JSON.stringify(T.PEAKS));
+console.log(`fixture peaks: ${T.PEAKS.length} in ${peaksDir}/10_47.json`);

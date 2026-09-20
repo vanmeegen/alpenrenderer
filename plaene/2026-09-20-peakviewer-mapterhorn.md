@@ -379,6 +379,25 @@ setzen und die URL reproduziert die Ansicht.
 Ziel: Aus einer Position und einem Bild (Live-Kamera oder hochgeladenes Foto)
 die Gipfel bestimmen und beschriften.
 
+**Status 3a, Katalog und Labels: umgesetzt (2026-09-20), test-first.** Der
+Katalog ist statisch: `tools/build_peaks.mjs` holt alle benannten
+`natural=peak`-Knoten der Alpen (5–17°E, 43–49°N) per Overpass und schreibt
+sie als 1°×1°-Zellen nach `public/peaks/{x}_{y}.json` (kompakte Datensätze:
+OSM-Id, Name, Lon, Lat, Höhe, Prominenz, Wikidata, Wikipedia). Die App lädt
+über `PeakCatalog` die Zellen im Umkreis von 260 km, `?peaks=` zeigt auf einen
+anderen Katalog (die E2E-Tests auf den synthetischen). Labels laufen über
+peakviewers `buildTargets` (Anker auf `summitNear`), `computeVisibility`
+(DEM-Marsch mit Krümmung und Refraktion) und `layoutLabels`, gezeichnet vom
+`LabelPainter` auf einem Overlay-Canvas; ein Tap (neu im Gestenmodell) öffnet
+die Gipfelkarte mit Höhe, Entfernung, Peilung, Wikipedia und Wikidata. Tests:
+`tests/unit/peakcatalog.test.ts` (Zellenwahl, Parsen, Cache, Fehler),
+`tests/unit/labels.test.ts` (Charakterisierung: Anker, Rang, Sichtbarkeit an
+einem Grat, Layout ohne Überlappung, Auswahl), Tap im Gestenmodell,
+`tests/e2e/labels.spec.ts` (Testhorn-Label auf der berechneten Zeile,
+Hinterhorn dahinter ohne Label, Gratspitze nach Norden mit Krümmung,
+Gipfelkarte, Schalter). Offen: Overpass zur Laufzeit als Fallback, Prominenz
+für Gipfel ohne Tag, Label-Dichte auf dem Handy.
+
 Arbeitspakete:
 
 1. **Gipfelkatalog.** `natural=peak` mit Namen aus OSM. Zwei Wege, beide

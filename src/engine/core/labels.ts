@@ -122,14 +122,19 @@ export function layoutLabels(
 
     let bx = Math.min(Math.max(ax - bw / 2, 2), opt.width - bw - 2);
     let by = ay - 14 - bh;
+    // Stack upwards from the summit; a summit too close to the top edge for
+    // that keeps its label at the top and stacks downwards instead, because
+    // the highest peak in view is the last one that should lose its name.
+    let dir = -1;
+    if (by < 2) { by = 2; dir = 1; }
     let ok = false;
     for (let attempt = 0; attempt < 26; attempt++) {
-      if (by < 2) break;
+      if (by < 2 || by + bh > opt.height - 2) break;
       const hit = boxes.some((b) =>
         bx < b.bx + b.bw + opt.gap && bx + bw + opt.gap > b.bx
         && by < b.by + b.bh + margin && by + bh + margin > b.by);
       if (!hit) { ok = true; break; }
-      by -= opt.lineHeight + opt.gap;
+      by += dir * (opt.lineHeight + opt.gap);
     }
     if (!ok) continue;
 
