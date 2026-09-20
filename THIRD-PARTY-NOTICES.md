@@ -8,6 +8,7 @@ The code in this repository is MIT (see `LICENSE`). It builds on:
 | [Babylon.js](https://www.babylonjs.com) (`@babylonjs/core`) | Apache-2.0 | Rendering on WebGL2 and WebGPU |
 | [geomagnetism](https://www.npmjs.com/package/geomagnetism) | Apache-2.0 | World Magnetic Model 2025 declination |
 | [pmtiles](https://github.com/protomaps/PMTiles) | BSD-3-Clause | Reading Mapterhorn's coverage index |
+| [Leaflet](https://leafletjs.com) | BSD-2-Clause | Standpoint map |
 | [React](https://react.dev) | MIT | UI shell |
 | [Tailwind CSS](https://tailwindcss.com) | MIT | Styling |
 | [three.js](https://threejs.org) (spike only, from CDN) | MIT | `spike/zugspitze/` |
@@ -23,5 +24,8 @@ Data:
   © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the
   European Union and ESA.
 - Summit names and positions: © OpenStreetMap contributors, ODbL.
+- Standpoint map tiles: © OpenStreetMap contributors, ODbL, served by the
+  OpenStreetMap Foundation's standard tile layer under its
+  [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
 - Magnetic declination: NOAA NCEI and the British Geological Survey, World
   Magnetic Model 2025.

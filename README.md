@@ -15,8 +15,11 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   von einem Standpunkt aus, Mapterhorn-Terrain (LiDAR-Auflösung in D/A/CH),
   Krümmung und Refraktion, ein Finger schaut um, zwei Finger zoomen.
   Standpunkt und Blick stehen in der URL.
-- Inkrement 2 (eigene Position und Sichtachse) und 3 (Gipfel aus Foto
-  erkennen und beschriften) folgen. Der Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
+- **Inkrement 2a** (Standpunkt wählen): „Karte“ öffnet OpenStreetMap, mit den
+  Fingern verschieben und zoomen, Punkt antippen, „Panorama von hier“;
+  „Mein Standort“ nimmt die GPS-Position. Der Blick bleibt dabei erhalten.
+- Inkrement 2b (Sichtachse per Sensoren) und 3 (Gipfel aus Foto erkennen und
+  beschriften) folgen. Der Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
 
 ## Entwicklung
 
@@ -72,5 +75,6 @@ Shading-Pass erweitert.
   offener nationaler Höhenmodelle (swissALTI3D, BEV, Bayern DGM1, Südtirol,
   Aosta, IGN …) mit Copernicus GLO-30 als globalem Fallback. Die Quellen
   unter dem jeweiligen Standpunkt zeigt die App unter „Quellen“.
-- Gipfel: © OpenStreetMap contributors, ODbL.
+- Gipfel und Standpunkt-Karte: © OpenStreetMap contributors, ODbL; die
+  Kartenkacheln kommen vom Standard-Tile-Layer der OpenStreetMap Foundation.
 - Code: MIT. Drittkomponenten in `THIRD-PARTY-NOTICES.md`.
