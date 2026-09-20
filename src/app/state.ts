@@ -41,6 +41,9 @@ export const DEFAULT_VIEW: ViewState = {
   lon: PLACES[0].lon, lat: PLACES[0].lat, yaw: PLACES[0].yaw, pitch: 0, fov: 60,
 };
 
+/** 0 <= yaw < 360 without the rounding noise that (x % 360 + 360) % 360 adds. */
+export const wrap360 = (deg: number): number => deg - 360 * Math.floor(deg / 360);
+
 const num = (v: string | null, d: number): number => {
   const n = v === null ? NaN : parseFloat(v);
   return Number.isFinite(n) ? n : d;
@@ -55,7 +58,7 @@ export function readHash(hash = location.hash): ViewState {
     lon: num(q.get('lon'), base.lon),
     lat: num(q.get('lat'), base.lat),
     alt: alt === null ? undefined : num(alt, NaN) || undefined,
-    yaw: ((num(q.get('yaw'), base.yaw) % 360) + 360) % 360,
+    yaw: wrap360(num(q.get('yaw'), base.yaw)),
     pitch: Math.max(-89, Math.min(89, num(q.get('pitch'), base.pitch))),
     fov: Math.max(5, Math.min(110, num(q.get('fov'), base.fov))),
   };

@@ -22,8 +22,23 @@ Live: https://vanmeegen.github.io/alpenrenderer/
 
     bun install
     bun run dev            # http://localhost:5173
-    bun run check          # tsc, WGSL-Preprocessor-Check, Geometrie-Check
+    bun run check          # tsc + Unit-Tests (bun test tests/unit)
     bun run build          # -> dist/
+    bun run test:e2e       # Playwright, App im Chromium gegen synthetisches Gelände
+    bun run test           # Unit + E2E
+
+Gearbeitet wird test-first (Red-Green), siehe `CLAUDE.md`. Unit-Tests
+liegen in `tests/unit/` (Engine, Zustand, Gesten, Shader-Preprocessing),
+E2E-Tests in `tests/e2e/` (die gebaute App in Chromium mit Software-WebGL2,
+Gelände aus der Formel in `tests/e2e/fixtures/terrain.ts`, kein Netz). CI
+(`.github/workflows/ci.yml`) führt beides auf jedem Push aus.
+
+Die Daten-Suite `tests/data/` prüft das Live-Material von Mapterhorn
+(TileJSON, Header, verlustfreies 512-px-WebP, Gipfelhöhen gegen
+`tests/data/reference.json`, Coverage-Index, Attribution). Sie läuft nur von
+Hand, lokal mit `bun run test:data` oder über **Actions → „Data check
+(Mapterhorn, manual)“ → Run workflow**, damit weder Rate-Limits noch eine
+Datenaktualisierung die Builds brechen.
 
 Für Offline-Tests und Headless-Renders einen lokalen Tile-Cache füllen und
 der App per `?tiles=` mitgeben:

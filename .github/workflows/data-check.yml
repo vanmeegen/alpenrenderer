@@ -1,0 +1,32 @@
+name: Data check (Mapterhorn, manual)
+
+# Verifies that the live Mapterhorn data still has the format and values the
+# app assumes: TileJSON, headers, lossless 512-px WebP, summit heights against
+# tests/data/reference.json, coverage index and attribution list. Manual only,
+# so that neither rate limits nor a survey update can break CI.
+on:
+  workflow_dispatch:
+
+jobs:
+  data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium
+      - name: Live data checks
+        run: bun run test:data
+        env:
+          CI: 'true'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: data-check-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 30

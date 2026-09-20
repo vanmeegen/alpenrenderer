@@ -1,0 +1,31 @@
+{
+  "_comment": "Reference values for the live Mapterhorn data, recorded 2026-09-20. Summit heights are the highest terrarium sample within the given pixel radius of the summit at that tile zoom. Tolerances allow for survey updates, not for format changes.",
+  "tilejson": {
+    "url": "https://tiles.mapterhorn.com/tilejson.json",
+    "encoding": "terrarium",
+    "tileSize": 512,
+    "scheme": "xyz",
+    "tiles": ["https://tiles.mapterhorn.com/{z}/{x}/{y}.webp"]
+  },
+  "tileTemplate": "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp",
+  "coverageIndex": "https://download.mapterhorn.com/coverage-index.pmtiles",
+  "attribution": "https://download.mapterhorn.com/attribution.json",
+  "summits": [
+    { "name": "Matterhorn", "lon": 7.65862, "lat": 45.97639, "catalogue": 4478, "z": 12, "radiusPx": 4, "expect": 4471.5, "tolerance": 12 },
+    { "name": "Matterhorn", "lon": 7.65862, "lat": 45.97639, "catalogue": 4478, "z": 14, "radiusPx": 18, "expect": 4476.8, "tolerance": 6 },
+    { "name": "Zugspitze", "lon": 10.98527, "lat": 47.42111, "catalogue": 2962, "z": 12, "radiusPx": 4, "expect": 2957, "tolerance": 12 },
+    { "name": "Grossglockner", "lon": 12.69444, "lat": 47.07444, "catalogue": 3798, "z": 12, "radiusPx": 4, "expect": 3795, "tolerance": 12 },
+    { "name": "Watzmann", "lon": 12.92222, "lat": 47.55472, "catalogue": 2713, "z": 12, "radiusPx": 4, "expect": 2706, "tolerance": 12 }
+  ],
+  "lowZoomTiles": [
+    { "z": 5, "x": 17, "y": 11 },
+    { "z": 7, "x": 68, "y": 45 }
+  ],
+  "beyondMaxZoom": { "z": 18, "x": 136648, "y": 93284 },
+  "expectedSources": {
+    "Matterhorn": ["swissalti3d"],
+    "Zugspitze": ["at1", "debayern"],
+    "Grossglockner": ["at1"]
+  },
+  "attributionMustContain": ["swissalti3d", "at1", "debayern", "glo30", "itbozen", "si"]
+}
