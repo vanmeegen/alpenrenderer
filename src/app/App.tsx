@@ -251,7 +251,7 @@ export function App() {
             {alignment && <div className="alp-align mb-1">{alignment}</div>}
             <label className="flex items-center gap-2">
               <span>Objektiv {lensFov.toFixed(0)}°</span>
-              <input type="range" min={25} max={90} step={0.5} value={lensFov} aria-label="Objektiv"
+              <input type="range" min={8} max={90} step={0.5} value={lensFov} aria-label="Objektiv"
                 onChange={(e) => lens(Number(e.target.value))} className="flex-1" />
             </label>
             <div className="mt-0.5 text-neutral-500">
