@@ -3,6 +3,10 @@ dist/
 tile-cache/
 shots/
 .DS_Store
-tests/e2e/fixtures/tiles/
+tests/e2e/fixtures/tiles
+tests/e2e/fixtures/peaks/
+tests/e2e/fixtures/camera.y4m
+tests/e2e/fixtures/photo.png
+tests/e2e/fixtures/photo-fog.png
 test-results/
 playwright-report/

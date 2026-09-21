@@ -29,6 +29,19 @@ export function heightAt(lon: number, lat: number): number {
   return PLAIN_M + Math.max(cone, ridge) + ripple;
 }
 
+/**
+ * The summit catalogue of the range, as the cell file the app loads. The
+ * Hinterhorn stands on the plain 12 km east, straight behind the Testhorn:
+ * catalogued at 3500 m, but the DEM knows only the plain there, so it is
+ * hidden and must never get a label.
+ */
+export const PEAKS = [
+  { i: 1, n: 'Testhorn', o: TESTHORN.lon, a: TESTHORN.lat, e: TESTHORN.summit, p: 2500, w: 'Q1', k: 'de:Testhorn' },
+  { i: 2, n: 'Gratspitze', o: STAND.lon, a: RIDGE.lat, e: RIDGE.height },
+  { i: 3, n: 'Hinterhorn', o: STAND.lon + 12000 / M_PER_DEG_LON, a: STAND.lat, e: 3500 },
+];
+export const RIDGE_RANGE = 20000;
+
 /** Bearing from the standpoint to the Testhorn summit, degrees. */
 export const TESTHORN_BEARING = 90;
 /** Ground range to the Testhorn summit, metres. */
@@ -79,3 +92,25 @@ export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, 
   }
   return height / 2 - (height / 2) * (maxTan / Math.cos(b)) / tanV;
 }
+
+/**
+ * The fake camera frame: luma values (0..255, full range) of the light upper
+ * and dark lower half. Grey only, so what the renderer samples does not
+ * depend on the browser's YUV matrix.
+ */
+export const CAMERA_TOP_Y = 204;
+export const CAMERA_BOTTOM_Y = 51;
+export const CAMERA_FRAME = { width: 640, height: 480 };
+
+/**
+ * The fixture photo: taken from the standpoint, pointed a little right of the
+ * Testhorn, slightly up, level, with a 26 mm-equivalent lens. The EXIF in the
+ * file carries the standpoint and the lens; the pose is what alignment must
+ * recover.
+ */
+export const PHOTO = {
+  width: 640, height: 480, yaw: 94, pitch: 8, roll: 0, focal35: 26,
+  taken: '2026:09:20 11:30:00',
+  /** Vertical field of view of that lens in landscape, degrees. */
+  fovY: (2 * Math.atan(12 / 26) * 180) / Math.PI,
+};

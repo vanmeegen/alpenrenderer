@@ -1,0 +1,41 @@
+name: Build peak catalogue (OpenStreetMap, manual)
+
+# Rebuilds public/peaks/ from Overpass and opens a pull request with the
+# result. Manual only: the public Overpass servers rate-limit, and a catalogue
+# change should be reviewed like any other change.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch every 1°×1° cell of the Alps from Overpass
+        run: node tools/build_peaks.mjs --out public/peaks
+      - name: Summary
+        run: |
+          echo "## Gipfelkatalog" >> "$GITHUB_STEP_SUMMARY"
+          node -e 'const i=require("./public/peaks/index.json");console.log(`${i.total} Gipfel in ${Object.values(i.cells).filter(Boolean).length} Zellen, Stand ${i.generated}`)' >> "$GITHUB_STEP_SUMMARY"
+      - name: Open a pull request with the new catalogue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if git diff --quiet -- public/peaks; then echo "Katalog unverändert"; exit 0; fi
+          branch="peaks/$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add public/peaks
+          git commit -m "Gipfelkatalog: Stand $(date -u +%Y-%m-%d) aus OpenStreetMap"
+          git push -f origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Gipfelkatalog: Stand $(date -u +%Y-%m-%d)" \
+            --body "Neu gebaut per \`tools/build_peaks.mjs\` aus Overpass (\`natural=peak\` mit Namen, 5–17°E, 43–49°N). Daten © OpenStreetMap contributors, ODbL." \
+            || echo "PR existiert bereits"

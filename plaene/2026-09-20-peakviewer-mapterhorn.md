@@ -379,6 +379,60 @@ setzen und die URL reproduziert die Ansicht.
 Ziel: Aus einer Position und einem Bild (Live-Kamera oder hochgeladenes Foto)
 die Gipfel bestimmen und beschriften.
 
+**Status 3a, Katalog und Labels: umgesetzt (2026-09-20), test-first.** Der
+Katalog ist statisch: `tools/build_peaks.mjs` holt alle benannten
+`natural=peak`-Knoten der Alpen (5–17°E, 43–49°N) per Overpass und schreibt
+sie als 1°×1°-Zellen nach `public/peaks/{x}_{y}.json` (kompakte Datensätze:
+OSM-Id, Name, Lon, Lat, Höhe, Prominenz, Wikidata, Wikipedia). Die App lädt
+über `PeakCatalog` die Zellen im Umkreis von 260 km, `?peaks=` zeigt auf einen
+anderen Katalog (die E2E-Tests auf den synthetischen). Labels laufen über
+peakviewers `buildTargets` (Anker auf `summitNear`), `computeVisibility`
+(DEM-Marsch mit Krümmung und Refraktion) und `layoutLabels`, gezeichnet vom
+`LabelPainter` auf einem Overlay-Canvas; ein Tap (neu im Gestenmodell) öffnet
+die Gipfelkarte mit Höhe, Entfernung, Peilung, Wikipedia und Wikidata. Tests:
+`tests/unit/peakcatalog.test.ts` (Zellenwahl, Parsen, Cache, Fehler),
+`tests/unit/labels.test.ts` (Charakterisierung: Anker, Rang, Sichtbarkeit an
+einem Grat, Layout ohne Überlappung, Auswahl), Tap im Gestenmodell,
+`tests/e2e/labels.spec.ts` (Testhorn-Label auf der berechneten Zeile,
+Hinterhorn dahinter ohne Label, Gratspitze nach Norden mit Krümmung,
+Gipfelkarte, Schalter). Offen: Overpass zur Laufzeit als Fallback, Prominenz
+für Gipfel ohne Tag, Label-Dichte auf dem Handy.
+
+**Status 3b, Live-Kamera: umgesetzt (2026-09-20), test-first.** „Kamera“
+öffnet die Rückkamera (`CameraFeed`, Port aus peakviewer), der Renderer
+schaltet auf den AR-Pfad (Kamerabild entsättigt und weiß gewaschen, Grate als
+Tinte darüber, Labels auf dem Overlay). Das Sichtfeld ist das des Objektivs,
+cover-gecroppt in die Canvas (`coverFovY`), mit Regler „Objektiv“ zur
+Handkorrektur, weil kein Browser das Objektiv-FOV meldet. „Foto“ rendert das
+Composite samt Labels und Quellenzeile in ein PNG und geht über die
+Share-API in die Fotos-App, sonst als Download. Tests: `tests/unit/camera.test.ts`
+(Cover-Crop-Mathematik, Dateiname), `tests/e2e/camera.spec.ts` mit Chromiums
+Fake-Kamera aus einer festen Y4M-Datei (oben helles, unten dunkles Grau):
+gewaschene Grauwerte im Composite, Grat-Tinte auf der berechneten Zeile,
+FOV aus dem Objektiv, Regler, PNG-Download mit Maßen, Verweigerung. Offen:
+Pinch als Objektiv-Korrektur, Zoom-Objektive, Zeitstempel im Foto.
+
+**Status 3c, Foto-Modus: umgesetzt (2026-09-20), test-first.** „Foto laden“
+liest das EXIF selbst (`src/app/exif.ts`, JPEG-APP1 und PNG-eXIf, ohne
+Abhängigkeit): GPS setzt den Standpunkt, Brennweite bzw. 35-mm-Äquivalent
+das Sichtfeld (`fovFromExif`, Hoch- und Querformat). Das Bild liegt als
+Standbild im Composite (`attachStill`, derselbe AR-Pfad wie die Kamera).
+„Ausrichten“ extrahiert die Skyline des Fotos (`extractSkyline`, für Fotos
+mit 288 px Arbeitsbild, weil 192 px die Rolle nicht mehr festlegen),
+rechnet das Horizontprofil aus dem DEM und sucht gestuft (`alignPhoto`):
+Richtung und Neigung, dann Rolle, bei unbekanntem Objektiv das Sichtfeld
+und die Rolle erneut, dann Richtung und Neigung nochmals für die Konfidenz.
+Angewandt wird nur ein vertrauter Treffer; sonst steht der Grund da, und der
+Finger bleibt die Instanz. Tests: `tests/unit/align.test.ts`
+(Charakterisierung als Port von `check_align`, dazu neu: Rolle und
+Sichtfeld als Suchparameter in `matchSkyline`, `alignPhoto`),
+`tests/unit/exif.test.ts` (handgebautes TIFF in JPEG und PNG),
+`tests/e2e/photo.spec.ts` (Fixture-Foto aus der Geländeformel mit eXIf:
+Standpunkt und Objektiv aus EXIF, Ausrichtung findet 94°/2° aus 90°/0°,
+Testhorn-Label auf der Foto-Spalte; Nebelfoto ohne EXIF wird abgelehnt).
+Offen: Stresstest mit echten Fotos (Arbeitspaket 7), PNG-Export mit Labels
+gibt es über „Speichern“.
+
 Arbeitspakete:
 
 1. **Gipfelkatalog.** `natural=peak` mit Namen aus OSM. Zwei Wege, beide

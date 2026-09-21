@@ -253,3 +253,24 @@ describe('with a turn handler (sensor mode)', () => {
     expect(got).toEqual([[60 * 0.08, 0], [0, 60 * 0.08]]);
   });
 });
+
+describe('tap', () => {
+  test('a short touch without movement is a tap at that point', () => {
+    const { g } = setup();
+    const taps: [number, number][] = [];
+    g.onTap = (x, y) => { taps.push([x, y]); };
+    g.down(1, 400, 300, 0);
+    g.up(1, 120);
+    expect(taps).toEqual([[400, 300]]);
+  });
+
+  test('a drag, a long press or two fingers are not taps', () => {
+    const { g } = setup();
+    const taps: [number, number][] = [];
+    g.onTap = (x, y) => { taps.push([x, y]); };
+    g.down(1, 400, 300, 0); g.move(1, 420, 300, 50); g.tick(50); g.up(1, 120);   // drag
+    g.down(1, 400, 300, 1000); g.up(1, 1600);                                  // long press
+    g.down(1, 400, 300, 3000); g.down(2, 500, 300, 3010); g.up(2, 3100); g.up(1, 3120); // two fingers
+    expect(taps).toEqual([]);
+  });
+});

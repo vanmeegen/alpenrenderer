@@ -37,12 +37,17 @@ describe('formatHash', () => {
 
 describe('readOptions', () => {
   test('defaults to WebGL2 and automatic quality', () => {
-    expect(readOptions('')).toEqual({ backend: 'webgl2', quality: 'auto', tiles: undefined });
+    expect(readOptions('')).toEqual({ backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json' });
   });
 
   test('tiles base becomes a URL template with a trailing slash', () => {
     expect(readOptions('?tiles=/tile-cache').tiles).toBe('/tile-cache/{z}/{x}/{y}.webp');
     expect(readOptions('?tiles=/tile-cache/').tiles).toBe('/tile-cache/{z}/{x}/{y}.webp');
+  });
+
+  test('peaks base becomes a cell URL template, default next to the app', () => {
+    expect(readOptions('?peaks=/tests/e2e/fixtures/peaks').peaks).toBe('/tests/e2e/fixtures/peaks/{x}_{y}.json');
+    expect(readOptions('?peaks=/p/').peaks).toBe('/p/{x}_{y}.json');
   });
 
   test('backend and quality overrides', () => {

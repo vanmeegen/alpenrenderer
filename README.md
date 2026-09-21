@@ -23,8 +23,21 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   Weil der Kompass in den Bergen oft daneben liegt, korrigiert ein Finger in
   diesem Modus die Richtung; die Korrektur bleibt gespeichert und steht an
   der Kompassrose.
-- Inkrement 3 (Gipfel aus Foto erkennen und beschriften) folgt. Der Plan:
-  [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
+- **Inkrement 3a** (Gipfelnamen): Gipfel aus OpenStreetMap stehen als Label
+  im Panorama, verdeckte bleiben weg (DEM-Marsch mit Krümmung und
+  Refraktion), Tippen öffnet Höhe, Entfernung, Peilung und Wikipedia. Der
+  Katalog liegt statisch als Zellen unter `public/peaks/` (Build:
+  `node tools/build_peaks.mjs`), die App fragt Overpass nie selbst.
+- **Inkrement 3b** (Live-Kamera): „Kamera“ legt die Grate und Gipfelnamen
+  über das Kamerabild (weiß gewaschen, damit die Linien tragen), das
+  Sichtfeld folgt dem Objektiv und lässt sich mit einem Regler korrigieren,
+  „Foto“ speichert das Bild mit Labels und Quellenzeile als PNG.
+- **Inkrement 3c** (Foto): „Foto laden“ legt die Grate und Namen über ein
+  Foto. Standpunkt und Objektiv kommen aus dem EXIF (GPS, Brennweite),
+  „Ausrichten“ legt die berechnete Skyline auf die des Fotos (Richtung,
+  Neigung, Rolle, bei unbekanntem Objektiv auch das Sichtfeld) und sagt, wie
+  sicher es sich ist; ein Finger korrigiert weiterhin von Hand.
+- Der Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
 
 ## Entwicklung
 
@@ -39,7 +52,9 @@ Gearbeitet wird test-first (Red-Green), siehe `CLAUDE.md`. Unit-Tests
 liegen in `tests/unit/` (Engine, Zustand, Gesten, Shader-Preprocessing),
 E2E-Tests in `tests/e2e/` (die gebaute App in Chromium mit Software-WebGL2,
 Gelände aus der Formel in `tests/e2e/fixtures/terrain.ts`, kein Netz; GPS und
-Orientierungssensoren werden emuliert bzw. als synthetische Events eingespeist). CI
+Orientierungssensoren werden emuliert bzw. als synthetische Events eingespeist,
+die Kamera ist Chromiums Fake-Gerät mit einem festen Y4M-Bild, das Foto ein
+aus der Geländeformel gerendertes PNG mit eXIf-Chunk). CI
 (`.github/workflows/ci.yml`) führt beides auf jedem Push aus.
 
 Die Daten-Suite `tests/data/` prüft das Live-Material von Mapterhorn
@@ -59,7 +74,8 @@ der App per `?tiles=` mitgeben:
 
 URL-Parameter: `#lon`, `lat`, `alt` (absolute Augenhöhe, sonst Boden + 1,7 m),
 `yaw`, `pitch`, `fov`, `p=<ort>` für einen der Standpunkte im Menü;
-`?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität.
+`?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität,
+`?peaks=<verzeichnis>` für einen anderen Gipfelkatalog (Zellen `{x}_{y}.json`).
 
 ## Aufbau
 
@@ -81,6 +97,7 @@ Shading-Pass erweitert.
   offener nationaler Höhenmodelle (swissALTI3D, BEV, Bayern DGM1, Südtirol,
   Aosta, IGN …) mit Copernicus GLO-30 als globalem Fallback. Die Quellen
   unter dem jeweiligen Standpunkt zeigt die App unter „Quellen“.
-- Gipfel und Standpunkt-Karte: © OpenStreetMap contributors, ODbL; die
-  Kartenkacheln kommen vom Standard-Tile-Layer der OpenStreetMap Foundation.
+- Gipfel (`public/peaks/`, `natural=peak` mit Namen, per Overpass gebaut) und
+  Standpunkt-Karte: © OpenStreetMap contributors, ODbL; die Kartenkacheln
+  kommen vom Standard-Tile-Layer der OpenStreetMap Foundation.
 - Code: MIT. Drittkomponenten in `THIRD-PARTY-NOTICES.md`.

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
 import { formatHash, PLACES, readHash, readOptions, ViewState } from './state';
-import { Viewer, ViewerStatus } from './viewer';
+import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
+import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
 import { PickedPosition } from './mapPicker';
 import { CompassRose } from './CompassRose';
@@ -12,16 +13,24 @@ const fmtBytes = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Mat
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const [status, setStatus] = useState<ViewerStatus | null>(null);
   const [view, setView] = useState<ViewState>(() => readHash());
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'map'>('none');
   const [outline, setOutline] = useState(true);
-  const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place'>('url');
+  const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place' | 'photo'>('url');
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [sensors, setSensors] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [labelsOn, setLabelsOn] = useState(true);
+  const [camera, setCamera] = useState(false);
+  const [lensFov, setLensFov] = useState(51);
+  const [photo, setPhoto] = useState<PhotoStatus | null>(null);
+  const [alignment, setAlignment] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [peak, setPeak] = useState<PeakInfo | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -30,7 +39,7 @@ export function App() {
     let hashTimer = 0;
     const opt = readOptions();
 
-    Viewer.create(canvas, opt, readHash()).then((v) => {
+    Viewer.create(canvas, opt, readHash(), overlayRef.current).then((v) => {
       if (cancelled) { v.dispose(); return; }
       viewer = v;
       viewerRef.current = v;
@@ -39,6 +48,7 @@ export function App() {
         const now = performance.now();
         if (now - lastStatus > 250) { lastStatus = now; setStatus({ ...s }); }
       };
+      v.onSelect = (p) => setPeak(p);
       v.onView = (nv) => {
         setView(nv);
         clearTimeout(hashTimer);
@@ -63,7 +73,7 @@ export function App() {
 
   useEffect(() => {
     const v = viewerRef.current;
-    if (v) v.renderer.outline = outline ? 0.35 : 0;
+    if (v) { v.renderer.outline = outline ? 0.35 : 0; v.showLabels = labelsOn; }
   });
 
   const go = (id: string) => {
@@ -96,6 +106,68 @@ export function App() {
     }
   };
 
+  /** The camera behind the outline, or back to the shaded view. */
+  const toggleCamera = async () => {
+    const v = viewerRef.current;
+    if (!v) return;
+    setNote(null);
+    if (camera) { v.stopCamera(); setCamera(false); return; }
+    try {
+      await v.startCamera();
+      setLensFov(v.feed.status.fovY);
+      setCamera(true);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const lens = (deg: number) => {
+    setLensFov(deg);
+    if (photo) viewerRef.current?.setPhotoLensFov(deg);
+    else viewerRef.current?.setLensFov(deg);
+  };
+
+  /** A photo from the file picker: EXIF for standpoint and lens, then the user or "Ausrichten" for the heading. */
+  const openPhoto = async (file: File | undefined) => {
+    const v = viewerRef.current;
+    if (!v || !file) return;
+    setNote(null);
+    setAlignment(null);
+    try {
+      if (camera) { v.stopCamera(); setCamera(false); }
+      const p = await v.openPhoto(file);
+      setPhoto(p);
+      setLensFov(p.lensFov);
+      setPositionSource(p.positioned ? 'photo' : positionSource);
+      if (!p.positioned) setNote('Foto ohne GPS: Standpunkt per Karte setzen.');
+    } catch (e) {
+      setNote(`Foto konnte nicht geladen werden: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const closePhoto = () => {
+    viewerRef.current?.closePhoto();
+    setPhoto(null);
+    setAlignment(null);
+  };
+
+  const align = () => {
+    const v = viewerRef.current;
+    if (!v) return;
+    const r = v.alignPhotoToTerrain();
+    if (!r) return;
+    setAlignment(r.ok
+      ? `Ausgerichtet: Fit ${Math.round(r.fit * 100)} %, Konfidenz ${Math.round(r.confidence * 100)} %`
+      : `Nicht ausgerichtet: ${r.why}`);
+    setPhoto(v.status().photo);
+    setLensFov(v.status().photo?.lensFov ?? lensFov);
+  };
+
+  const savePhoto = async () => {
+    const r = await viewerRef.current?.snapshot();
+    if (r === 'failed') setNote('Foto konnte nicht gespeichert werden.');
+  };
+
   const loading = status && status.levelsReady < status.levels;
   const d = status?.diagnostics;
   const offsetYaw = status?.sensors.offsetYaw ?? 0;
@@ -106,6 +178,7 @@ export function App() {
   return (
     <div className="relative h-full w-full">
       <canvas ref={canvasRef} className="view" />
+      <canvas ref={overlayRef} className="labels" />
 
       {/* HUD */}
       <div className="pointer-events-none absolute inset-x-2 top-2 flex flex-col gap-2"
@@ -122,7 +195,10 @@ export function App() {
             <span className="tabular-nums">{view.lat.toFixed(4)}, {view.lon.toFixed(4)}</span>
             {positionSource === 'gps' && <span> (GPS{gpsAccuracy !== null ? `, ±${Math.round(gpsAccuracy)} m` : ''})</span>}
             {positionSource === 'map' && <span> (Karte)</span>}
+            {positionSource === 'photo' && <span> (Foto-GPS)</span>}
             {sensors && <span> · Sensoren{corrected ? `, Korrektur ${signed(offsetYaw)} / ${signed(offsetPitch)}` : ''}</span>}
+            {camera && <span> · Kamera</span>}
+            {photo && <span> · Foto</span>}
             {status && (
               <span> · Auge {Math.round(status.eyeAltitude)} m
                 {status.altitudeSource === 'dem' ? ' (Boden + 1,7 m)' : ''}</span>
@@ -138,21 +214,51 @@ export function App() {
             )}
             {status && !loading && (
               <span>{status.levels} Level · {fmtBytes(status.bytes)} · {status.backend}
-                {status.failed > 0 ? ` · ${status.failed} Tiles fehlgeschlagen` : ''}</span>
+                {status.failed > 0 ? ` · ${status.failed} Tiles fehlgeschlagen` : ''}
+                {status.peaks.total > 0 ? ` · Gipfel ${status.peaks.visible}/${status.peaks.total}` : ''}</span>
             )}
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel('map')}>Karte</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'places' ? 'none' : 'places')}>Standpunkt</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void toggleSensors()}>{sensors ? 'Sensoren aus' : 'Sensoren'}</button>
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void toggleCamera()}>{camera ? 'Kamera aus' : 'Kamera'}</button>
+            {(camera || photo) && <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void savePhoto()}>Speichern</button>}
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => fileRef.current?.click()}>Foto laden</button>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" aria-label="Foto laden"
+              onChange={(e) => { void openPhoto(e.target.files?.[0]); e.target.value = ''; }} />
             {corrected && (
               <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => viewerRef.current?.sensors.resetOffset()}>Korrektur zurücksetzen</button>
             )}
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setLabelsOn(!labelsOn)}>Gipfel {labelsOn ? 'aus' : 'an'}</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setOutline(!outline)}>Umrisse {outline ? 'aus' : 'an'}</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'credits' ? 'none' : 'credits')}>Quellen</button>
             <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'check' ? 'none' : 'check')}>Check</button>
           </div>
         </div>
+
+        {(camera || photo) && (
+          <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur">
+            {photo && (
+              <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <b className="font-semibold">Foto</b>
+                <span className="text-neutral-600">{photo.width}×{photo.height}{photo.taken ? ` · ${photo.taken}` : ''}
+                  {` · Objektiv ${photo.lensSource === 'exif' ? 'aus EXIF' : photo.lensSource === 'found' ? 'gefunden' : photo.lensSource === 'manual' ? 'von Hand' : 'geschätzt'}`}</span>
+                <button className="text-blue-700 underline-offset-2 hover:underline" onClick={align}>Ausrichten</button>
+                <button className="text-blue-700 underline-offset-2 hover:underline" onClick={closePhoto}>Foto schließen</button>
+              </div>
+            )}
+            {alignment && <div className="alp-align mb-1">{alignment}</div>}
+            <label className="flex items-center gap-2">
+              <span>Objektiv {lensFov.toFixed(0)}°</span>
+              <input type="range" min={25} max={90} step={0.5} value={lensFov} aria-label="Objektiv"
+                onChange={(e) => lens(Number(e.target.value))} className="flex-1" />
+            </label>
+            <div className="mt-0.5 text-neutral-500">
+              {photo ? '1 Finger: Grate aufs Foto schieben, oder „Ausrichten“.' : 'Regler schieben, bis die gezeichneten Grate auf den echten liegen.'}
+            </div>
+          </div>
+        )}
 
         {panel === 'places' && (
           <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur">
@@ -210,13 +316,30 @@ export function App() {
         <CompassRose yaw={view.yaw} offset={offsetYaw} sensors={sensors} />
       </div>
 
+      {peak && (
+        <div className="alp-peak-card pointer-events-auto absolute left-2 max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur"
+          style={{ bottom: 'max(2rem, calc(env(safe-area-inset-bottom) + 1.5rem))' }}>
+          <div className="flex items-baseline gap-3">
+            <b className="text-[15px] font-semibold">{peak.name}</b>
+            <span className="tabular-nums text-neutral-600">
+              {peak.ele !== undefined ? `${Math.round(peak.ele)} m · ` : ''}{fmtRange(peak.range)} · {peak.compass} {peak.bearing.toFixed(0)}°
+            </span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap gap-x-3">
+            {peak.wikipedia && <a className="text-blue-700 hover:underline" href={peak.wikipedia} target="_blank" rel="noopener">Wikipedia</a>}
+            {peak.wikidata && <a className="text-blue-700 hover:underline" href={peak.wikidata} target="_blank" rel="noopener">Wikidata</a>}
+            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => viewerRef.current?.clearSelection()}>Schließen</button>
+          </div>
+        </div>
+      )}
+
       {panel === 'map' && (
         <MapPanel lon={view.lon} lat={view.lat} yaw={view.yaw} onPick={pick} onClose={() => setPanel('none')} />
       )}
 
       <div className="pointer-events-none absolute inset-x-2 bottom-2 text-center text-[11px] text-white drop-shadow"
         style={{ bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-        {sensors ? '1 Finger: Kompass korrigieren' : '1 Finger: umschauen'} · 2 Finger: zoomen · Gelände © Mapterhorn und Quellen
+        {sensors ? '1 Finger: Kompass korrigieren' : '1 Finger: umschauen'}{camera || photo ? ' · Zoom: Objektiv-Regler' : ' · 2 Finger: zoomen'} · Gelände © Mapterhorn und Quellen
       </div>
     </div>
   );
