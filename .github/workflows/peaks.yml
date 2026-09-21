@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fetch every 1°×1° cell of the Alps from Overpass
-        run: node tools/build_peaks.mjs --out public/peaks ${{ inputs.refresh && '--refresh' || '' }}
+        run: node tools/build_peaks.mjs --out public/peaks --budget-minutes 100 ${{ inputs.refresh && '--refresh' || '' }}
       - name: Summary
         run: |
           echo "## Gipfelkatalog" >> "$GITHUB_STEP_SUMMARY"

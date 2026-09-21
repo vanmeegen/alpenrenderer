@@ -6,12 +6,18 @@
  * reads. Run by hand (or the "Build peak catalogue" workflow) and committed;
  * the app never talks to Overpass itself.
  *
- *   node tools/build_peaks.mjs [--bbox 5,43,17,49] [--out public/peaks] [--refresh] [--cells 10_47,11_47]
+ *   node tools/build_peaks.mjs [--bbox 5,43,17,49] [--out public/peaks] [--refresh] [--cells 10_47,11_47] [--budget-minutes 100]
  *
  * Cells that already exist in --out are kept unless --refresh is given, so a
  * run that the public servers cut short can simply be repeated. A cell that
  * fails every attempt is listed as missing in index.json and the run goes on:
  * a catalogue with a gap is worth more than none, and the next run fills it.
+ * The time budget stops the run before a CI job limit would kill it and lose
+ * everything fetched so far; the rest is marked missing likewise.
+ *
+ * Overpass treats the declared [timeout] as the price of a request and turns
+ * expensive ones away first under load (504 "dispatcher timeout"), so each
+ * cell asks for little: a 1° cell holds a few hundred nodes and takes seconds.
  *
  * Data © OpenStreetMap contributors, ODbL.
  */
@@ -24,6 +30,8 @@ const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i >= 0
 const [W, S, E, N] = opt('bbox', '5,43,17,49').split(',').map(Number);
 const out = opt('out', 'public/peaks');
 const only = opt('cells', '') ? new Set(opt('cells', '').split(',')) : null;
+const budgetMs = Number(opt('budget-minutes', '100')) * 60_000;
+const startedAt = Date.now();
 mkdirSync(out, { recursive: true });
 
 // The public servers rate-limit hard and answer 429, 504 or, in front of
@@ -47,8 +55,9 @@ const num = (s) => {
 
 /** One cell, with retries across endpoints; null when every attempt failed. */
 async function fetchCell(x, y) {
-  const q = `[out:json][timeout:90];node["natural"="peak"]["name"](${y},${x},${y + 1},${x + 1});out body;`;
+  const q = `[out:json][timeout:25][maxsize:16777216];node["natural"="peak"]["name"](${y},${x},${y + 1},${x + 1});out body;`;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (Date.now() - startedAt > budgetMs) return null;
     const ep = ENDPOINTS[attempt % ENDPOINTS.length];
     try {
       const res = await fetch(ep, {
@@ -102,10 +111,14 @@ for (let y = S; y < N; y++) {
       console.error(`${key}: ${n} (kept)`);
       continue;
     }
+    if (Date.now() - startedAt > budgetMs) {
+      index.missing.push(key);
+      continue;
+    }
     const elements = await fetchCell(x, y);
     if (!elements) {
       index.missing.push(key);
-      console.error(`${key}: MISSING after ${MAX_ATTEMPTS} attempts`);
+      console.error(`${key}: MISSING (${Date.now() - startedAt > budgetMs ? 'time budget spent' : `${MAX_ATTEMPTS} attempts failed`})`);
       continue;
     }
     const records = elements.map(toRecord).filter(Boolean).sort((a, b) => (b.e ?? 0) - (a.e ?? 0));
@@ -119,4 +132,5 @@ for (let y = S; y < N; y++) {
 index.total = total;
 writeFileSync(join(out, 'index.json'), JSON.stringify(index, null, 1));
 console.error(`${total} summits in ${Object.values(index.cells).filter(Boolean).length} cells -> ${out}`
+  + ` in ${Math.round((Date.now() - startedAt) / 60_000)} min`
   + (index.missing.length ? `; MISSING ${index.missing.length}: ${index.missing.join(' ')} (run again to fill)` : ''));
