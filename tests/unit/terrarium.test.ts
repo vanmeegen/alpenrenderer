@@ -51,3 +51,17 @@ function fakeStore() {
     async has() { return false; },
   } as unknown as ConstructorParameters<typeof TerrariumSource>[0] extends { store?: infer S } ? S : never;
 }
+
+describe('decoder probe', () => {
+  test('the probe tile reads back exactly, and a colour-managed decoder that shifts one red byte is 256 m off', async () => {
+    const { DECODER_PROBE, probeDeviation } = await import('../../src/engine/sources/terrarium');
+    const exact = new Uint8ClampedArray(DECODER_PROBE.rgb.length / 3 * 4);
+    for (let i = 0, o = 0; i < DECODER_PROBE.rgb.length; i += 3, o += 4) {
+      exact[o] = DECODER_PROBE.rgb[i]; exact[o + 1] = DECODER_PROBE.rgb[i + 1]; exact[o + 2] = DECODER_PROBE.rgb[i + 2]; exact[o + 3] = 255;
+    }
+    expect(probeDeviation(exact)).toBe(0);
+    const shifted = exact.slice();
+    shifted[4 * 5] += 1;                      // one pixel's R byte, as a colour transform might
+    expect(probeDeviation(shifted)).toBeCloseTo(256, 6);
+  });
+});

@@ -69,6 +69,8 @@ export interface ViewerStatus {
   fps: number;
   bytes: number;
   failed: number;
+  /** What the tile decoder probe found: "exakt (bitmap)" or why not. */
+  decoder: string;
   backend: Backend;
   quality: 'high' | 'low';
   surveys: SurveyCredit[];
@@ -448,6 +450,7 @@ export class Viewer {
       fps: this.fps,
       bytes: this.source.stats.bytes,
       failed: this.source.stats.failed,
+      decoder: this.source.decoderReport,
       backend: this.renderer.backend,
       quality: this.quality,
       surveys: this.surveys,

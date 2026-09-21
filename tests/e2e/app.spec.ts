@@ -292,6 +292,8 @@ test.describe('panels', () => {
     await expect(page.getByText(/Build [0-9a-f]{7,}( |$)/)).toBeVisible();
     // The device's limits and the GL error state after the atlas upload, for reports from tablets.
     await expect(page.getByText(/Limits: Textur \d{4,} · Vertex-Texturen \d+ · Vertex-Uniforms \d+ · highp Vertex \d+ Bit · GL-Fehler 0( |$)/)).toBeVisible();
+    // The tile decoder proved itself on a probe tile before the first tile was decoded.
+    await expect(page.getByText(/Tile-Dekoder: exakt \((bitmap|image)\)/)).toBeVisible();
   });
 });
 
