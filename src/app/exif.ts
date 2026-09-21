@@ -144,17 +144,18 @@ export function readExif(input: Uint8Array | ArrayBuffer): ExifInfo {
 }
 
 /**
- * Vertical field of view of the photo, degrees. From the 35 mm equivalent
- * when the camera wrote one (the short side of a 36×24 mm frame is 24 mm in
- * landscape and 36 mm in portrait), else from the bare focal length assuming
- * a phone-sized 1/2.55" sensor, else unknown.
+ * Vertical field of view of the photo, degrees, for a frame of `width` by
+ * `height` pixels. A 35 mm equivalent focal length is defined over the
+ * diagonal of a 36×24 mm frame (43.27 mm, CIPA), not over its short side:
+ * the two agree on a 3:2 frame, but a phone's 20:9 wide shot is a much
+ * flatter frame with the same equivalent, and the short-side reading would
+ * draw the terrain a third too tall. Without an equivalent, the bare focal
+ * length assumes a phone-sized 1/2.55" sensor (7.9 mm diagonal); with
+ * neither, unknown.
  */
-export function fovFromExif(x: Pick<ExifInfo, 'focal35' | 'focalLength'>, portrait: boolean): number | undefined {
-  const side = portrait ? 36 : 24;
-  if (x.focal35) return (2 * Math.atan(side / 2 / x.focal35) * 180) / Math.PI;
-  if (x.focalLength) {
-    const sensor = portrait ? 6.3 : 4.7;
-    return (2 * Math.atan(sensor / 2 / x.focalLength) * 180) / Math.PI;
-  }
+export function fovFromExif(x: Pick<ExifInfo, 'focal35' | 'focalLength'>, width: number, height: number): number | undefined {
+  const share = height / Math.hypot(width, height);      // the diagonal's share that is vertical
+  if (x.focal35) return (2 * Math.atan((21.635 * share) / x.focal35) * 180) / Math.PI;
+  if (x.focalLength) return (2 * Math.atan((3.93 * share) / x.focalLength) * 180) / Math.PI;
   return undefined;
 }

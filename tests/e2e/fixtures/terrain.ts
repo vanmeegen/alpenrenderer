@@ -111,6 +111,6 @@ export const CAMERA_FRAME = { width: 640, height: 480 };
 export const PHOTO = {
   width: 640, height: 480, yaw: 94, pitch: 8, roll: 0, focal35: 26,
   taken: '2026:09:20 11:30:00',
-  /** Vertical field of view of that lens in landscape, degrees. */
-  fovY: (2 * Math.atan(12 / 26) * 180) / Math.PI,
+  /** Vertical field of view of that lens on this 4:3 frame, degrees: the 35 mm equivalent is defined over the diagonal (43.27 mm). */
+  fovY: (2 * Math.atan((21.635 * (480 / Math.hypot(640, 480))) / 26) * 180) / Math.PI,
 };

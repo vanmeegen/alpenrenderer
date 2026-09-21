@@ -237,7 +237,7 @@ export class Viewer {
     ctx.drawImage(bitmap, 0, 0, w, h);
     bitmap.close();
     const pixels = ctx.getImageData(0, 0, w, h).data;
-    const lens = fovFromExif(exif, h > w);
+    const lens = fovFromExif(exif, w, h);
     const positioned = exif.lon !== undefined && exif.lat !== undefined;
     this.photo = {
       width: w, height: h, lensFov: lens ?? DEFAULT_LENS_FOV, lensSource: lens ? 'exif' : 'default',
