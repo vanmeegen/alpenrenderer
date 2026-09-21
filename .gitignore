@@ -10,3 +10,4 @@ tests/e2e/fixtures/photo.png
 tests/e2e/fixtures/photo-fog.png
 test-results/
 playwright-report/
+tools/.scratch/
