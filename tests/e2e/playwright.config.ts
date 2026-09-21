@@ -13,7 +13,9 @@ export default defineConfig({
   testDir: '.',
   testMatch: /.*\.spec\.ts/,
   globalSetup: './global-setup.ts',
-  timeout: 120_000,
+  // Each test loads the terrain in software WebGL, twice when it reloads: a
+  // slow CI runner needs well over two minutes for that.
+  timeout: 240_000,
   expect: { timeout: 30_000, toHaveScreenshot: { maxDiffPixelRatio: 0.02 } },
   fullyParallel: false,
   workers: 1,
