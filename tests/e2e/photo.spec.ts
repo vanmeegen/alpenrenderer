@@ -79,6 +79,11 @@ test.describe('photo mode', () => {
     const expectedX = W / 2 + (Math.tan(((TESTHORN_BEARING - PHOTO.yaw) * Math.PI) / 180) / tanH) * (W / 2);
     expect(Math.abs(t.ax - expectedX)).toBeLessThan(8);
 
+    // The lens slider reaches a 70 mm telephoto: a 20:9 phone frame at 70 mm
+    // equivalent sees 14.5° vertically, and the slider must go there.
+    await page.getByLabel('Objektiv').fill('14.5');
+    await expect.poll(() => hashNum(page, 'fov'), { timeout: 30_000 }).toBeCloseTo(coverFovY(14.5, PHOTO.width, PHOTO.height, W, H), 0);
+
     await page.getByRole('button', { name: 'Foto schließen' }).click();
     await expect.poll(async () => { const t = await rgb(page, 100, 20, 40, 20); return t[2] - t[0]; }, { timeout: 30_000 }).toBeGreaterThan(0.05);
   });

@@ -143,16 +143,18 @@ describe('fovFromExif', () => {
     expect(fovFromExif({ focal35: 26 }, 2000, 3000)).toBeCloseTo(deg(2 * Math.atan(18 / 26)), 2);
   });
 
-  test('the equivalence is by the diagonal: a 24 mm lens on a 20:9 phone frame sees 40.5° vertically, not 53°', () => {
-    // A 4000×1800 photo from a phone in its wide mode. The short side of a
-    // 36×24 mm frame would give 53°, and the drawn terrain would be a third
-    // too tall for the photo. CIPA defines the 35 mm equivalent over the
-    // diagonal (43.27 mm), which puts the vertical field at 40.5°.
+  test('the long side is the 36 mm: a 24 mm lens on a 20:9 phone frame sees 37.3° vertically, not 53°', () => {
+    // A 4000×1800 photo from a phone in its wide mode: a crop of the 4:3
+    // sensor that keeps the full width. The short side of a 36×24 mm frame
+    // would give 53°, and the drawn terrain would be a third too tall. With
+    // the long side as the 36 mm, the vertical field is 37.3°, within 4% of
+    // what the crop really sees (36°).
     const f = fovFromExif({ focal35: 24 }, 4000, 1800)!;
-    expect(f).toBeCloseTo(deg(2 * Math.atan((21.63 * (1800 / Math.hypot(4000, 1800))) / 24)), 1);
-    expect(f).toBeLessThan(42);
-    // The same lens on a 4:3 frame: 57.5° vertically.
-    expect(fovFromExif({ focal35: 24 }, 4000, 3000)!).toBeCloseTo(deg(2 * Math.atan((21.63 * 0.6) / 24)), 1);
+    expect(f).toBeCloseTo(deg(2 * Math.atan((18 * (1800 / 4000)) / 24)), 1);
+    expect(f).toBeLessThan(38);
+    // The same lens on a 4:3 frame: 54.8°; and in portrait the long side is vertical: 73.7°.
+    expect(fovFromExif({ focal35: 24 }, 4000, 3000)!).toBeCloseTo(deg(2 * Math.atan(13.5 / 24)), 1);
+    expect(fovFromExif({ focal35: 24 }, 1800, 4000)!).toBeCloseTo(deg(2 * Math.atan(18 / 24)), 1);
   });
 
   test('without a 35 mm equivalent, a bare focal length assumes a phone sensor; nothing gives undefined', () => {
