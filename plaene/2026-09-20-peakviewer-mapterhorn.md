@@ -595,7 +595,7 @@ Foto-Import, dann die Implementierung.
   (`<img>` plus Canvas) waren sauber. Gegenmaßnahme in
   `sources/terrarium.ts`: beim Start dekodiert die Quelle eine 4×4-Probe
   mit bekannten Bytes über beide Pfade und nimmt den ersten exakten; das
-  Check-Panel zeigt „Tile-Dekoder: exakt (image), bitmap ±N m“. Ohne Probe
+  Check-Panel zeigt „Tile-Dekoder: exakt (image), bitmap ±771 m“ (gemessen auf dem iPad). Ohne Probe
   bliebe jeder neue Browser ein Blindflug.
 - **Datenvolumen.** 8 Level mit 512-px-Tiles sind 6 bis 12 MB pro
   Standpunkt. Auf Mobil `QUALITY_LOW` mit 6 Leveln und coarse-first ist das
