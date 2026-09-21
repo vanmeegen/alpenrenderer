@@ -464,12 +464,45 @@ davor. Befunde:
 6. *Hochformat.* HUD und Foto-Panel decken das obere Drittel ab, genau wo
    Skyline und Labels sitzen.
 
+**Zweiter Durchgang (2026-09-21, sieben Fotos Berner Oberland und Bern,
+alle OnePlus Open, alle ohne GPS-Fix, Standpunkte von Hand):** Schreckhorn
+im Hochformat (47 mm), Bachalp-Wiese (24 mm, 20:9), Bachalpsee (14 mm, 20:9),
+First mit Eiger (24 mm, 20:9), Bern mit Bundeshaus (70 mm, 20:9), dazu zwei
+Bilder vom Schynige-Platte-Kamm, deren Standpunkt ich nicht sicher
+verorten konnte (nicht gewertet). Befunde:
+
+7. *35-mm-Äquivalent falsch gelesen.* Die Kurzseiten-Regel (24 mm) machte
+   aus dem 20:9-Panorama bei 24 mm ein Sichtfeld von 53° vertikal; das
+   Telefon schneidet sein 4:3-Sensorbild aber oben und unten ab und
+   behält die Breite, real sind es etwa 36°. Behoben: die Langseite ist
+   die 36 mm, die Kurzseite folgt aus dem Seitenverhältnis (20:9 → 37,3°,
+   4:3 → 54,8°, 3:2 unverändert). Handläufe am First (Eiger, Jungfrau,
+   Ostegg auf den Fotogipfeln) und an der Bachalp-Wiese bestätigen die
+   Skala. Unit-Test in `exif.test.ts`, Fixture-Foto auf 54,8°.
+8. *Objektiv-Regler.* Begann bei 25°, das 70-mm-Bild aus Bern sieht 13°;
+   Minimum jetzt 8°, E2E-Schritt in `photo.spec.ts`.
+9. *Automatische Ausrichtung, fünf verortete Fotos:* ein Treffer
+   (Bachalpsee, 14 mm: Fit 51 %, Konfidenz 27 %, Schreckhorn-Label auf der
+   Fotospitze, Neigung −9° gefunden), vier korrekt abgelehnte (1 bis 12 %
+   Konfidenz: Hochformat mit 14° Aufblick, Wiese mit Wolkenband, Eiger mit
+   Dunst, Bern mit Dächern vor Bergen in 70 km). Im ersten Durchgang dazu
+   ein falscher Treffer am Schynige-Platte-Weg (Fit 72 %, Konfidenz 21 %,
+   Kurs um 29° verdreht, Cumulus-Kante als Horizont). Muster: sauberer
+   blauer Himmel und eine lange Horizontlinie gelingen, alles andere
+   scheitert am Extraktor, und die Konfidenzschwelle von 18 % lässt
+   Wolkenkanten durch.
+10. *Handplatzierung* mit der App-eigenen Objektivregel trifft bei allen
+    fünf verorteten Fotos die Gipfel horizontal; vertikal fehlt meist die
+    Neigung (Schreckhorn-Hochformat +14°, Bern und First −5°), die der
+    Finger liefert.
+
 Daraus die nächsten Schritte, jeder test-first: (a) Himmelsmodell im
 Extraktor (Blau und Wolkenweiß von oben her als Himmel, Baumkanten und
 Nahfeld abgewertet) mit einer Fixture, die Wolkenband und Baumkante enthält;
 (b) Umrisse unter etwa 300 m Entfernung oder auf flachem Gelände ausblenden;
-(c) Neigungssuche auf ±12°; (d) Panels im Hochformat unten oder
-einklappbar. Die Regressionsmenge aus zehn Fotos mit bekanntem Standpunkt
+(c) Neigungssuche auf ±15°, weil Hochformate von Gipfeln 14° aufblicken;
+(d) Panels im Hochformat unten oder einklappbar; (e) Konfidenzschwelle
+für Fotos anheben oder Treffer unter 30 % nur als Vorschlag zeigen. Die Regressionsmenge aus zehn Fotos mit bekanntem Standpunkt
 bleibt offen; beide Bilder hier haben keinen.
 
 Arbeitspakete:
