@@ -41,7 +41,13 @@ jobs:
           git commit -m "Gipfelkatalog: Stand $(date -u +%Y-%m-%d) aus OpenStreetMap"
           git push -f origin "$branch"
           missing=$(node -e 'const i=require("./public/peaks/index.json");console.log(i.missing.join(", "))')
-          gh pr create --base main --head "$branch" \
+          if [ -n "$(gh pr list --base main --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "PR existiert bereits"; exit 0
+          fi
+          if ! gh pr create --base main --head "$branch" \
             --title "Gipfelkatalog: Stand $(date -u +%Y-%m-%d)" \
-            --body "Neu gebaut per \`tools/build_peaks.mjs\` aus Overpass (\`natural=peak\` mit Namen, 5–17°E, 43–49°N). Daten © OpenStreetMap contributors, ODbL.${missing:+ Fehlende Zellen (Workflow nochmal starten, er füllt nur die Lücken): $missing}" \
-            || echo "PR existiert bereits"
+            --body "Neu gebaut per \`tools/build_peaks.mjs\` aus Overpass (\`natural=peak\` mit Namen, 5–17°E, 43–49°N). Daten © OpenStreetMap contributors, ODbL.${missing:+ Fehlende Zellen (Workflow nochmal starten, er füllt nur die Lücken): $missing}"; then
+            url="https://github.com/${{ github.repository }}/compare/main...$branch?expand=1"
+            echo "::warning::PR konnte nicht angelegt werden (Repo-Einstellung „Allow GitHub Actions to create and approve pull requests“ ist aus). Von Hand anlegen: $url"
+            { echo; echo "**PR fehlt.** Branch \`$branch\` ist gepusht; PR von Hand anlegen: $url"; } >> "$GITHUB_STEP_SUMMARY"
+          fi

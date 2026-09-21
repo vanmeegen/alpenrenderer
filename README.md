@@ -64,6 +64,14 @@ Hand, lokal mit `bun run test:data` oder über **Actions → „Data check
 (Mapterhorn, manual)“ → Run workflow**, damit weder Rate-Limits noch eine
 Datenaktualisierung die Builds brechen.
 
+Den Gipfelkatalog baut **Actions → „Build peak catalogue (OpenStreetMap,
+manual)“ → Run workflow** (Overpass, mit Wiederholungen, Zeitbudget und
+Wiederaufnahme fehlender Zellen). Der Lauf pusht den Branch
+`peaks/<Datum>` und legt dazu einen PR an; das gelingt nur, wenn unter
+Settings → Actions → General „Allow GitHub Actions to create and approve
+pull requests“ eingeschaltet ist. Sonst meldet der Lauf eine Warnung mit dem
+Link, unter dem der PR von Hand anzulegen ist.
+
 Für Offline-Tests und Headless-Renders einen lokalen Tile-Cache füllen und
 der App per `?tiles=` mitgeben:
 
