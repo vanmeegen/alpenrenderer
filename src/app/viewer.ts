@@ -27,6 +27,14 @@ import { SensorLook } from './sensorLook';
 import { AppOptions, ViewState } from './state';
 
 const EYE_HEIGHT = 1.7;
+/**
+ * The eye stands EYE_HEIGHT above the highest ground this far around the
+ * standpoint, not above the ground under it: a DEM post every six metres
+ * rounds a slope into steps, and on a hillside an eye 1.7 m over its own
+ * post is inside the next one. Flat ground is unaffected; a 45° slope lifts
+ * the eye some 25 m, roughly what a viewing platform would.
+ */
+const EYE_CLEAR_RADIUS = 25;
 /** Summits beyond this are not labelled, km. */
 const LABEL_RANGE_KM = 260;
 const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
@@ -416,7 +424,8 @@ export class Viewer {
   private applyAltitude() {
     const hf = this.streamer.heightField;
     const ground = hf.groundAt(this.view.lon, this.view.lat);
-    const eye = this.view.alt ?? ground + EYE_HEIGHT;
+    const highest = Math.max(ground, hf.summitNear(this.view.lon, this.view.lat, EYE_CLEAR_RADIUS));
+    const eye = this.view.alt ?? highest + EYE_HEIGHT;
     this.renderer.moveTo(this.view.lon, this.view.lat, eye);
   }
 

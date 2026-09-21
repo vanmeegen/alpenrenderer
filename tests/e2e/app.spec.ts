@@ -3,7 +3,7 @@
  * here is derived from tests/e2e/fixtures/terrain.ts, not read off a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { PLAIN_M, STAND, skylineRow, summitScreenY } from './fixtures/terrain';
+import { FLANK, PLAIN_M, STAND, eyeAbove, skylineRow, summitScreenY } from './fixtures/terrain';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
 const R_EFF_M = 6371008.8 / (1 - 0.13);
@@ -79,12 +79,30 @@ test.describe('loading', () => {
     await expect(page.getByText('8 Level')).toBeVisible();
   });
 
-  test('the eye stands 1.7 m above the plain', async ({ page }) => {
+  test('the eye stands 1.7 m above the highest ground within 25 m: a little more on the plain, whose ripple climbs half a metre', async ({ page }) => {
     await page.goto(url());
     const s = await ready(page);
     expect(Math.abs(s.ground - PLAIN_M)).toBeLessThan(10);   // the ripple is ±8 m
-    expect(s.eyeAltitude - s.ground).toBeCloseTo(1.7, 3);
-    await expect(page.getByText('(Boden + 1,7 m)')).toBeVisible();
+    const expected = eyeAbove(STAND.lon, STAND.lat);
+    expect(expected).toBeGreaterThan(1.9);                   // the rule is doing something even here
+    expect(expected).toBeLessThan(2.6);
+    // The fixture tiles hold whole metres, so the highest post can round up by half a metre.
+    expect(Math.abs(s.eyeAltitude - s.ground - expected)).toBeLessThan(0.75);
+    // The HUD says how far above the ground the eye is, to a decimal.
+    const hud = await page.getByText(/\(Boden \+ \d+,\d m\)/).textContent();
+    const shown = Number(hud!.match(/Boden \+ (\d+,\d) m/)![1].replace(',', '.'));
+    expect(Math.abs(shown - expected)).toBeLessThan(0.75);
+  });
+
+  test('on the Testhorn\'s flank the eye clears the slope: 25 m up, not inside the hill', async ({ page }) => {
+    // A cone rising 1 m per metre: the ground 25 m uphill is 25 m higher, and
+    // an eye 1.7 m above the standpoint would look out from inside it.
+    await page.goto(url({ lon: FLANK.lon, lat: FLANK.lat, yaw: 270 }));
+    const s = await ready(page);
+    const expected = eyeAbove(FLANK.lon, FLANK.lat);
+    expect(expected).toBeGreaterThan(25);
+    expect(Math.abs(s.eyeAltitude - s.ground - expected)).toBeLessThan(4);   // DEM posts are 6 m apart
+    await expect(page.getByText(/\(Boden \+ 2\d m, Hang\)/)).toBeVisible();
   });
 
   test('a given altitude puts the eye there', async ({ page }) => {

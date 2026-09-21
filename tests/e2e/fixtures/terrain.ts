@@ -42,6 +42,31 @@ export const PEAKS = [
 ];
 export const RIDGE_RANGE = 20000;
 
+/** The eye stands this far above the highest ground within EYE_CLEAR_RADIUS metres. */
+export const EYE_HEIGHT = 1.7;
+export const EYE_CLEAR_RADIUS = 25;
+
+/** A standpoint on the Testhorn's west flank, 1500 m from the summit: the cone rises 1 m per metre there. */
+export const FLANK = { lon: TESTHORN.lon - 1500 / M_PER_DEG_LON, lat: TESTHORN.lat };
+
+/**
+ * How far above the ground under the standpoint the eye stands: EYE_HEIGHT
+ * over the highest ground within EYE_CLEAR_RADIUS, so that on a slope the
+ * eye is not inside the hill next to it. 1.7 m on flat ground.
+ */
+export function eyeAbove(lon: number, lat: number): number {
+  const g = heightAt(lon, lat);
+  let best = g;
+  const r = EYE_CLEAR_RADIUS;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r) continue;
+      best = Math.max(best, heightAt(lon + dx / M_PER_DEG_LON, lat + dy / M_PER_DEG_LAT));
+    }
+  }
+  return best - g + EYE_HEIGHT;
+}
+
 /** Bearing from the standpoint to the Testhorn summit, degrees. */
 export const TESTHORN_BEARING = 90;
 /** Ground range to the Testhorn summit, metres. */

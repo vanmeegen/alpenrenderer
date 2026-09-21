@@ -168,10 +168,10 @@ function tiff({ lon, lat, focal35, taken }) {
 
 // --- tiles -------------------------------------------------------------------
 let written = 0, kept = 0;
-for (const z of LEVELS) {
+for (const centre of [T.STAND, T.FLANK]) for (const z of LEVELS) {
   const tz = z - 1;
-  const px0 = Math.round(mercX(T.STAND.lon, z)) - SIZE / 2;
-  const py0 = Math.round(mercY(T.STAND.lat, z)) - SIZE / 2;
+  const px0 = Math.round(mercX(centre.lon, z)) - SIZE / 2;
+  const py0 = Math.round(mercY(centre.lat, z)) - SIZE / 2;
   for (let ty = Math.floor(py0 / TILE); ty <= Math.floor((py0 + SIZE - 1) / TILE); ty++) {
     for (let tx = Math.floor(px0 / TILE); tx <= Math.floor((px0 + SIZE - 1) / TILE); tx++) {
       const dir = join(out, String(tz), String(tx));

@@ -10,6 +10,8 @@ import { CompassRose } from './CompassRose';
 const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
 const compass = (yaw: number) => COMPASS[Math.round(yaw / 45) % 8];
 const fmtBytes = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
+/** "1,7 m" on the flat, "27 m, Hang" where the slope lifted the eye. */
+const aboveGround = (m: number) => (m < 5 ? `${m.toFixed(1).replace('.', ',')} m` : `${Math.round(m)} m, Hang`);
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -201,7 +203,7 @@ export function App() {
             {photo && <span> · Foto</span>}
             {status && (
               <span> · Auge {Math.round(status.eyeAltitude)} m
-                {status.altitudeSource === 'dem' ? ' (Boden + 1,7 m)' : ''}</span>
+                {status.altitudeSource === 'dem' ? ` (Boden + ${aboveGround(status.eyeAltitude - status.ground)})` : ''}</span>
             )}
           </div>
           <div className="mt-0.5 text-neutral-600">

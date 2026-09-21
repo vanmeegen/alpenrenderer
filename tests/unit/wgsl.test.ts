@@ -97,6 +97,23 @@ describe.each(pairs)('WGSL pair %s', (_name, vsSrc, fsSrc, expectUniforms) => {
 });
 
 describe('shader dialect parity', () => {
+  test('the GLSL fetches atlas texels by integer coordinate through a highp sampler', async () => {
+    // On Apple GPUs a sampler2D without a precision qualifier is lowp, and
+    // WebKit's Metal backend samples it at that precision: the normalised v
+    // coordinate of a 640×5120 atlas then snaps to 1/256, twenty rows at a
+    // time, and the terrain comes out as vertical bands (iPad, Safari, 2026).
+    // Integer texel fetches carry no such coordinate, and the sampler is
+    // declared highp so the fetched bytes come back whole.
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    for (const src of [GL.TERRAIN_VERTEX_GL, GL.TERRAIN_SHADE_FRAGMENT_GL]) {
+      expect(src).toContain('precision highp sampler2D;');
+      expect(src).toContain('texelFetch(heights,');
+      expect(src).not.toContain('textureLod(heights');
+    }
+    // The composite samples the range and colour buffers at screen resolution, 1/1640 apart.
+    expect(GL.COMPOSITE_FRAGMENT_GL).toContain('precision highp sampler2D;');
+  });
+
   test('the GLSL file declares the same uniform names as the WGSL lists', async () => {
     const GL = await import('../../src/engine/render/gpu/glsl');
     const declared = (src: string) => new Set([...src.matchAll(/uniform\s+\w+\s+(\w+)/g)].map((m) => m[1]));

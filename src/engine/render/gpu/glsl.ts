@@ -49,12 +49,19 @@ float unpackLogRange(vec4 p) {
 
 /** Clipmap sampling shared by the vertex stage and the shade fragment stage. */
 const CLIPMAP_SAMPLER = /* glsl */ `
-/** One exact texel out of the stacked clipmap atlas. */
+/**
+ * One exact texel out of the stacked clipmap atlas. Fetched by integer
+ * coordinate, not sampled at a normalised one: WebKit's Metal backend samples
+ * at the sampler's precision, and a 640×5120 atlas needs more than the
+ * mediump a phone or tablet gives a texture coordinate. Sampled, the rows
+ * snapped twenty at a time and the terrain came out as vertical bands
+ * (iPad, Safari, 2026). The WGSL keeps its normalised sample; WebGPU has no
+ * reduced precision to lose.
+ */
 float texel(int lv, float x, float y) {
   float px = clamp(x, 0.0, uLevelPx - 1.0);
   float py = clamp(y, 0.0, uLevelPx - 1.0) + float(lv) * uLevelPx;
-  vec2 uv = vec2((px + 0.5) / uTexSize.x, (py + 0.5) / uTexSize.y);
-  vec4 c = textureLod(heights, uv, 0.0);
+  vec4 c = texelFetch(heights, ivec2(int(px), int(py)), 0);
   return floor(c.r * 255.0 + 0.5) * 256.0 + floor(c.g * 255.0 + 0.5);
 }
 
@@ -93,6 +100,8 @@ varying float vH;
 `;
 
 export const TERRAIN_VERTEX_GL = /* glsl */ `
+precision highp float;
+precision highp sampler2D;
 // x = azimuth index, y = radial row index. Everything else is derived.
 attribute vec3 position;
 
@@ -204,6 +213,7 @@ void main(void) {
 /** Shaded terrain; see TERRAIN_SHADE_FRAGMENT in wgsl.ts for the reasoning. */
 export const TERRAIN_SHADE_FRAGMENT_GL = /* glsl */ `
 precision highp float;
+precision highp int;
 precision highp sampler2D;
 ${VARYINGS}
 
@@ -292,6 +302,7 @@ void main(void) {
 
 export const COMPOSITE_FRAGMENT_GL = /* glsl */ `
 precision highp float;
+precision highp sampler2D;
 varying vec2 vUV;
 
 uniform vec2  uTexel;
