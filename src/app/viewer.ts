@@ -356,6 +356,7 @@ export class Viewer {
 
   /** Moves the standpoint; the clipmap refills around it. */
   async relocate(v: Partial<ViewState>) {
+    if (v.lon !== undefined || v.lat !== undefined) this.select(null);
     this.view = { ...this.view, ...v };
     if (v.yaw !== undefined || v.pitch !== undefined || v.fov !== undefined) {
       this.camera.set({ yaw: this.view.yaw, pitch: this.view.pitch, fov: this.view.fov });
@@ -382,7 +383,8 @@ export class Viewer {
   /** Summit geometry and what the terrain hides: once per position or level, not per frame. */
   private rebuildTargets() {
     const hf = this.streamer.heightField;
-    this.select(null);
+    // The selection survives a rebuild: drawLabels re-binds it to the same
+    // summit by id. Only a new standpoint (relocate) clears it.
     if (!this.peaks.length || !hf.levels.length) { this.targets = []; this.visibleCount = 0; return; }
     const eye = this.renderer.eyeAltitude;
     const obs = { lon: this.view.lon, lat: this.view.lat, ground: eye, eye: 0 };
