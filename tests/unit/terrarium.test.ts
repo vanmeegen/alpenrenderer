@@ -65,3 +65,15 @@ describe('decoder probe', () => {
     expect(probeDeviation(shifted)).toBeCloseTo(256, 6);
   });
 });
+
+describe('chooseDecoder', () => {
+  test('the first exact decoder wins; when the fast path is off, the report says by how much', async () => {
+    const { chooseDecoder } = await import('../../src/engine/sources/terrarium');
+    expect(chooseDecoder([{ how: 'bitmap', deviation: 0 }, { how: 'image', deviation: 0 }]))
+      .toEqual({ decoder: 'bitmap', report: 'exakt (bitmap)' });
+    expect(chooseDecoder([{ how: 'bitmap', deviation: 512 }, { how: 'image', deviation: 0 }]))
+      .toEqual({ decoder: 'image', report: 'exakt (image), bitmap ±512 m' });
+    expect(chooseDecoder([{ how: 'bitmap', deviation: null }, { how: 'image', deviation: 3 }]))
+      .toEqual({ decoder: 'image', report: 'kein Dekoder exakt: bitmap fehlgeschlagen, image ±3 m' });
+  });
+});

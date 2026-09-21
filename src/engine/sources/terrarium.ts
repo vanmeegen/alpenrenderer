@@ -98,10 +98,24 @@ async function bytesToHeights(bytes: ArrayBuffer, size: number, how: Decoder): P
   }
 }
 
-/** Tries each decoder on the probe tile; the first exact one is used, else the least wrong. */
+export interface ProbeResult { how: Decoder; deviation: number | null }
+
+/** The first exact decoder wins; the report names what the others made of the probe, so a tablet can be read. */
+export function chooseDecoder(results: ProbeResult[]): { decoder: Decoder; report: string } {
+  const describe = (r: ProbeResult) => `${r.how} ${r.deviation === null ? 'fehlgeschlagen' : `±${Math.round(r.deviation)} m`}`;
+  const exact = results.findIndex((r) => r.deviation === 0);
+  if (exact >= 0) {
+    const passedOver = results.slice(0, exact).map(describe);
+    return { decoder: results[exact].how, report: `exakt (${results[exact].how})${passedOver.length ? `, ${passedOver.join(', ')}` : ''}` };
+  }
+  const usable = results.filter((r) => r.deviation !== null).sort((a, b) => a.deviation! - b.deviation!);
+  return { decoder: usable[0]?.how ?? 'bitmap', report: `kein Dekoder exakt: ${results.map(describe).join(', ')}` };
+}
+
+/** Tries each decoder on the probe tile; see chooseDecoder. */
 export async function probeDecoders(): Promise<{ decoder: Decoder; report: string }> {
   const bytes = Uint8Array.from(atob(DECODER_PROBE.webp), (c) => c.charCodeAt(0));
-  const results: { how: Decoder; deviation: number | null }[] = [];
+  const results: ProbeResult[] = [];
   for (const how of ['bitmap', 'image'] as Decoder[]) {
     try {
       const px = await pixelsOf(bytes, DECODER_PROBE.size, how);
@@ -110,11 +124,7 @@ export async function probeDecoders(): Promise<{ decoder: Decoder; report: strin
       results.push({ how, deviation: null });
     }
   }
-  const exact = results.find((r) => r.deviation === 0);
-  if (exact) return { decoder: exact.how, report: `exakt (${exact.how})` };
-  const usable = results.filter((r) => r.deviation !== null).sort((a, b) => a.deviation! - b.deviation!);
-  const describe = results.map((r) => `${r.how} ${r.deviation === null ? 'fehlgeschlagen' : `±${Math.round(r.deviation)} m`}`).join(', ');
-  return { decoder: usable[0]?.how ?? 'bitmap', report: `kein Dekoder exakt: ${describe}` };
+  return chooseDecoder(results);
 }
 
 export interface TerrariumOptions {
