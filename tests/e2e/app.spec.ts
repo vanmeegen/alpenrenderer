@@ -67,6 +67,14 @@ const hashOf = (page: Page) => page.evaluate(() => location.hash);
 const hashNum = (hash: string, key: string) => Number(new URLSearchParams(hash.slice(1)).get(key));
 
 test.describe('loading', () => {
+  test('a loading overlay shows the tile progress until the terrain is in, then leaves the view alone', async ({ page }) => {
+    await page.goto(url());
+    const overlay = page.getByText(/Gelände lädt/);
+    await expect(overlay).toBeVisible({ timeout: 60_000 });
+    await ready(page);
+    await expect(overlay).toBeHidden({ timeout: 30_000 });
+  });
+
   test('renders the fixture terrain with every pipeline compiled and no errors', async ({ page }) => {
     await page.goto(url());
     const s = await ready(page);

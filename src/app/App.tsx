@@ -9,6 +9,8 @@ import { CompassRose } from './CompassRose';
 
 const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
 const compass = (yaw: number) => COMPASS[Math.round(yaw / 45) % 8];
+/** HUD buttons: a visible pressed state the instant the finger lands, no tap delay, no text selection. */
+const BTN = 'rounded px-1 -mx-1 text-blue-700 underline-offset-2 hover:underline active:bg-blue-200 active:text-blue-950 touch-manipulation select-none';
 const fmtBytes = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
 /** "1,7 m" on the flat, "27 m, Hang" where the slope lifted the eye. */
 const aboveGround = (m: number) => (m < 5 ? `${m.toFixed(1).replace('.', ',')} m` : `${Math.round(m)} m, Hang`);
@@ -221,21 +223,21 @@ export function App() {
             )}
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel('map')}>Karte</button>
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'places' ? 'none' : 'places')}>Standpunkt</button>
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void toggleSensors()}>{sensors ? 'Sensoren aus' : 'Sensoren'}</button>
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void toggleCamera()}>{camera ? 'Kamera aus' : 'Kamera'}</button>
-            {(camera || photo) && <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => void savePhoto()}>Speichern</button>}
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => fileRef.current?.click()}>Foto laden</button>
+            <button className={BTN} onClick={() => setPanel('map')}>Karte</button>
+            <button className={BTN} onClick={() => setPanel(panel === 'places' ? 'none' : 'places')}>Standpunkt</button>
+            <button className={BTN} onClick={() => void toggleSensors()}>{sensors ? 'Sensoren aus' : 'Sensoren'}</button>
+            <button className={BTN} onClick={() => void toggleCamera()}>{camera ? 'Kamera aus' : 'Kamera'}</button>
+            {(camera || photo) && <button className={BTN} onClick={() => void savePhoto()}>Speichern</button>}
+            <button className={BTN} onClick={() => fileRef.current?.click()}>Foto laden</button>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" aria-label="Foto laden"
               onChange={(e) => { void openPhoto(e.target.files?.[0]); e.target.value = ''; }} />
             {corrected && (
-              <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => viewerRef.current?.sensors.resetOffset()}>Korrektur zurücksetzen</button>
+              <button className={BTN} onClick={() => viewerRef.current?.sensors.resetOffset()}>Korrektur zurücksetzen</button>
             )}
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setLabelsOn(!labelsOn)}>Gipfel {labelsOn ? 'aus' : 'an'}</button>
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setOutline(!outline)}>Umrisse {outline ? 'aus' : 'an'}</button>
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'credits' ? 'none' : 'credits')}>Quellen</button>
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => setPanel(panel === 'check' ? 'none' : 'check')}>Check</button>
+            <button className={BTN} onClick={() => setLabelsOn(!labelsOn)}>Gipfel {labelsOn ? 'aus' : 'an'}</button>
+            <button className={BTN} onClick={() => setOutline(!outline)}>Umrisse {outline ? 'aus' : 'an'}</button>
+            <button className={BTN} onClick={() => setPanel(panel === 'credits' ? 'none' : 'credits')}>Quellen</button>
+            <button className={BTN} onClick={() => setPanel(panel === 'check' ? 'none' : 'check')}>Check</button>
           </div>
         </div>
 
@@ -246,8 +248,8 @@ export function App() {
                 <b className="font-semibold">Foto</b>
                 <span className="text-neutral-600">{photo.width}×{photo.height}{photo.taken ? ` · ${photo.taken}` : ''}
                   {` · Objektiv ${photo.lensSource === 'exif' ? 'aus EXIF' : photo.lensSource === 'found' ? 'gefunden' : photo.lensSource === 'manual' ? 'von Hand' : 'geschätzt'}`}</span>
-                <button className="text-blue-700 underline-offset-2 hover:underline" onClick={align}>Ausrichten</button>
-                <button className="text-blue-700 underline-offset-2 hover:underline" onClick={closePhoto}>Foto schließen</button>
+                <button className={BTN} onClick={align}>Ausrichten</button>
+                <button className={BTN} onClick={closePhoto}>Foto schließen</button>
               </div>
             )}
             {alignment && <div className="alp-align mb-1">{alignment}</div>}
@@ -315,6 +317,21 @@ export function App() {
         )}
       </div>
 
+      {(!status || loading) && !error && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="rounded-lg bg-white/85 px-4 py-3 text-[14px] text-neutral-800 shadow backdrop-blur" role="status">
+            <div className="font-semibold">Gelände lädt …</div>
+            {status && (
+              <>
+                <div className="mt-0.5 text-neutral-600">Tiles {status.tilesDone}/{status.tilesTotal} · Level {status.levelsReady}/{status.levels}</div>
+                <div className="mt-1.5 h-1.5 w-56 overflow-hidden rounded bg-neutral-200">
+                  <div className="h-full bg-blue-600" style={{ width: `${status.tilesTotal ? Math.round((100 * status.tilesDone) / status.tilesTotal) : 0}%` }} />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <div className="pointer-events-none absolute right-2"
         style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}>
         <CompassRose yaw={view.yaw} offset={offsetYaw} sensors={sensors} />
@@ -332,7 +349,7 @@ export function App() {
           <div className="mt-0.5 flex flex-wrap gap-x-3">
             {peak.wikipedia && <a className="text-blue-700 hover:underline" href={peak.wikipedia} target="_blank" rel="noopener">Wikipedia</a>}
             {peak.wikidata && <a className="text-blue-700 hover:underline" href={peak.wikidata} target="_blank" rel="noopener">Wikidata</a>}
-            <button className="text-blue-700 underline-offset-2 hover:underline" onClick={() => viewerRef.current?.clearSelection()}>Schließen</button>
+            <button className={BTN} onClick={() => viewerRef.current?.clearSelection()}>Schließen</button>
           </div>
         </div>
       )}

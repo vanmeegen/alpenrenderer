@@ -29,6 +29,8 @@ export interface LabelTarget {
   /** Sort key: how much this summit deserves the screen space. */
   score: number;
   visible: boolean;
+  /** Whether the sightline has been checked yet; until then `visible` is a placeholder false. */
+  decided: boolean;
 }
 
 export interface PlacedLabel {
@@ -85,6 +87,7 @@ export function buildTargets(
       // still earns a label over a nameless 3000er at 6 km.
       score: peakImportance(p) - o.range / 260,
       visible: false,
+      decided: false,
     });
   }
   out.sort((a, b) => b.score - a.score);

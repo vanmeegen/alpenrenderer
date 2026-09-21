@@ -79,6 +79,25 @@ describe('computeVisibility', () => {
     expect(vis).toEqual({ wall: true, behind: false, east: true });
     expect(n).toBe(2);
   });
+
+  test('in slices: each step stops when its budget is spent, and the answer is the same at the end', async () => {
+    // Forty thousand catalogue summits take a second or two of sightlines;
+    // done in one go on the main thread, the app freezes for that long at
+    // every level that arrives. The job decides as many as its budget allows
+    // per frame, most important first, and the rest wait for the next frame.
+    const { VisibilityJob } = await import('../../src/engine/core/horizon');
+    const t = buildTargets(peaks, obs, hf, hf.maxRange);
+    let clock = 0;
+    const job = new VisibilityJob(t, hf, PLAIN + 1.7, undefined, () => clock++);   // every look at the clock is a millisecond
+    expect(job.done).toBe(false);
+    expect(job.step(1)).toBe(false);          // one target fits into one millisecond
+    expect(t.filter((x) => x.decided).length).toBe(1);
+    expect(t.filter((x) => x.visible).length).toBeLessThanOrEqual(1);
+    while (!job.step(1)) { /* frame by frame */ }
+    expect(job.done).toBe(true);
+    expect(job.visible).toBe(2);
+    expect(Object.fromEntries(t.map((x) => [x.peak.id, x.visible]))).toEqual({ wall: true, behind: false, east: true });
+  });
 });
 
 function camera(yaw: number, w = 1000, h = 600) {

@@ -8,7 +8,7 @@
 
 import { AlignResult, DEFAULT_PROFILE, PHOTO_SKYLINE, alignPhoto, extractSkyline, horizonProfile } from '../engine/core/align';
 import { Camera } from '../engine/core/camera';
-import { computeVisibility } from '../engine/core/horizon';
+import { VisibilityJob } from '../engine/core/horizon';
 import { LabelTarget, PlacedLabel, buildTargets, layoutLabels, pickLabel } from '../engine/core/labels';
 import { Peak } from '../engine/core/peaks';
 import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
@@ -35,6 +35,10 @@ const EYE_HEIGHT = 1.7;
  * the eye some 25 m, roughly what a viewing platform would.
  */
 const EYE_CLEAR_RADIUS = 25;
+/** Milliseconds of sightline work per frame; the rest of the frame stays for drawing and touch. */
+const VISIBILITY_BUDGET_MS = 4;
+/** Quiet time after a level arrives before the label targets are rebuilt. */
+const REBUILD_SETTLE_MS = 300;
 /** Summits beyond this are not labelled, km. */
 const LABEL_RANGE_KM = 260;
 const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
@@ -111,6 +115,8 @@ export class Viewer {
   private painter: LabelPainter | null;
   private peaks: Peak[] = [];
   private targets: LabelTarget[] = [];
+  private visibility: VisibilityJob | null = null;
+  private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
   private placed: PlacedLabel[] = [];
   private selected: PlacedLabel | null = null;
   private visibleCount = 0;
@@ -173,6 +179,10 @@ export class Viewer {
       this.controls.update();
       if (this.sensors.tick(performance.now())) this.viewChanged();
       if (this.feed.status.active) this.applyLensFov();
+      if (this.visibility && !this.visibility.done) {
+        this.visibility.step(VISIBILITY_BUDGET_MS);
+        this.visibleCount = this.visibility.visible;
+      }
       this.renderer.render();
       this.drawLabels();
       this.frames++;
@@ -377,7 +387,19 @@ export class Viewer {
     const eye = this.renderer.eyeAltitude;
     const obs = { lon: this.view.lon, lat: this.view.lat, ground: eye, eye: 0 };
     this.targets = buildTargets(this.peaks, obs, hf, Math.min(LABEL_RANGE_KM * 1000, hf.maxRange));
-    this.visibleCount = computeVisibility(this.targets, hf, eye);
+    // Sightlines over frames, not in one go: see VisibilityJob.
+    this.visibility = new VisibilityJob(this.targets, hf, eye);
+    this.visibleCount = 0;
+  }
+
+  /**
+   * Levels arrive in a burst while the terrain loads; rebuilding the targets
+   * for each would restart the sightlines eight times. Once per burst is
+   * enough, a few hundred milliseconds after the last level.
+   */
+  private scheduleRebuildTargets() {
+    if (this.rebuildTimer !== null) clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = setTimeout(() => { this.rebuildTimer = null; this.rebuildTargets(); }, REBUILD_SETTLE_MS);
   }
 
   private drawLabels() {
@@ -420,7 +442,7 @@ export class Viewer {
   private onLevel() {
     this.applyAltitude();
     this.renderer.setHeightField(this.streamer.heightField);
-    this.rebuildTargets();
+    this.scheduleRebuildTargets();
   }
 
   private applyAltitude() {
@@ -470,6 +492,7 @@ export class Viewer {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    if (this.rebuildTimer !== null) clearTimeout(this.rebuildTimer);
     this.feed.stop();
     this.sensors.stop();
     this.controls.dispose();
