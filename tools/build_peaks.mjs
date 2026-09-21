@@ -6,23 +6,36 @@
  * reads. Run by hand (or the "Build peak catalogue" workflow) and committed;
  * the app never talks to Overpass itself.
  *
- *   node tools/build_peaks.mjs [--bbox 5,43,17,49] [--out public/peaks]
+ *   node tools/build_peaks.mjs [--bbox 5,43,17,49] [--out public/peaks] [--refresh] [--cells 10_47,11_47]
+ *
+ * Cells that already exist in --out are kept unless --refresh is given, so a
+ * run that the public servers cut short can simply be repeated. A cell that
+ * fails every attempt is listed as missing in index.json and the run goes on:
+ * a catalogue with a gap is worth more than none, and the next run fills it.
  *
  * Data © OpenStreetMap contributors, ODbL.
  */
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const args = Object.fromEntries(process.argv.slice(2).map((a, i, all) => a.startsWith('--') ? [a.slice(2), all[i + 1]] : []).filter((x) => x.length));
-const [W, S, E, N] = (args.bbox ?? '5,43,17,49').split(',').map(Number);
-const out = args.out ?? 'public/peaks';
+const argv = process.argv.slice(2);
+const flag = (name) => argv.includes(`--${name}`);
+const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : dflt; };
+const [W, S, E, N] = opt('bbox', '5,43,17,49').split(',').map(Number);
+const out = opt('out', 'public/peaks');
+const only = opt('cells', '') ? new Set(opt('cells', '').split(',')) : null;
 mkdirSync(out, { recursive: true });
 
-const ENDPOINTS = [
+// The public servers rate-limit hard and answer 429, 504 or, in front of
+// overpass-api.de, a plain 406 from Apache under load; each attempt goes to
+// the next one in the ring.
+const ENDPOINTS = process.env.OVERPASS_ENDPOINTS?.split(',') ?? [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
 ];
-const UA = 'Mozilla/5.0 (compatible; alpenrenderer-build/0.1; +https://github.com/vanmeegen/alpenrenderer)';
+const UA = 'alpenrenderer-build/0.1 (+https://github.com/vanmeegen/alpenrenderer)';
+const MAX_ATTEMPTS = Number(process.env.OVERPASS_ATTEMPTS ?? 15);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,28 +45,27 @@ const num = (s) => {
   return Number.isFinite(v) ? Math.round(v) : undefined;
 };
 
-/** One cell, with retries across endpoints: the public servers answer 429/504 under load. */
+/** One cell, with retries across endpoints; null when every attempt failed. */
 async function fetchCell(x, y) {
-  const q = `[out:json][timeout:120];node["natural"="peak"]["name"](${y},${x},${y + 1},${x + 1});out body;`;
-  let attempt = 0;
-  for (;;) {
+  const q = `[out:json][timeout:90];node["natural"="peak"]["name"](${y},${x},${y + 1},${x + 1});out body;`;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const ep = ENDPOINTS[attempt % ENDPOINTS.length];
     try {
       const res = await fetch(ep, {
-        method: 'POST', headers: { 'user-agent': UA, 'content-type': 'application/x-www-form-urlencoded' },
+        method: 'POST',
+        headers: { 'user-agent': UA, accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(q),
       });
       const text = await res.text();
       if (res.ok && text.trimStart().startsWith('{')) return JSON.parse(text).elements;
-      throw new Error(`HTTP ${res.status}: ${text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 160)}`);
+      throw new Error(`HTTP ${res.status}: ${text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 120)}`);
     } catch (e) {
-      attempt++;
-      if (attempt > 8) throw e;
-      const wait = Math.min(120_000, 5000 * 2 ** attempt);
-      console.error(`  ${x}_${y}: ${e.message} — retry ${attempt} in ${wait / 1000}s`);
+      const wait = Math.min(90_000, 5000 * 1.6 ** attempt);
+      console.error(`  ${x}_${y} via ${new URL(ep).host}: ${e.message} — retry ${attempt + 1}/${MAX_ATTEMPTS} in ${Math.round(wait / 1000)}s`);
       await sleep(wait);
     }
   }
+  return null;
 }
 
 function toRecord(e) {
@@ -70,25 +82,41 @@ function toRecord(e) {
   return r;
 }
 
-const index = { generated: new Date().toISOString(), source: 'OpenStreetMap via Overpass, natural=peak with name', license: 'ODbL 1.0', bbox: [W, S, E, N], cells: {} };
+const index = {
+  generated: new Date().toISOString(),
+  source: 'OpenStreetMap via Overpass, natural=peak with name',
+  license: 'ODbL 1.0',
+  bbox: [W, S, E, N],
+  cells: {},
+  missing: [],
+};
 let total = 0;
 for (let y = S; y < N; y++) {
   for (let x = W; x < E; x++) {
-    const file = join(out, `${x}_${y}.json`);
-    if (args.resume && existsSync(file)) {
+    const key = `${x}_${y}`;
+    if (only && !only.has(key)) continue;
+    const file = join(out, `${key}.json`);
+    if (!flag('refresh') && existsSync(file)) {
       const n = JSON.parse(readFileSync(file, 'utf8')).length;
-      index.cells[`${x}_${y}`] = n; total += n;
+      index.cells[key] = n; total += n;
+      console.error(`${key}: ${n} (kept)`);
       continue;
     }
     const elements = await fetchCell(x, y);
+    if (!elements) {
+      index.missing.push(key);
+      console.error(`${key}: MISSING after ${MAX_ATTEMPTS} attempts`);
+      continue;
+    }
     const records = elements.map(toRecord).filter(Boolean).sort((a, b) => (b.e ?? 0) - (a.e ?? 0));
     if (records.length) writeFileSync(file, JSON.stringify(records));
-    index.cells[`${x}_${y}`] = records.length;
+    index.cells[key] = records.length;
     total += records.length;
-    console.error(`${x}_${y}: ${records.length}`);
+    console.error(`${key}: ${records.length}`);
     await sleep(1500);
   }
 }
 index.total = total;
 writeFileSync(join(out, 'index.json'), JSON.stringify(index, null, 1));
-console.error(`${total} summits in ${Object.values(index.cells).filter(Boolean).length} cells -> ${out}`);
+console.error(`${total} summits in ${Object.values(index.cells).filter(Boolean).length} cells -> ${out}`
+  + (index.missing.length ? `; MISSING ${index.missing.length}: ${index.missing.join(' ')} (run again to fill)` : ''));
