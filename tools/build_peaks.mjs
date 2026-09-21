@@ -67,9 +67,13 @@ async function fetchCell(x, y) {
       });
       const text = await res.text();
       if (res.ok && text.trimStart().startsWith('{')) return JSON.parse(text).elements;
-      throw new Error(`HTTP ${res.status}: ${text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 120)}`);
+      const err = new Error(`HTTP ${res.status}: ${text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 120)}`);
+      err.status = res.status;
+      throw err;
     } catch (e) {
-      const wait = Math.min(90_000, 5000 * 1.6 ** attempt);
+      // 429 is the per-IP quota: nothing to do but leave it alone for a while.
+      const wait = e.status === 429 ? Math.max(60_000, Math.min(90_000, 5000 * 1.6 ** attempt))
+        : Math.min(90_000, 5000 * 1.6 ** attempt);
       console.error(`  ${x}_${y} via ${new URL(ep).host}: ${e.message} — retry ${attempt + 1}/${MAX_ATTEMPTS} in ${Math.round(wait / 1000)}s`);
       await sleep(wait);
     }
