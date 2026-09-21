@@ -119,6 +119,41 @@ export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, 
 }
 
 /**
+ * Where the view ray through screen pixel (x, y) meets the terrain, for a
+ * level camera at `eye` metres looking along `yawDeg`: the point's position,
+ * height, ground range and outward unit normal (east, north, up) from the
+ * formula's own gradient. Curvature is ignored: under 2 m at the 5 km the
+ * shading test looks at.
+ */
+export function terrainHit(yawDeg: number, x: number, y: number, eye: number, fov: number, width: number, height: number) {
+  const tanV = Math.tan((fov * Math.PI) / 360);
+  const tanH = tanV * (width / height);
+  const ndcX = ((x + 0.5) / width) * 2 - 1;
+  const ndcY = 1 - ((y + 0.5) / height) * 2;
+  const b = Math.atan(ndcX * tanH);
+  const bearing = yawDeg + (b * 180) / Math.PI;
+  const rise = (ndcY * tanV) / Math.sqrt(1 + (ndcX * tanH) ** 2);   // height gained per metre of ground range
+  let prev = 0;
+  for (let r = 1; r < 50000; r += 1) {
+    const ground = heightAlong(bearing, r);
+    const ray = eye + r * rise;
+    if (ray <= ground) {
+      const rr = prev + (r - prev) * 0.5;
+      const br = (bearing * Math.PI) / 180;
+      const lon = STAND.lon + (rr * Math.sin(br)) / M_PER_DEG_LON;
+      const lat = STAND.lat + (rr * Math.cos(br)) / M_PER_DEG_LAT;
+      const d = 2;   // metres, for the gradient
+      const dhE = (heightAt(lon + d / M_PER_DEG_LON, lat) - heightAt(lon - d / M_PER_DEG_LON, lat)) / (2 * d);
+      const dhN = (heightAt(lon, lat + d / M_PER_DEG_LAT) - heightAt(lon, lat - d / M_PER_DEG_LAT)) / (2 * d);
+      const len = Math.hypot(dhE, dhN, 1);
+      return { lon, lat, h: heightAt(lon, lat), range: rr, normal: [-dhE / len, -dhN / len, 1 / len] as [number, number, number] };
+    }
+    prev = r;
+  }
+  return null;
+}
+
+/**
  * The fake camera frame: luma values (0..255, full range) of the light upper
  * and dark lower half. Grey only, so what the renderer samples does not
  * depend on the browser's YUV matrix.

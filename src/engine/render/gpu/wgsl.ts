@@ -258,16 +258,22 @@ var heights        : texture_2d<f32>;
 
 ${CLIPMAP_SAMPLER}
 
-/** d(height)/d(east), d(height)/d(north) at one level, metres per metre. */
+/**
+ * d(height)/d(east), d(height)/d(north) at one level, metres per metre: the
+ * central difference on the DEM grid at the cell this point falls in, from
+ * exact texels, so the normal is one per cell (see glsl.ts).
+ */
 fn gradient(lv : i32, dLon : f32, dIso : f32) -> vec2<f32> {
   let A = uniforms.uLvlA[lv];
-  let dp = 1.0 / A.z;                                    // one pixel, radians
+  let B = uniforms.uLvlB[lv];
   let mpp = uniforms.uRadius * uniforms.uCosLat0 / A.z;  // one pixel, metres
-  let hE = sampleLevel(lv, dLon + dp, dIso);
-  let hW = sampleLevel(lv, dLon - dp, dIso);
-  let hN = sampleLevel(lv, dLon, dIso + dp);
-  let hS = sampleLevel(lv, dLon, dIso - dp);
-  return vec2<f32>((hE - hW) / (2.0 * mpp), (hN - hS) / (2.0 * mpp));
+  let x = floor(A.x + dLon * A.z - 0.5);
+  let y = floor(A.y - dIso * A.z - 0.5);
+  let hE = texel(lv, x + 1.0, y);
+  let hW = texel(lv, x - 1.0, y);
+  let hN = texel(lv, x, y - 1.0);                        // rows run south
+  let hS = texel(lv, x, y + 1.0);
+  return vec2<f32>((hE - hW) * B.x / (2.0 * mpp), (hN - hS) * B.x / (2.0 * mpp));
 }
 
 @fragment
@@ -301,9 +307,10 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
             * (1.0 - smoothstep(0.45, 0.7, slope));
   col = mix(col, snow, snowy);
 
-  // Sun plus a soft sky term that keeps north faces readable.
+  // Plain Lambert with a floor: shadow sides keep their shape, lit faces
+  // stand out. A sky term that lifted north faces flattened the relief.
   let diff = max(dot(n, uniforms.uSun), 0.0);
-  let shade = 0.26 + 0.12 * n.z + 0.66 * diff;
+  let shade = 0.28 + 0.72 * diff;
   col = col * shade;
 
   // Aerial perspective: distant ridges recede into the horizon colour but

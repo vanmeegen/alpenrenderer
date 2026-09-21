@@ -3,7 +3,8 @@
  * here is derived from tests/e2e/fixtures/terrain.ts, not read off a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { FLANK, PLAIN_M, STAND, eyeAbove, skylineRow, summitScreenY } from './fixtures/terrain';
+import { FLANK, PLAIN_M, STAND, eyeAbove, skylineRow, summitScreenY, terrainHit } from './fixtures/terrain';
+import { luminance as lumOf, terrainColor } from '../../src/engine/render/shading';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
 const R_EFF_M = 6371008.8 / (1 - 0.13);
@@ -306,6 +307,29 @@ test.describe('panels', () => {
 });
 
 test.describe('appearance', () => {
+  test('the two flanks of the Testhorn are lit as the shading formula says: Lambert from the south-south-east over rock', async ({ page }) => {
+    // The cone rises 1 m per metre all round, so the flank left of the summit
+    // faces the sun and the flank right of it faces away. Their brightness
+    // ratio is set by the light formula alone; fog and colour are the same
+    // at the same range and altitude.
+    await page.goto(url());
+    const s = await ready(page);
+    const ys = summitScreenY(s.eyeAltitude, 60) * H;
+    const probe = async (x: number, y: number) => {
+      const hit = terrainHit(90, x, y, s.eyeAltitude, 60, W, H)!;
+      expect(hit.range).toBeGreaterThan(2500);            // on the cone, not the plain
+      const expected = lumOf(terrainColor(hit.h, hit.normal, hit.range));
+      const measured = (await luminance(page, x - 6, y - 6, 12, 12)) / 255;
+      return { expected, measured };
+    };
+    const left = await probe(W / 2 - 110, ys + 70);
+    const right = await probe(W / 2 + 110, ys + 70);
+    expect(left.expected / right.expected).toBeGreaterThan(1.3);   // the formula itself separates the flanks
+    expect(Math.abs(left.measured - left.expected)).toBeLessThan(0.04);
+    expect(Math.abs(right.measured - right.expected)).toBeLessThan(0.04);
+    expect(Math.abs(left.measured / right.measured - left.expected / right.expected)).toBeLessThan(0.05);
+  });
+
   test('the Testhorn view matches the golden within tolerance', async ({ page }) => {
     // A page screenshot of a software-rendered WebGL canvas can take well
     // over ten seconds on a slow CI runner, and the matcher needs two of

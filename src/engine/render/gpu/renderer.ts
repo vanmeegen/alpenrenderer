@@ -55,6 +55,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { Camera } from '../../core/camera';
 import { DEG, MERC_PX, REFRACTION_K, effectiveRadiusAt, localRadius } from '../../core/geodesy';
 import { HeightField, Observer } from '../../core/heightfield';
+import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, SUN } from '../shading';
 import {
   COMPOSITE_FRAGMENT_GL, COMPOSITE_VERTEX_GL, TERRAIN_FRAGMENT_GL,
   TERRAIN_SHADE_FRAGMENT_GL, TERRAIN_VERTEX_GL,
@@ -147,14 +148,14 @@ export class GpuRenderer {
   /** Strength of the ridge lines drawn over the shaded view, 0..1. */
   outline = 0.35;
   /** Where the sun is, degrees: bearing clockwise from north, elevation up. */
-  sunAzimuth = 160;
-  sunElevation = 45;
+  sunAzimuth = SUN.azimuth;
+  sunElevation = SUN.elevation;
   /** Metres; snow above, rock and meadow below, blended over ~350 m. */
-  snowLine = 2900;
+  snowLine = SNOW_LINE;
   /** Metres to 1/e of terrain colour in the aerial perspective. */
-  fogRange = 55000;
+  fogRange = FOG_RANGE;
   skyTop: [number, number, number] = [0.36, 0.56, 0.86];
-  horizonColor: [number, number, number] = [0.80, 0.87, 0.95];
+  horizonColor: [number, number, number] = [...HORIZON_COLOR];
 
   /** How far the camera image is washed towards white, 0..1. */
   whiten = 0.62;
