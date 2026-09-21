@@ -430,8 +430,47 @@ Sichtfeld als Suchparameter in `matchSkyline`, `alignPhoto`),
 `tests/e2e/photo.spec.ts` (Fixture-Foto aus der Geländeformel mit eXIf:
 Standpunkt und Objektiv aus EXIF, Ausrichtung findet 94°/2° aus 90°/0°,
 Testhorn-Label auf der Foto-Spalte; Nebelfoto ohne EXIF wird abgelehnt).
-Offen: Stresstest mit echten Fotos (Arbeitspaket 7), PNG-Export mit Labels
-gibt es über „Speichern“.
+PNG-Export mit Labels gibt es über „Speichern“.
+
+**Stand Arbeitspaket 7, erster Durchgang (2026-09-21):** zwei echte Fotos
+(OnePlus Open), headless mit Chrome 153 gegen Mapterhorn-Tiles und den
+OSM-Katalog, beide ohne brauchbares GPS, Standpunkt daher von Hand gesetzt.
+Ferchensee: Schwenk-Panorama 4384×2064, keine Brennweite im EXIF.
+Hoher Kasten: Hochformat 1800×4000, 47 mm KB, Grand-Tour-Rahmen mit Person
+davor. Befunde:
+
+1. *EXIF ohne Fix.* Das Telefon schreibt einen vollständigen GPS-Block mit
+   lauter 0/0-Rationalen; der Leser machte daraus Breite 0, Länge 0, die
+   App hätte auf Null Island verschoben. Behoben, Unit-Test
+   `a GPS block of 0/0 rationals gives no position`.
+2. *Skyline-Extraktor ohne Himmelsmodell.* Der texturbasierte Kürzeste-Pfad
+   nimmt am Ferchensee rechts ein Cirrus-Band und die nahe Baumkante als
+   Horizont (dort die höchste Spaltenstärke 0,4 bis 0,5), den echten Grat
+   der Wettersteinspitze nicht. Ergebnis „Ausgerichtet: Fit 62 %,
+   Konfidenz 28 %“ mit 14° falschem Kurs (242° statt etwa 256°), von zwei
+   Startkursen (235°, 255°) aus identisch. Von Hand auf 256°/+4° gelegt,
+   liegt der Grat Wettersteinspitze–Waxensteine auf der Felskante im Foto:
+   Gelände und Katalog stimmen, der Extraktor nicht.
+3. *Panorama.* Zylindrische Projektion, Bildverhältnis 2,1:1; das
+   Lochkamera-Modell passt nur in der Bildmitte. Die Objektivsuche fand 47°
+   vertikal, was für die Mitte plausibel ist.
+4. *Hoher Kasten.* Die Ausrichtung lehnt korrekt ab („16 % Konfidenz“):
+   Rahmen und Person verdecken die Horizontlinie. Die Kamera blickt etwa 8°
+   nach unten, mehr als die Neigungssuche (±7°) erlaubt. Von Hand auf
+   245°/−8° liegt der Grat auf der Kette Altmann–Säntis.
+5. *Umrisse im Nahfeld.* Die Second-Difference-Kanten zeichnen auf Wiese
+   und Kies Linien aus DEM-Rippeln von ein bis zwei Metern; als Grate über
+   einem Foto sind sie irreführend.
+6. *Hochformat.* HUD und Foto-Panel decken das obere Drittel ab, genau wo
+   Skyline und Labels sitzen.
+
+Daraus die nächsten Schritte, jeder test-first: (a) Himmelsmodell im
+Extraktor (Blau und Wolkenweiß von oben her als Himmel, Baumkanten und
+Nahfeld abgewertet) mit einer Fixture, die Wolkenband und Baumkante enthält;
+(b) Umrisse unter etwa 300 m Entfernung oder auf flachem Gelände ausblenden;
+(c) Neigungssuche auf ±12°; (d) Panels im Hochformat unten oder
+einklappbar. Die Regressionsmenge aus zehn Fotos mit bekanntem Standpunkt
+bleibt offen; beide Bilder hier haben keinen.
 
 Arbeitspakete:
 
