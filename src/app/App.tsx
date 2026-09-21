@@ -300,7 +300,7 @@ export function App() {
 
         {panel === 'check' && d && (
           <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 font-mono text-[11px] text-neutral-800 shadow backdrop-blur">
-            <div>{d.engine} · {d.adapter}</div>
+            <div>{d.engine} · {d.adapter} · Build {__BUILD__}</div>
             <div>Qualität {status?.quality} · Mesh {d.vertices.toLocaleString('de')} Vertices · Sektoren {d.sectorsDrawn}/32 · {d.size}</div>
             <div>Atlas {d.atlas} · Level {d.levels} · Frame {d.frameMs.toFixed(1)} ms · Frames {d.framesDrawn}</div>
             <div>Pipelines: terrain {d.terrainReady ? 'ok' : '…'} · shade {d.shadeReady ? 'ok' : '…'} · composite {d.compositeReady ? 'ok' : '…'}</div>

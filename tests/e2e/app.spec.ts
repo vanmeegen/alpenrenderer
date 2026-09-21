@@ -288,6 +288,8 @@ test.describe('panels', () => {
     await page.getByRole('button', { name: 'Check' }).click();
     await expect(page.getByText('Pipelines: terrain ok · shade ok · composite ok')).toBeVisible();
     await expect(page.getByText(/Fehler: 0 Frames/)).toBeVisible();
+    // Which build is this? The commit, so a report from a phone can be matched to the code.
+    await expect(page.getByText(/Build [0-9a-f]{7,}( |$)/)).toBeVisible();
   });
 });
 
