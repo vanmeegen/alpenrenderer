@@ -117,6 +117,10 @@ export interface RendererDiagnostics {
   sectorsDrawn: number;
   frameMs: number;
   size: string;
+  /** The device's WebGL limits that this renderer leans on, for reports from phones and tablets. */
+  limits: string;
+  /** gl.getError() after the last atlas upload; 0 is NO_ERROR. */
+  glError: number;
 }
 
 export interface CaptureResult {
@@ -170,7 +174,10 @@ export class GpuRenderer {
     terrainReady: false, shadeReady: false, compositeReady: false, framesDrawn: 0,
     deviceLost: 0, frameErrors: 0, lastError: '',
     levels: 0, atlas: '', vertices: 0, sectorsDrawn: 0, frameMs: 0, size: '',
+    limits: '', glError: 0,
   };
+  /** The raw WebGL2 context, for limits and error state; null on WebGPU. */
+  private gl2: WebGL2RenderingContext | null = null;
 
   private engine!: AbstractEngine;
   private scene!: Scene;
@@ -253,6 +260,13 @@ export class GpuRenderer {
       d.webgpu = false;
       d.engine = `Babylon.js WebGL${gl.webGLVersion}`;
       d.adapter = gl.getGlInfo().renderer || 'unreported';
+      // What this renderer asks of the device: a 640×5120 atlas, texture
+      // fetches in the vertex stage, two vec4[8] uniform arrays, highp there.
+      const g = (gl as unknown as { _gl: WebGL2RenderingContext })._gl;
+      this.gl2 = g;
+      const highp = g.getShaderPrecisionFormat(g.VERTEX_SHADER, g.HIGH_FLOAT);
+      d.limits = `Textur ${g.getParameter(g.MAX_TEXTURE_SIZE)} · Vertex-Texturen ${g.getParameter(g.MAX_VERTEX_TEXTURE_IMAGE_UNITS)}`
+        + ` · Vertex-Uniforms ${g.getParameter(g.MAX_VERTEX_UNIFORM_VECTORS)} · highp Vertex ${highp ? highp.precision : 0} Bit`;
       // WebGL clips depth to [-1,1]; the GLSL remap ends on the same interval.
       this.camera.depthZeroToOne = false;
     } else {
@@ -551,6 +565,7 @@ export class GpuRenderer {
     } else if (changed) {
       this.atlas.update(this.atlasData!);
     }
+    if (this.gl2) this.diagnostics.glError = this.gl2.getError();
 
     this.diagnostics.levels = levels.length;
     this.diagnostics.atlas = `${w}×${h * levels.length} rgba8`;

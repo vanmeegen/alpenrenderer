@@ -305,6 +305,7 @@ export function App() {
             <div>Atlas {d.atlas} · Level {d.levels} · Frame {d.frameMs.toFixed(1)} ms · Frames {d.framesDrawn}</div>
             <div>Pipelines: terrain {d.terrainReady ? 'ok' : '…'} · shade {d.shadeReady ? 'ok' : '…'} · composite {d.compositeReady ? 'ok' : '…'}</div>
             <div>Fehler: {d.frameErrors} Frames · Device lost {d.deviceLost}</div>
+            {d.limits && <div>Limits: {d.limits} · GL-Fehler {d.glError}</div>}
             {status && <div>Boden {status.ground.toFixed(0)} m · Auge {status.eyeAltitude.toFixed(1)} m</div>}
             {d.shaderErrors.length > 0 && (
               <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-red-700">{d.shaderErrors.join('\n')}</pre>

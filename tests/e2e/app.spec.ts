@@ -290,6 +290,8 @@ test.describe('panels', () => {
     await expect(page.getByText(/Fehler: 0 Frames/)).toBeVisible();
     // Which build is this? The commit, so a report from a phone can be matched to the code.
     await expect(page.getByText(/Build [0-9a-f]{7,}( |$)/)).toBeVisible();
+    // The device's limits and the GL error state after the atlas upload, for reports from tablets.
+    await expect(page.getByText(/Limits: Textur \d{4,} · Vertex-Texturen \d+ · Vertex-Uniforms \d+ · highp Vertex \d+ Bit · GL-Fehler 0( |$)/)).toBeVisible();
   });
 });
 
