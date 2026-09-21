@@ -308,10 +308,10 @@ test.describe('panels', () => {
 
 test.describe('appearance', () => {
   test('the two flanks of the Testhorn are lit as the shading formula says: Lambert from the south-south-east over rock', async ({ page }) => {
-    // The cone rises 1 m per metre all round, so the flank left of the summit
-    // faces the sun and the flank right of it faces away. Their brightness
-    // ratio is set by the light formula alone; fog and colour are the same
-    // at the same range and altitude.
+    // The cone rises 1 m per metre all round. Seen from the west, the flank
+    // right of the summit faces south-west, towards the sun, the one left of
+    // it north-west, away from it. Their brightness ratio is set by the light
+    // formula alone; fog and colour are the same at the same range and altitude.
     await page.goto(url());
     const s = await ready(page);
     const ys = summitScreenY(s.eyeAltitude, 60) * H;
@@ -322,12 +322,16 @@ test.describe('appearance', () => {
       const measured = (await luminance(page, x - 6, y - 6, 12, 12)) / 255;
       return { expected, measured };
     };
-    const left = await probe(W / 2 - 110, ys + 70);
-    const right = await probe(W / 2 + 110, ys + 70);
-    expect(left.expected / right.expected).toBeGreaterThan(1.3);   // the formula itself separates the flanks
-    expect(Math.abs(left.measured - left.expected)).toBeLessThan(0.04);
-    expect(Math.abs(right.measured - right.expected)).toBeLessThan(0.04);
-    expect(Math.abs(left.measured / right.measured - left.expected / right.expected)).toBeLessThan(0.05);
+    // 200 px below the summit the rays land on the near face, well inside the silhouette.
+    const yp = Math.round(ys + 200);
+    const left = await probe(W / 2 - 100, yp);
+    const right = await probe(W / 2 + 100, yp);
+    expect(right.expected / left.expected).toBeGreaterThan(1.3);   // the formula itself separates the flanks
+    // The old light (a sky term over a 0.66 Lambert) read 0.028 too bright on
+    // the shadow flank and 0.020 on the lit one; the tolerance sits below that.
+    expect(Math.abs(left.measured - left.expected)).toBeLessThan(0.015);
+    expect(Math.abs(right.measured - right.expected)).toBeLessThan(0.015);
+    expect(Math.abs(left.measured / right.measured - left.expected / right.expected)).toBeLessThan(0.03);
   });
 
   test('the Testhorn view matches the golden within tolerance', async ({ page }) => {
