@@ -229,7 +229,11 @@ export class Viewer {
     const w = Math.max(1, Math.round(bitmap.width * scale)), h = Math.max(1, Math.round(bitmap.height * scale));
     const cv = document.createElement('canvas');
     cv.width = w; cv.height = h;
-    const ctx = cv.getContext('2d')!;
+    // Read back from a CPU-backed canvas: the pixels are for the skyline
+    // extraction and the still texture, and a GPU-backed canvas turns the
+    // readback into a stall of seconds on a software renderer (the same
+    // lesson as the terrarium decoder).
+    const ctx = cv.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(bitmap, 0, 0, w, h);
     bitmap.close();
     const pixels = ctx.getImageData(0, 0, w, h).data;

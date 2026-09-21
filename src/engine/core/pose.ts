@@ -355,7 +355,13 @@ export class PoseTracker {
    * pitch and roll come from gravity, which is quiet enough to filter directly.
    */
   sample(now = performance.now()): Orientation {
-    const dt = this.lastSample ? Math.min(0.25, (now - this.lastSample) / 1000) : 0;
+    // The real time since the last frame drives the filters and the compass
+    // pull, so a slow renderer settles on the compass in the same seconds as
+    // a fast one. Only the gyro is capped: a rate is a short extrapolation,
+    // and integrating it across a long gap (a hidden tab, a stalled frame)
+    // would turn the view by however much the gyro happened to say last.
+    const dt = this.lastSample ? (now - this.lastSample) / 1000 : 0;
+    const gyroDt = Math.min(0.25, dt);
     this.lastSample = now;
     this.status.gpsAge = this.lastFix ? (now - this.lastFix) / 1000 : null;
 
@@ -386,7 +392,7 @@ export class PoseTracker {
     let turned = 0;
     if (this.gyro) {
       const [ux, uy, uz] = t.upRow;
-      turned = -(this.gyro.x * ux + this.gyro.y * uy + this.gyro.z * uz) * dt;
+      turned = -(this.gyro.x * ux + this.gyro.y * uy + this.gyro.z * uz) * gyroDt;
       o.yaw = wrap(o.yaw + turned);
     }
 

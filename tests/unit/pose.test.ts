@@ -174,6 +174,23 @@ describe('PoseTracker', () => {
     expect(Math.abs(angleDelta(p.orientation.yaw, 270))).toBeLessThan(0.5);
   });
 
+  test('the compass pull is a matter of wall time, not frame count: 2 fps settles like 60 fps', () => {
+    // A slow renderer (software WebGL) draws two frames a second. After a
+    // 180° turn the heading must still be on the compass five seconds later,
+    // exactly as it would be at 60 fps.
+    const settle = (fps: number) => {
+      const p = new PoseTracker({});
+      p.applyDeclination = false;
+      for (let i = 0; i < 2 * HZ; i++) { p.feedOrientation(270, 90, 0, 0); p.sample(i * DT); }
+      expect(Math.abs(angleDelta(p.orientation.yaw, 90))).toBeLessThan(0.5);
+      const t0 = 2 * HZ * DT, frame = 1000 / fps;
+      for (let i = 1; i <= 5 * fps; i++) { p.feedOrientation(90, 90, 0, 0); p.sample(t0 + i * frame); }
+      return Math.abs(angleDelta(p.orientation.yaw, 270));
+    };
+    expect(settle(60)).toBeLessThan(0.5);
+    expect(settle(2)).toBeLessThan(0.5);
+  });
+
   test('one update per frame, not one per sensor event', () => {
     let calls = 0;
     const p = new PoseTracker({ onOrientation: () => { calls++; } });
