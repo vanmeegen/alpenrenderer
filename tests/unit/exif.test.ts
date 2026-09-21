@@ -36,7 +36,7 @@ function ifd(entries: Entry[], offset: number, extra: { tag: number; ifdOffset: 
 }
 
 /** TIFF with IFD0 (orientation, pointers), Exif IFD (lens, time, size) and GPS IFD. */
-function tiff(opt: { lon?: number; lat?: number; alt?: number; focal?: number; focal35?: number; taken?: string; orientation?: number; w?: number; h?: number }): Buffer {
+function tiff(opt: { lon?: number; lat?: number; alt?: number; focal?: number; focal35?: number; taken?: string; orientation?: number; w?: number; h?: number; gpsNoFix?: boolean }): Buffer {
   const header = Buffer.from([0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00]);   // II, 42, IFD0 at 8
   const dms = (deg: number): [number, number][] => {
     const a = Math.abs(deg);
@@ -53,6 +53,12 @@ function tiff(opt: { lon?: number; lat?: number; alt?: number; focal?: number; f
   if (opt.lat !== undefined && opt.lon !== undefined) {
     gpsEntries.push({ tag: 1, type: 2, value: opt.lat >= 0 ? 'N' : 'S' }, { tag: 2, type: 5, value: dms(opt.lat) });
     gpsEntries.push({ tag: 3, type: 2, value: opt.lon >= 0 ? 'E' : 'W' }, { tag: 4, type: 5, value: dms(opt.lon) });
+  }
+  if (opt.gpsNoFix) {
+    // What a phone without a fix writes (OnePlus Open, 2026): a full GPS
+    // block whose rationals are all 0/0.
+    const zero: [number, number][] = [[0, 0], [0, 0], [0, 0]];
+    gpsEntries.push({ tag: 1, type: 2, value: '\0' }, { tag: 2, type: 5, value: zero }, { tag: 3, type: 2, value: '\0' }, { tag: 4, type: 5, value: zero }, { tag: 6, type: 5, value: [[0, 0]] });
   }
   if (opt.alt !== undefined) gpsEntries.push({ tag: 5, type: 1, value: [opt.alt < 0 ? 1 : 0] }, { tag: 6, type: 5, value: [[Math.round(Math.abs(opt.alt) * 10), 10]] });
   // Lay out: IFD0 at 8, then Exif IFD, then GPS IFD.
@@ -113,6 +119,14 @@ describe('readExif', () => {
     const x = readExif(pngWith(tiff(GORNERGRAT)));
     expect(x.lat).toBeCloseTo(45.98333, 4);
     expect(x.focal35).toBe(26);
+  });
+
+  test('a GPS block of 0/0 rationals (a phone that had no fix) gives no position, not Null Island', () => {
+    const x = readExif(jpegWith(tiff({ gpsNoFix: true, focal: 6.06, focal35: 47 })));
+    expect(x.lat).toBeUndefined();
+    expect(x.lon).toBeUndefined();
+    expect(x.alt).toBeUndefined();
+    expect(x.focal35).toBe(47);
   });
 
   test('a photo without EXIF, or a file that is not an image, yields nothing and no error', () => {

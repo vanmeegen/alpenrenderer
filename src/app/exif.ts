@@ -92,7 +92,7 @@ export function readExif(input: Uint8Array | ArrayBuffer): ExifInfo {
           const r = Array.from({ length: count }, (_, k) => {
             const num = type === 5 ? u32(at + 8 * k) : dv.getInt32(at + 8 * k, le);
             const den = type === 5 ? u32(at + 8 * k + 4) : dv.getInt32(at + 8 * k + 4, le);
-            return den ? num / den : 0;
+            return den ? num / den : NaN;     // 0/0 is what a phone without a GPS fix writes
           });
           m.set(tag, count === 1 ? r[0] : r);
         } else if (type === 1) {
@@ -103,7 +103,7 @@ export function readExif(input: Uint8Array | ArrayBuffer): ExifInfo {
     };
 
     const ifd0 = readIfd(u32(4));
-    const num = (v: Value | undefined) => (typeof v === 'number' ? v : undefined);
+    const num = (v: Value | undefined) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
     const orientation = num(ifd0.get(TAG.orientation));
     if (orientation) out.orientation = orientation;
 
@@ -124,7 +124,11 @@ export function readExif(input: Uint8Array | ArrayBuffer): ExifInfo {
     const gpsOff = num(ifd0.get(TAG.gpsIfd));
     if (gpsOff) {
       const g = readIfd(gpsOff);
-      const dms = (v: Value | undefined) => (Array.isArray(v) && v.length === 3 ? v[0] + v[1] / 60 + v[2] / 3600 : undefined);
+      const dms = (v: Value | undefined) => {
+        if (!Array.isArray(v) || v.length !== 3) return undefined;
+        const deg = (v[0] as number) + (v[1] as number) / 60 + (v[2] as number) / 3600;
+        return Number.isFinite(deg) ? deg : undefined;
+      };
       const lat = dms(g.get(TAG.lat)), lon = dms(g.get(TAG.lon));
       if (lat !== undefined && lon !== undefined) {
         out.lat = g.get(TAG.latRef) === 'S' ? -lat : lat;
