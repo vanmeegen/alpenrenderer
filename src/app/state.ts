@@ -96,3 +96,34 @@ export function readOptions(search = location.search): AppOptions {
     peaks: (peaks.endsWith('/') ? peaks : peaks + '/') + '{x}_{y}.json',
   };
 }
+
+/**
+ * The eye stands 1.7 m above the highest ground within this many metres of
+ * the standpoint. A DEM post every few metres rounds a slope into steps, so
+ * an eye over its own post sits inside the hill next to it; a wider area
+ * lifts it clear of the nearby ridge as well. Chosen per device on a slider.
+ */
+export const EYE_RADIUS = { min: 10, max: 2000, initial: 1000 };
+const EYE_RADIUS_KEY = 'alp.eyeRadius';
+
+const defaultStorage = (): Storage | undefined => {
+  try { return typeof localStorage !== 'undefined' ? localStorage : undefined; } catch { return undefined; }
+};
+
+export function clampEyeRadius(m: number): number {
+  if (!Number.isFinite(m)) return EYE_RADIUS.initial;
+  return Math.max(EYE_RADIUS.min, Math.min(EYE_RADIUS.max, Math.round(m)));
+}
+
+export function readEyeRadius(storage = defaultStorage()): number {
+  try {
+    const v = storage?.getItem(EYE_RADIUS_KEY);
+    return v == null ? EYE_RADIUS.initial : clampEyeRadius(parseFloat(v));
+  } catch {
+    return EYE_RADIUS.initial;
+  }
+}
+
+export function writeEyeRadius(m: number, storage = defaultStorage()) {
+  try { storage?.setItem(EYE_RADIUS_KEY, String(clampEyeRadius(m))); } catch { /* private mode: not remembered */ }
+}

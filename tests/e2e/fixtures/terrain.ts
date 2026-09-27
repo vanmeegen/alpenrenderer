@@ -42,26 +42,27 @@ export const PEAKS = [
 ];
 export const RIDGE_RANGE = 20000;
 
-/** The eye stands this far above the highest ground within EYE_CLEAR_RADIUS metres. */
+/** The eye stands this far above the highest ground within the eye radius (metres, default of the slider). */
 export const EYE_HEIGHT = 1.7;
-export const EYE_CLEAR_RADIUS = 25;
+export const EYE_CLEAR_RADIUS = 1000;
 
 /** A standpoint on the Testhorn's west flank, 1500 m from the summit: the cone rises 1 m per metre there. */
 export const FLANK = { lon: TESTHORN.lon - 1500 / M_PER_DEG_LON, lat: TESTHORN.lat };
 
 /**
  * How far above the ground under the standpoint the eye stands: EYE_HEIGHT
- * over the highest ground within EYE_CLEAR_RADIUS, so that on a slope the
- * eye is not inside the hill next to it. 1.7 m on flat ground.
+ * over the highest ground within `radius` metres, so that on a slope the
+ * eye is not inside the hill next to it. Sampled every `step` metres, which
+ * is finer than the 6 m the DEM posts are apart.
  */
-export function eyeAbove(lon: number, lat: number): number {
+export function eyeAbove(lon: number, lat: number, radius = EYE_CLEAR_RADIUS, step = radius > 100 ? 2 : 1): number {
   const g = heightAt(lon, lat);
   let best = g;
-  const r = EYE_CLEAR_RADIUS;
-  for (let dy = -r; dy <= r; dy++) {
-    for (let dx = -r; dx <= r; dx++) {
-      if (dx * dx + dy * dy > r * r) continue;
-      best = Math.max(best, heightAt(lon + dx / M_PER_DEG_LON, lat + dy / M_PER_DEG_LAT));
+  const n = Math.floor(radius / step);
+  for (let j = -n; j <= n; j++) {
+    for (let i = -n; i <= n; i++) {
+      if (i * i + j * j > n * n) continue;
+      best = Math.max(best, heightAt(lon + (i * step) / M_PER_DEG_LON, lat + (j * step) / M_PER_DEG_LAT));
     }
   }
   return best - g + EYE_HEIGHT;

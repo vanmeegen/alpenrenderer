@@ -1,19 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
-import { formatHash, PLACES, readHash, readOptions, ViewState } from './state';
+import { EYE_RADIUS, formatHash, PLACES, readHash, readOptions, ViewState } from './state';
 import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
 import { PickedPosition } from './mapPicker';
 import { CompassRose } from './CompassRose';
+import { Icon, IconName } from './icons';
 
 const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
 const compass = (yaw: number) => COMPASS[Math.round(yaw / 45) % 8];
 /** HUD buttons: a visible pressed state the instant the finger lands, no tap delay, no text selection. */
 const BTN = 'rounded px-1 -mx-1 text-blue-700 underline-offset-2 hover:underline active:bg-blue-200 active:text-blue-950 touch-manipulation select-none';
 const fmtBytes = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
-/** "1,7 m" on the flat, "27 m, Hang" where the slope lifted the eye. */
-const aboveGround = (m: number) => (m < 5 ? `${m.toFixed(1).replace('.', ',')} m` : `${Math.round(m)} m, Hang`);
+/** "1,7 m" to a decimal while small, whole metres once the area lifted the eye far. */
+const aboveGround = (m: number) => (m < 100 ? `${m.toFixed(1).replace('.', ',')} m` : `${Math.round(m)} m`);
+/** Panels beside the rail: compact, and scrolling rather than running off a phone held sideways. */
+const PANEL = 'pointer-events-auto min-h-0 shrink overflow-auto rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur';
+
+/** One icon of the menu rail; the label is its accessible name and tooltip. */
+function RailButton({ icon, label, onClick, pressed }: { icon: IconName; label: string; onClick: () => void; pressed?: boolean }) {
+  return (
+    <button aria-label={label} title={label} aria-pressed={pressed} onClick={onClick}
+      className={`flex h-8 w-9 items-center justify-center rounded text-blue-800 hover:bg-blue-100 active:bg-blue-200 active:text-blue-950 touch-manipulation select-none ${pressed ? 'bg-blue-100' : ''}`}>
+      <Icon name={icon} />
+    </button>
+  );
+}
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -22,7 +35,9 @@ export function App() {
   const [status, setStatus] = useState<ViewerStatus | null>(null);
   const [view, setView] = useState<ViewState>(() => readHash());
   const [error, setError] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'map'>('none');
+  const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'settings' | 'map'>('none');
+  const [menuOpen, setMenuOpen] = useState(true);
+  const [eyeRadius, setEyeRadius] = useState(EYE_RADIUS.initial);
   const [outline, setOutline] = useState(true);
   const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place' | 'photo'>('url');
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
@@ -60,6 +75,7 @@ export function App() {
           history.replaceState(null, '', formatHash(nv));
         }, 300);
       };
+      setEyeRadius(v.eyeRadius);
       v.start();
       // Debug handle for the console and for headless checks.
       (window as unknown as Record<string, unknown>).alp = v;
@@ -172,6 +188,12 @@ export function App() {
     if (r === 'failed') setNote('Foto konnte nicht gespeichert werden.');
   };
 
+  const radius = (m: number) => {
+    setEyeRadius(m);
+    viewerRef.current?.setEyeRadius(m);
+  };
+  const toggle = (p: typeof panel) => setPanel(panel === p ? 'none' : p);
+
   const loading = status && status.levelsReady < status.levels;
   const d = status?.diagnostics;
   const offsetYaw = status?.sensors.offsetYaw ?? 0;
@@ -184,18 +206,47 @@ export function App() {
       <canvas ref={canvasRef} className="view" />
       <canvas ref={overlayRef} className="labels" />
 
-      {/* HUD */}
-      <div className="pointer-events-none absolute inset-x-2 top-2 flex flex-col gap-2"
-        style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}>
-        <div className="pointer-events-auto max-w-md rounded-lg bg-white/85 px-3 py-2 text-[13px] leading-snug text-neutral-800 shadow backdrop-blur">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <b className="text-[15px] font-semibold">alpenrenderer</b>
-            <span className="tabular-nums">{compass(view.yaw)} {view.yaw.toFixed(0)}°</span>
+      {/* Menu rail at the left edge, status and panels beside it; the whole of it folds away. */}
+      <div className="pointer-events-none absolute flex items-start gap-2"
+        style={{
+          top: 'max(0.5rem, env(safe-area-inset-top))', bottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+          left: 'max(0.5rem, env(safe-area-inset-left))', right: 'max(3.5rem, env(safe-area-inset-right))',
+        }}>
+        {!menuOpen ? (
+          <div className="pointer-events-auto rounded-lg bg-white/85 shadow backdrop-blur">
+            <RailButton icon="menu" label="Menü einblenden" onClick={() => setMenuOpen(true)} />
+          </div>
+        ) : (
+          <nav aria-label="Menü" className="pointer-events-auto grid max-h-full grid-flow-col gap-x-0.5 rounded-lg bg-white/85 p-0.5 shadow backdrop-blur"
+            style={{ gridTemplateRows: 'repeat(auto-fit, 2rem)' }}>
+            <RailButton icon="fold" label="Menü ausblenden" onClick={() => setMenuOpen(false)} />
+            <RailButton icon="map" label="Karte" onClick={() => setPanel('map')} />
+            <RailButton icon="pin" label="Standpunkt" pressed={panel === 'places'} onClick={() => toggle('places')} />
+            <RailButton icon="compass" label={sensors ? 'Sensoren aus' : 'Sensoren'} pressed={sensors} onClick={() => void toggleSensors()} />
+            <RailButton icon="camera" label={camera ? 'Kamera aus' : 'Kamera'} pressed={camera} onClick={() => void toggleCamera()} />
+            {(camera || photo) && <RailButton icon="save" label="Speichern" onClick={() => void savePhoto()} />}
+            <RailButton icon="photo" label="Foto laden" pressed={!!photo} onClick={() => fileRef.current?.click()} />
+            {corrected && <RailButton icon="reset" label="Korrektur zurücksetzen" onClick={() => viewerRef.current?.sensors.resetOffset()} />}
+            <RailButton icon="peaks" label={labelsOn ? 'Gipfel aus' : 'Gipfel an'} pressed={labelsOn} onClick={() => setLabelsOn(!labelsOn)} />
+            <RailButton icon="outline" label={outline ? 'Umrisse aus' : 'Umrisse an'} pressed={outline} onClick={() => setOutline(!outline)} />
+            <RailButton icon="settings" label="Einstellungen" pressed={panel === 'settings'} onClick={() => toggle('settings')} />
+            <RailButton icon="info" label="Quellen" pressed={panel === 'credits'} onClick={() => toggle('credits')} />
+            <RailButton icon="check" label="Check" pressed={panel === 'check'} onClick={() => toggle('check')} />
+          </nav>
+        )}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" aria-label="Fotodatei"
+          onChange={(e) => { void openPhoto(e.target.files?.[0]); e.target.value = ''; }} />
+
+        {menuOpen && (
+        <div className="flex max-h-full min-w-0 max-w-[24rem] flex-col gap-2">
+        <div className="pointer-events-auto shrink-0 rounded-lg bg-white/85 px-2.5 py-1.5 text-[12px] leading-snug text-neutral-800 shadow backdrop-blur">
+          <div className="flex flex-wrap items-baseline gap-x-3">
+            <span className="tabular-nums font-semibold">{compass(view.yaw)} {view.yaw.toFixed(0)}°</span>
             <span className="tabular-nums">{view.pitch >= 0 ? '+' : ''}{view.pitch.toFixed(0)}°</span>
             <span className="tabular-nums">FOV {view.fov.toFixed(0)}°</span>
             {status && <span className="tabular-nums text-neutral-500">{status.fps} fps</span>}
           </div>
-          <div className="mt-0.5 text-neutral-600">
+          <div className="text-neutral-600">
             <span className="tabular-nums">{view.lat.toFixed(4)}, {view.lon.toFixed(4)}</span>
             {positionSource === 'gps' && <span> (GPS{gpsAccuracy !== null ? `, ±${Math.round(gpsAccuracy)} m` : ''})</span>}
             {positionSource === 'map' && <span> (Karte)</span>}
@@ -208,7 +259,7 @@ export function App() {
                 {status.altitudeSource === 'dem' ? ` (Boden + ${aboveGround(status.eyeAltitude - status.ground)})` : ''}</span>
             )}
           </div>
-          <div className="mt-0.5 text-neutral-600">
+          <div className="text-neutral-600">
             {error && <span className="whitespace-pre-wrap text-red-700">{error}</span>}
             {note && !error && <span className="text-red-700">{note} </span>}
             {!error && !status && 'Renderer startet…'}
@@ -222,27 +273,10 @@ export function App() {
                 {status.peaks.total > 0 ? ` · Gipfel ${status.peaks.visible}/${status.peaks.total}` : ''}</span>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
-            <button className={BTN} onClick={() => setPanel('map')}>Karte</button>
-            <button className={BTN} onClick={() => setPanel(panel === 'places' ? 'none' : 'places')}>Standpunkt</button>
-            <button className={BTN} onClick={() => void toggleSensors()}>{sensors ? 'Sensoren aus' : 'Sensoren'}</button>
-            <button className={BTN} onClick={() => void toggleCamera()}>{camera ? 'Kamera aus' : 'Kamera'}</button>
-            {(camera || photo) && <button className={BTN} onClick={() => void savePhoto()}>Speichern</button>}
-            <button className={BTN} onClick={() => fileRef.current?.click()}>Foto laden</button>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" aria-label="Foto laden"
-              onChange={(e) => { void openPhoto(e.target.files?.[0]); e.target.value = ''; }} />
-            {corrected && (
-              <button className={BTN} onClick={() => viewerRef.current?.sensors.resetOffset()}>Korrektur zurücksetzen</button>
-            )}
-            <button className={BTN} onClick={() => setLabelsOn(!labelsOn)}>Gipfel {labelsOn ? 'aus' : 'an'}</button>
-            <button className={BTN} onClick={() => setOutline(!outline)}>Umrisse {outline ? 'aus' : 'an'}</button>
-            <button className={BTN} onClick={() => setPanel(panel === 'credits' ? 'none' : 'credits')}>Quellen</button>
-            <button className={BTN} onClick={() => setPanel(panel === 'check' ? 'none' : 'check')}>Check</button>
-          </div>
         </div>
 
         {(camera || photo) && (
-          <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur">
+          <div className={PANEL}>
             {photo && (
               <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <b className="font-semibold">Foto</b>
@@ -265,7 +299,7 @@ export function App() {
         )}
 
         {panel === 'places' && (
-          <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur">
+          <div className={PANEL} role="region" aria-label="Standpunkt wählen">
             <div className="mb-1 font-semibold">Standpunkt wählen</div>
             <div className="flex flex-wrap gap-x-3 gap-y-1">
               {PLACES.map((p) => (
@@ -276,8 +310,22 @@ export function App() {
           </div>
         )}
 
+        {panel === 'settings' && (
+          <div className={PANEL} role="region" aria-label="Einstellungen">
+            <div className="mb-1 font-semibold">Einstellungen</div>
+            <label className="flex items-center gap-2">
+              <span className="shrink-0 whitespace-nowrap tabular-nums">Höhenbereich {eyeRadius} m</span>
+              <input type="range" min={EYE_RADIUS.min} max={EYE_RADIUS.max} step={5} value={eyeRadius} aria-label="Höhenbereich"
+                onChange={(e) => radius(Number(e.target.value))} className="min-w-0 flex-1" />
+            </label>
+            <div className="mt-0.5 text-neutral-500">
+              Auge 1,7 m über dem höchsten Gelände in diesem Umkreis: klein = am Standpunkt, groß = frei über nahe Kuppen.
+            </div>
+          </div>
+        )}
+
         {panel === 'credits' && (
-          <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 text-[12px] text-neutral-800 shadow backdrop-blur">
+          <div className={`${PANEL} text-[12px]`} role="region" aria-label="Quellen">
             <div className="mb-1 font-semibold">Gelände unter diesem Standpunkt</div>
             {status?.surveys.length ? (
               <ul className="mb-2 list-disc pl-4">
@@ -301,7 +349,7 @@ export function App() {
         )}
 
         {panel === 'check' && d && (
-          <div className="pointer-events-auto max-w-md rounded-lg bg-white/90 px-3 py-2 font-mono text-[11px] text-neutral-800 shadow backdrop-blur">
+          <div className={`${PANEL} font-mono text-[11px]`} role="region" aria-label="Check">
             <div>{d.engine} · {d.adapter} · Build {__BUILD__}</div>
             <div>Qualität {status?.quality} · Mesh {d.vertices.toLocaleString('de')} Vertices · Sektoren {d.sectorsDrawn}/32 · {d.size}</div>
             <div>Atlas {d.atlas} · Level {d.levels} · Frame {d.frameMs.toFixed(1)} ms · Frames {d.framesDrawn}</div>
@@ -309,11 +357,13 @@ export function App() {
             <div>Fehler: {d.frameErrors} Frames · Device lost {d.deviceLost}</div>
             {d.limits && <div>Limits: {d.limits} · GL-Fehler {d.glError}</div>}
             {status?.decoder && <div>Tile-Dekoder: {status.decoder}</div>}
-            {status && <div>Boden {status.ground.toFixed(0)} m · Auge {status.eyeAltitude.toFixed(1)} m</div>}
+            {status && <div>Boden {status.ground.toFixed(0)} m · Auge {status.eyeAltitude.toFixed(1)} m · Höhenbereich {eyeRadius} m</div>}
             {d.shaderErrors.length > 0 && (
               <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-red-700">{d.shaderErrors.join('\n')}</pre>
             )}
           </div>
+        )}
+        </div>
         )}
       </div>
 
@@ -338,8 +388,11 @@ export function App() {
       </div>
 
       {peak && (
-        <div className="alp-peak-card pointer-events-auto absolute left-2 max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur"
-          style={{ bottom: 'max(2rem, calc(env(safe-area-inset-bottom) + 1.5rem))' }}>
+        <div className="alp-peak-card pointer-events-auto absolute max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur"
+          style={{
+            bottom: 'max(2rem, calc(env(safe-area-inset-bottom) + 1.5rem))',
+            left: menuOpen ? 'calc(max(0.5rem, env(safe-area-inset-left)) + 3rem)' : 'max(0.5rem, env(safe-area-inset-left))',
+          }}>
           <div className="flex items-baseline gap-3">
             <b className="text-[15px] font-semibold">{peak.name}</b>
             <span className="tabular-nums text-neutral-600">

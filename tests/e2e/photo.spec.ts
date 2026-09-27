@@ -54,7 +54,7 @@ test.describe('photo mode', () => {
     await page.goto(url());
     await ready(page);
     expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon + 0.01, 3);
-    await page.getByLabel('Foto laden').setInputFiles(join(here, 'fixtures', 'photo.png'));
+    await page.getByLabel('Fotodatei').setInputFiles(join(here, 'fixtures', 'photo.png'));
     // The standpoint is the photo's, the field of view the lens's, cover-cropped.
     await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(STAND.lon, 4);
     const fov = coverFovY(PHOTO.fovY, PHOTO.width, PHOTO.height, W, H);
@@ -91,7 +91,7 @@ test.describe('photo mode', () => {
   test('a photo without EXIF keeps the standpoint, says so, and fog cannot be aligned', async ({ page }) => {
     await page.goto(url());
     await ready(page);
-    await page.getByLabel('Foto laden').setInputFiles(join(here, 'fixtures', 'photo-fog.png'));
+    await page.getByLabel('Fotodatei').setInputFiles(join(here, 'fixtures', 'photo-fog.png'));
     await expect(page.getByText('Foto ohne GPS: Standpunkt per Karte setzen.')).toBeVisible({ timeout: 30_000 });
     expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon + 0.01, 3);
     await expect(page.getByText('Objektiv geschätzt')).toBeVisible();

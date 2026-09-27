@@ -66,4 +66,15 @@ describe('HeightField', () => {
     // A radius too small to reach it stays on the plain.
     expect(hf.summitNear(LON, LAT, 5)).toBe(2000);
   });
+
+  test('summitNear searches a disc: a post in the corner of the square is out of range', () => {
+    const hf = new HeightField(LON, LAT);
+    const z = 13;
+    const cx = Math.round(lonToMercX(LON, z)), cy = Math.round(latToMercY(LAT, z));
+    // 10 px east and 10 px south: 10 px in each axis, 14.1 px away.
+    level(hf, z, (px, py) => (px === cx + 10 && py === cy + 10) ? 3000 : 2000);
+    const res = hf.levels[0].res;
+    expect(hf.summitNear(LON, LAT, 11 * res)).toBe(2000);
+    expect(hf.summitNear(LON, LAT, 15 * res)).toBe(3000);
+  });
 });

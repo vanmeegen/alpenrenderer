@@ -18,6 +18,10 @@ Live: https://vanmeegen.github.io/alpenrenderer/
 - **Inkrement 2a** (Standpunkt wählen): „Karte“ öffnet OpenStreetMap, mit den
   Fingern verschieben und zoomen, Punkt antippen, „Panorama von hier“;
   „Mein Standort“ nimmt die GPS-Position. Der Blick bleibt dabei erhalten.
+  Verweigert der Browser den Standort, sagt die App, wo er einzuschalten ist
+  (Seitenberechtigung am Schloss-Symbol, Standort in den Android-Einstellungen,
+  Standort-Berechtigung der Chrome-App); eine Webseite kann diese Einstellungen
+  nicht selbst öffnen.
 - **Inkrement 2b** (Sichtachse per Sensoren): „Sensoren“ lässt das Panorama
   dem Handy folgen (Kompass plus Gyro, Deklination aus dem Weltmagnetmodell).
   Weil der Kompass in den Bergen oft daneben liegt, korrigiert ein Finger in
@@ -37,6 +41,12 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   „Ausrichten“ legt die berechnete Skyline auf die des Fotos (Richtung,
   Neigung, Rolle, bei unbekanntem Objektiv auch das Sichtfeld) und sagt, wie
   sicher es sich ist; ein Finger korrigiert weiterhin von Hand.
+- **Bedienung**: Das Menü ist eine schmale Icon-Leiste am linken Rand,
+  Status und Panels stehen daneben und scrollen statt über den Bildschirm
+  zu laufen; „Menü ausblenden“ lässt nur einen Knopf stehen (Handy quer).
+  Unter „Einstellungen“ stellt „Höhenbereich“ (10 m bis 2 km, Standard 1 km,
+  pro Gerät gespeichert) ein, über welchem Umkreis das Auge 1,7 m über dem
+  höchsten Gelände steht.
 - Der Plan: [plaene/](plaene/2026-09-20-peakviewer-mapterhorn.md).
 
 ## Entwicklung
@@ -80,7 +90,7 @@ der App per `?tiles=` mitgeben:
     # http://localhost:8765/dist/?tiles=/tile-cache/#lon=7.78472&lat=45.98333&yaw=232
     node tools/shot.mjs "http://localhost:8765/dist/?tiles=/tile-cache/#lon=7.78472&lat=45.98333&yaw=232" shots/gornergrat.png
 
-URL-Parameter: `#lon`, `lat`, `alt` (absolute Augenhöhe, sonst 1,7 m über dem höchsten Boden im Umkreis von 25 m, damit das Auge am Hang nicht im nächsten DEM-Post steckt),
+URL-Parameter: `#lon`, `lat`, `alt` (absolute Augenhöhe, sonst 1,7 m über dem höchsten Boden im Umkreis des Höhenbereichs, Standard 1 km, damit das Auge nicht im Hang oder hinter der nächsten Kuppe steckt),
 `yaw`, `pitch`, `fov`, `p=<ort>` für einen der Standpunkte im Menü;
 `?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität,
 `?peaks=<verzeichnis>` für einen anderen Gipfelkatalog (Zellen `{x}_{y}.json`).

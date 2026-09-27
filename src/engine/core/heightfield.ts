@@ -177,6 +177,7 @@ export class HeightField {
       const y = Math.round(v - 0.5) + dy;
       if (y < 0 || y >= l.h) continue;
       for (let dx = -n; dx <= n; dx++) {
+        if (dx * dx + dy * dy > n * n) continue;
         const x = Math.round(u - 0.5) + dx;
         if (x < 0 || x >= l.w) continue;
         const h = l.raw[y * l.w + x] * l.quant + l.bias;

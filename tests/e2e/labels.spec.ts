@@ -62,12 +62,14 @@ test.describe('summit labels', () => {
     await page.goto(url({ yaw: 0 }));
     const s = await ready(page);
     await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Gratspitze']);
-    const [g] = await labels(page);
     const drop = RIDGE_RANGE ** 2 / (2 * R_EFF_M);
     const elev = Math.atan2(RIDGE.height - s.eyeAltitude - drop, RIDGE_RANGE);
     const expectedY = H / 2 - (H / 2) * Math.tan(elev) / Math.tan(Math.PI / 6);
+    // A label from a rebuild on half-loaded levels can stand until the last
+    // rebuild's sightlines are done; where it ends up is what counts.
+    await expect.poll(async () => Math.abs((await labels(page))[0].ay - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.01);
+    const [g] = await labels(page);
     expect(Math.abs(g.ax - W / 2)).toBeLessThan(3);
-    expect(Math.abs(g.ay - expectedY)).toBeLessThan(H * 0.01);
   });
 
   test('tapping a label opens its card with height, range and bearing', async ({ page }) => {

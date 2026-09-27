@@ -501,7 +501,9 @@ Extraktor (Blau und Wolkenweiß von oben her als Himmel, Baumkanten und
 Nahfeld abgewertet) mit einer Fixture, die Wolkenband und Baumkante enthält;
 (b) Umrisse unter etwa 300 m Entfernung oder auf flachem Gelände ausblenden;
 (c) Neigungssuche auf ±15°, weil Hochformate von Gipfeln 14° aufblicken;
-(d) Panels im Hochformat unten oder einklappbar; (e) Konfidenzschwelle
+(d) Panels im Hochformat unten oder einklappbar (2026-09-27 teilweise
+erledigt: Icon-Leiste links, Panels daneben und scrollend, ganzes Menü
+ausblendbar, E2E `layout.spec.ts` im Querformat 844×390); (e) Konfidenzschwelle
 für Fotos anheben oder Treffer unter 30 % nur als Vorschlag zeigen. Die Regressionsmenge aus zehn Fotos mit bekanntem Standpunkt
 bleibt offen; beide Bilder hier haben keinen.
 

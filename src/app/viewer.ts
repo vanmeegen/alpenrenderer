@@ -24,17 +24,9 @@ import { LookControls } from './controls';
 import { ExifInfo, fovFromExif, readExif } from './exif';
 import { LabelPainter } from './labelPainter';
 import { SensorLook } from './sensorLook';
-import { AppOptions, ViewState } from './state';
+import { AppOptions, ViewState, clampEyeRadius, readEyeRadius, writeEyeRadius } from './state';
 
 const EYE_HEIGHT = 1.7;
-/**
- * The eye stands EYE_HEIGHT above the highest ground this far around the
- * standpoint, not above the ground under it: a DEM post every six metres
- * rounds a slope into steps, and on a hillside an eye 1.7 m over its own
- * post is inside the next one. Flat ground is unaffected; a 45° slope lifts
- * the eye some 25 m, roughly what a viewing platform would.
- */
-const EYE_CLEAR_RADIUS = 25;
 /** Milliseconds of sightline work per frame; the rest of the frame stays for drawing and touch. */
 const VISIBILITY_BUDGET_MS = 4;
 /** Quiet time after a level arrives before the label targets are rebuilt. */
@@ -447,10 +439,26 @@ export class Viewer {
     this.scheduleRebuildTargets();
   }
 
+  /**
+   * The eye stands EYE_HEIGHT above the highest ground within this many
+   * metres, not above the ground under it: a DEM post every six metres
+   * rounds a slope into steps, and on a hillside an eye 1.7 m over its own
+   * post is inside the next one. The default, 1 km, also lifts it over the
+   * nearest knoll; the slider goes from 10 m (just the slope) to 2 km.
+   */
+  eyeRadius = readEyeRadius();
+
+  setEyeRadius(m: number) {
+    this.eyeRadius = clampEyeRadius(m);
+    writeEyeRadius(this.eyeRadius);
+    this.applyAltitude();
+    this.scheduleRebuildTargets();
+  }
+
   private applyAltitude() {
     const hf = this.streamer.heightField;
     const ground = hf.groundAt(this.view.lon, this.view.lat);
-    const highest = Math.max(ground, hf.summitNear(this.view.lon, this.view.lat, EYE_CLEAR_RADIUS));
+    const highest = Math.max(ground, hf.summitNear(this.view.lon, this.view.lat, this.eyeRadius));
     const eye = this.view.alt ?? highest + EYE_HEIGHT;
     this.renderer.moveTo(this.view.lon, this.view.lat, eye);
   }

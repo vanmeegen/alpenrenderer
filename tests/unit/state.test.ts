@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_VIEW, PLACES, formatHash, readHash, readOptions } from '../../src/app/state';
+import { DEFAULT_VIEW, EYE_RADIUS, PLACES, formatHash, readEyeRadius, readHash, readOptions, writeEyeRadius } from '../../src/app/state';
 
 describe('readHash', () => {
   test('empty hash is the default view', () => {
@@ -53,5 +53,34 @@ describe('readOptions', () => {
   test('backend and quality overrides', () => {
     expect(readOptions('?backend=webgpu&q=low')).toMatchObject({ backend: 'webgpu', quality: 'low' });
     expect(readOptions('?backend=foo&q=bar')).toMatchObject({ backend: 'webgl2', quality: 'auto' });
+  });
+});
+
+describe('eye radius: the area the eye height is taken from', () => {
+  const store = (v: string | null) => ({ getItem: () => v, setItem: () => {} }) as unknown as Storage;
+
+  test('1 km by default, 10 m to 2 km', () => {
+    expect(EYE_RADIUS).toEqual({ min: 10, max: 2000, initial: 1000 });
+    expect(readEyeRadius(store(null))).toBe(1000);
+  });
+
+  test('a stored value is used, clamped to the slider', () => {
+    expect(readEyeRadius(store('250'))).toBe(250);
+    expect(readEyeRadius(store('5'))).toBe(10);
+    expect(readEyeRadius(store('99999'))).toBe(2000);
+    expect(readEyeRadius(store('kaputt'))).toBe(1000);
+  });
+
+  test('storage that throws (private mode) falls back to the default', () => {
+    const broken = { getItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(readEyeRadius(broken)).toBe(1000);
+    expect(() => writeEyeRadius(300, broken)).not.toThrow();
+  });
+
+  test('what is written is read back', () => {
+    const m = new Map<string, string>();
+    const s = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); } } as unknown as Storage;
+    writeEyeRadius(420, s);
+    expect(readEyeRadius(s)).toBe(420);
   });
 });
