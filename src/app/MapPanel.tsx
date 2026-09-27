@@ -7,7 +7,7 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
-import { MAP_ZOOM, OSM_ATTRIBUTION, OSM_TILES, PickedPosition, locateDevice } from './mapPicker';
+import { LocateError, LocationHelp, MAP_ZOOM, OSM_ATTRIBUTION, OSM_TILES, PickedPosition, locateDevice, locationHelp } from './mapPicker';
 
 export interface MapPanelProps {
   lon: number;
@@ -29,6 +29,15 @@ function arrowIcon(yaw: number): L.DivIcon {
   });
 }
 
+/** The site's geolocation permission, where the browser tells. */
+async function sitePermission(): Promise<PermissionState | 'unknown'> {
+  try {
+    return (await navigator.permissions.query({ name: 'geolocation' })).state;
+  } catch {
+    return 'unknown';
+  }
+}
+
 export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
   const host = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -36,6 +45,7 @@ export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
   const [picked, setPicked] = useState<{ lon: number; lat: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [help, setHelp] = useState<LocationHelp | null>(null);
 
   useEffect(() => {
     const map = L.map(host.current!, {
@@ -68,11 +78,17 @@ export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
   const locate = async () => {
     setBusy(true);
     setMessage(null);
+    setHelp(null);
     try {
       const p = await locateDevice();
       onPick(p);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
+      setHelp(locationHelp({
+        code: e instanceof LocateError ? e.code : 0,
+        permission: await sitePermission(),
+        secure: window.isSecureContext,
+      }));
     } finally {
       setBusy(false);
     }
@@ -89,6 +105,18 @@ export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
         <span className="text-[12px] text-neutral-600">Karte verschieben, Punkt antippen, dann „Panorama von hier“.</span>
         {message && <span className="text-[12px] text-red-700">{message}</span>}
       </div>
+      {help && (
+        <div role="note" aria-label="Standort-Hilfe"
+          className="mx-3 mb-2 max-h-[40vh] overflow-auto rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-neutral-800">
+          <div className="flex items-baseline gap-3">
+            <b className="font-semibold">{help.title}</b>
+            <button className="ml-auto text-blue-700" onClick={() => setHelp(null)}>Ausblenden</button>
+          </div>
+          <ol className="mt-1 list-decimal pl-4">
+            {help.steps.map((t) => <li key={t}>{t}</li>)}
+          </ol>
+        </div>
+      )}
       <div ref={host} className="min-h-0 flex-1" />
     </div>
   );

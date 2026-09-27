@@ -117,5 +117,32 @@ test.describe('GPS refused', () => {
     await page.getByRole('button', { name: 'Mein Standort' }).click();
     await expect(page.getByText('Standort nicht verfügbar: Zugriff verweigert.')).toBeVisible({ timeout: 30_000 });
     expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon, 4);
+    // Not just the verdict: where to switch it on.
+    const help = page.getByRole('note', { name: 'Standort-Hilfe' });
+    await expect(help).toContainText('Standort nicht freigegeben');
+    await expect(help).toContainText('Berechtigungen → Standort');
+    await expect(help).toContainText('Einstellungen → Standort');
+  });
+});
+
+test.describe('GPS allowed for the site, off on the device', () => {
+  test.use({ permissions: ['geolocation'] });
+
+  test('the help points at the phone settings, not at the site', async ({ page }) => {
+    // Chrome on Android answers PERMISSION_DENIED even for an allowed site
+    // when the phone's location or Chrome's app permission is off.
+    await page.addInitScript(() => {
+      navigator.geolocation.getCurrentPosition = (_ok, fail) => {
+        fail?.({ code: 1, message: 'denied', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError);
+      };
+    });
+    await page.goto(url());
+    await ready(page);
+    await page.getByRole('button', { name: 'Karte' }).click();
+    await page.getByRole('button', { name: 'Mein Standort' }).click();
+    const help = page.getByRole('note', { name: 'Standort-Hilfe' });
+    await expect(help).toContainText('Standort am Gerät aus', { timeout: 30_000 });
+    await expect(help).toContainText('Apps → Chrome → Berechtigungen');
+    await expect(help).not.toContainText('Schloss');
   });
 });

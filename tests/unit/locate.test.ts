@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { locateDevice } from '../../src/app/mapPicker';
+import { LocateError, locateDevice, locationHelp } from '../../src/app/mapPicker';
 
 type Success = (p: GeolocationPosition) => void;
 type Failure = (e: GeolocationPositionError) => void;
@@ -41,5 +41,69 @@ describe('locateDevice', () => {
     await expect(locateDevice(g, 20)).rejects.toThrow();
     // Calling back now must not throw or do anything.
     late!({ coords: { latitude: 1, longitude: 2, accuracy: 3 } } as GeolocationPosition);
+  });
+});
+
+describe('locationHelp: what to do when the position is refused', () => {
+  test('a site blocked in Chrome points at the lock icon and the site permission', () => {
+    const h = locationHelp({ code: 1, permission: 'denied', secure: true });
+    expect(h.title).toBe('Standort für diese Seite blockiert');
+    expect(h.steps.join(' ')).toContain('Schloss');
+    expect(h.steps.join(' ')).toContain('Berechtigungen');
+    expect(h.retry).toBe(true);
+  });
+
+  test('a refusal while the site is allowed means the phone or Chrome itself has no location', () => {
+    const h = locationHelp({ code: 1, permission: 'granted', secure: true });
+    expect(h.title).toBe('Standort am Gerät aus');
+    expect(h.steps.join(' ')).toContain('Einstellungen');
+    expect(h.steps.join(' ')).toContain('Chrome');
+  });
+
+  test('a refusal with unknown permission state names both places to look', () => {
+    const h = locationHelp({ code: 1, permission: 'unknown', secure: true });
+    expect(h.steps.join(' ')).toContain('Schloss');
+    expect(h.steps.join(' ')).toContain('Einstellungen');
+  });
+
+  test('no fix at all asks to switch location on and to go outside', () => {
+    const h = locationHelp({ code: 2, permission: 'granted', secure: true });
+    expect(h.title).toBe('Keine Position gefunden');
+    expect(h.steps.join(' ')).toContain('Standort');
+  });
+
+  test('an insecure page cannot ask at all, whatever the code', () => {
+    const h = locationHelp({ code: 1, permission: 'unknown', secure: false });
+    expect(h.title).toBe('Nur über https');
+    expect(h.retry).toBe(false);
+  });
+
+  test('the error from locateDevice carries its code for the help', async () => {
+    const g = geo((_ok, fail) => fail(positionError(2)));
+    const e = await locateDevice(g).catch((x) => x);
+    expect(e).toBeInstanceOf(LocateError);
+    expect((e as LocateError).code).toBe(2);
+  });
+});
+
+describe('locateDevice retries without high accuracy', () => {
+  test('when the precise fix is unavailable, a coarse one is asked for', async () => {
+    const asked: boolean[] = [];
+    const g = {
+      getCurrentPosition: (ok: Success, fail: Failure, opt?: PositionOptions) => {
+        asked.push(!!opt?.enableHighAccuracy);
+        if (opt?.enableHighAccuracy) fail(positionError(2));
+        else ok({ coords: { latitude: 47, longitude: 11, accuracy: 900 } } as GeolocationPosition);
+      },
+    } as unknown as Geolocation;
+    expect(await locateDevice(g)).toEqual({ lon: 11, lat: 47, source: 'gps', accuracy: 900 });
+    expect(asked).toEqual([true, false]);
+  });
+
+  test('a refusal is not retried', async () => {
+    let calls = 0;
+    const g = geo((_ok, fail) => { calls++; fail(positionError(1)); });
+    await expect(locateDevice(g)).rejects.toThrow();
+    expect(calls).toBe(1);
   });
 });
