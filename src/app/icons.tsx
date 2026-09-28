@@ -14,7 +14,6 @@ const PATHS = {
   save: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
   reset: 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5',
   peaks: 'M2 20l7-12 4 6 3-4 6 10z',
-  outline: 'M2 17l5-7 4 4 5-8 6 10',
   settings: 'M4 6h9 M17 6h3 M15 4v4 M4 12h3 M11 12h9 M9 10v4 M4 18h11 M19 18h1 M17 16v4',
   info: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18 M12 11v6 M12 7.5v.5',
   check: 'M3 12h4l2-6 4 12 2-6h6',

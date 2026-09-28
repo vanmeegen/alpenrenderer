@@ -41,7 +41,6 @@ export function App() {
   const [eyeRadius, setEyeRadius] = useState(EYE_RADIUS.initial);
   const [locating, setLocating] = useState(false);
   const [locNote, setLocNote] = useState<{ message: string; help: LocationHelp } | null>(null);
-  const [outline, setOutline] = useState(true);
   const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place' | 'photo'>('url');
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [sensors, setSensors] = useState(false);
@@ -96,7 +95,7 @@ export function App() {
 
   useEffect(() => {
     const v = viewerRef.current;
-    if (v) { v.renderer.outline = outline ? 0.35 : 0; v.showLabels = labelsOn; }
+    if (v) v.showLabels = labelsOn;
   });
 
   const go = (id: string) => {
@@ -244,7 +243,6 @@ export function App() {
             <RailButton icon="photo" label="Foto laden" pressed={!!photo} onClick={() => fileRef.current?.click()} />
             {corrected && <RailButton icon="reset" label="Korrektur zurücksetzen" onClick={() => viewerRef.current?.sensors.resetOffset()} />}
             <RailButton icon="peaks" label={labelsOn ? 'Gipfel aus' : 'Gipfel an'} pressed={labelsOn} onClick={() => setLabelsOn(!labelsOn)} />
-            <RailButton icon="outline" label={outline ? 'Umrisse aus' : 'Umrisse an'} pressed={outline} onClick={() => setOutline(!outline)} />
             <RailButton icon="settings" label="Einstellungen" pressed={panel === 'settings'} onClick={() => toggle('settings')} />
             <RailButton icon="info" label="Quellen" pressed={panel === 'credits'} onClick={() => toggle('credits')} />
             <RailButton icon="check" label="Check" pressed={panel === 'check'} onClick={() => toggle('check')} />

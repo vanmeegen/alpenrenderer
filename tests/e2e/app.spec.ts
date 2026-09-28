@@ -198,16 +198,20 @@ test.describe('geometry on screen', () => {
     expect(Math.abs(got - skylineRow(270, W / 2, s.eyeAltitude, 60, W, H))).toBeLessThan(H * 0.01);
   });
 
-  test('ridge lines darken the silhouette and can be switched off', async ({ page }) => {
+  test('ridge lines always darken the silhouette; there is no switch for them any more', async ({ page }) => {
+    // The switch did nothing anyone could see on a phone (and nothing at all
+    // over the camera or a photo), so the lines are simply on, at 0.35.
     await page.goto(url());
     const s = await ready(page);
+    await expect(page.getByRole('button', { name: /Umrisse/ })).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).alp.renderer.outline)).toBe(0.35);
     const apex = summitScreenY(s.eyeAltitude, 60) * H;
     const on = await luminance(page, W / 2 - 60, Math.round(apex) - 4, 120, 40);
-    await page.getByRole('button', { name: 'Umrisse aus' }).click();
-    await page.waitForFunction(() => (window as any).alp.renderer.outline === 0);
+    // Taken out from the console, the silhouette gets lighter: the lines are really drawn.
+    await page.evaluate(() => { (window as any).alp.renderer.outline = 0; });
+    await page.waitForTimeout(500);
     const off = await luminance(page, W / 2 - 60, Math.round(apex) - 4, 120, 40);
     expect(on).toBeLessThan(off);
-    await expect(page.getByRole('button', { name: 'Umrisse an' })).toBeVisible();
   });
 });
 

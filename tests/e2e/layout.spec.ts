@@ -52,7 +52,7 @@ test.describe('phone held sideways', () => {
     const box = (await rail.boundingBox())!;
     expect(box.x).toBeLessThan(12);
     expect(box.width).toBeLessThanOrEqual(80);
-    for (const name of ['Karte', 'Standpunkt', 'Sensoren', 'Kamera', 'Foto laden', 'Gipfel aus', 'Umrisse aus', 'Einstellungen', 'Quellen', 'Check']) {
+    for (const name of ['Karte', 'Standpunkt', 'Sensoren', 'Kamera', 'Foto laden', 'Gipfel aus', 'Einstellungen', 'Quellen', 'Check']) {
       const b = (await rail.getByRole('button', { name, exact: true }).boundingBox())!;
       expect(b.y + b.height, name).toBeLessThanOrEqual(H);
       expect(b.width, name).toBeLessThanOrEqual(40);
