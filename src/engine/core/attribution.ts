@@ -37,7 +37,7 @@ export const FIXED_CREDITS: Credit[] = [
   },
   {
     who: 'OpenStreetMap contributors',
-    text: 'Summit names and positions © OpenStreetMap contributors, available '
+    text: 'Summit and lake names, positions and shorelines © OpenStreetMap contributors, available '
       + 'under the Open Database Licence (ODbL).',
     url: 'https://www.openstreetmap.org/copyright',
   },
@@ -62,4 +62,4 @@ export const FIXED_CREDITS: Credit[] = [
 /** One line suitable for a photo caption or an export footer. */
 export const SHORT_CREDIT =
   'Terrain: © Mapterhorn and its sources (swisstopo, BEV, LDBV Bayern and others). '
-  + 'Summits: © OpenStreetMap contributors, ODbL.';
+  + 'Summits and lakes: © OpenStreetMap contributors, ODbL.';

@@ -396,7 +396,7 @@ export function App() {
           <div className="flex items-baseline gap-3">
             <b className="text-[15px] font-semibold">{peak.name}</b>
             <span className="tabular-nums text-neutral-600">
-              {peak.ele !== undefined ? `${Math.round(peak.ele)} m · ` : ''}{fmtRange(peak.range)} · {peak.compass} {peak.bearing.toFixed(0)}°
+              {peak.kind === 'lake' ? 'See · ' : ''}{peak.ele !== undefined ? `${Math.round(peak.ele)} m · ` : ''}{fmtRange(peak.range)} · {peak.compass} {peak.bearing.toFixed(0)}°
             </span>
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3">

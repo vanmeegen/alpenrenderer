@@ -44,6 +44,10 @@ export interface Level extends LevelSpec {
    * wrong for that whole window.
    */
   filled: boolean;
+  /** Lake mask on the same grid, 255 = water (core/water.ts); absent = all dry. */
+  water?: Uint8Array;
+  /** Bumped whenever `water` is replaced, so the renderer re-uploads. */
+  waterVersion?: number;
 }
 
 export interface Observer {

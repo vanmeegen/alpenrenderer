@@ -17,8 +17,43 @@ export const RIDGE = { lat: 47.0 + 20000 / 111320, height: 2600, halfWidth: 800 
 const M_PER_DEG_LAT = 111320;
 const M_PER_DEG_LON = 111320 * Math.cos(STAND.lat * Math.PI / 180);
 
+/**
+ * The Testsee: a round lake, a 24-gon of 500 m radius, its centre 2.5 km
+ * from the standpoint at a bearing of 200°. Its surface is flat at 1490 m,
+ * just below the plain's ripple, as a LiDAR DEM holds a lake. The catalogue
+ * record (the shore as a ring, the label on the centre) is written by gen.mjs.
+ */
+export const LAKE = (() => {
+  const b = (200 * Math.PI) / 180, range = 2500, radius = 500, n = 24;
+  const lon = 10.0 + (range * Math.sin(b)) / (111320 * Math.cos((47 * Math.PI) / 180));
+  const lat = 47.0 + (range * Math.cos(b)) / 111320;
+  const ring: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (2 * Math.PI * i) / n;
+    ring.push(lon + (radius * Math.sin(a)) / (111320 * Math.cos((47 * Math.PI) / 180)), lat + (radius * Math.cos(a)) / 111320);
+  }
+  return { name: 'Testsee', lon, lat, bearing: 200, range, radius, surface: 1490, ring };
+})();
+
+/** Whether a point lies on the Testsee (inside its shore polygon). */
+export function inLake(lon: number, lat: number): boolean {
+  const r = LAKE.ring, n = r.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = r[2 * i], yi = r[2 * i + 1], xj = r[2 * j], yj = r[2 * j + 1];
+    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** The lake catalogue of the range, as the cell file the app loads. */
+export const LAKES = [
+  { i: 'w1', n: LAKE.name, o: LAKE.lon, a: LAKE.lat, ar: Math.round(Math.PI * LAKE.radius ** 2), g: [LAKE.ring] },
+];
+
 /** Height in metres at a geodetic point. */
 export function heightAt(lon: number, lat: number): number {
+  if (inLake(lon, lat)) return LAKE.surface;
   const dxT = (lon - TESTHORN.lon) * M_PER_DEG_LON;
   const dyT = (lat - TESTHORN.lat) * M_PER_DEG_LAT;
   const rT = Math.hypot(dxT, dyT);

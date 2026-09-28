@@ -26,6 +26,14 @@ export interface Peak {
   prom?: number;
   /** Where the record came from. */
   src?: string;
+  /** A lake rather than a summit: anchored on its surface, drawn in blue. */
+  kind?: 'lake';
+  /**
+   * Further anchor points, in order of preference, for a label that may be
+   * hidden at its main point: a big lake seen only in part is named where
+   * it shows.
+   */
+  spots?: { lon: number; lat: number }[];
   /** Free-form extras (region, first ascent, ...). */
   tags?: Record<string, string>;
 }

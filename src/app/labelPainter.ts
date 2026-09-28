@@ -15,6 +15,8 @@ export interface LabelStyle {
   leader: string;
   accent: string;
   accentInk: string;
+  /** Lake names: blue and italic, the way a map writes water. */
+  water: string;
 }
 
 export const LABEL_STYLE: LabelStyle = {
@@ -25,6 +27,7 @@ export const LABEL_STYLE: LabelStyle = {
   leader: 'rgba(10,13,17,.62)',
   accent: '#c2410c',
   accentInk: '#ffffff',
+  water: '#1d4ed8',
 };
 
 export class LabelPainter {
@@ -35,9 +38,9 @@ export class LabelPainter {
     this.ctx = canvas.getContext('2d')!;
   }
 
-  private font(big: boolean): string {
+  private font(big: boolean, italic = false): string {
     const s = big ? this.style.nameSize : this.style.detailSize;
-    return `${big ? 600 : 400} ${s}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    return `${italic ? 'italic ' : ''}${big ? 600 : 400} ${s}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
   }
 
   measure = (text: string, big: boolean): number => {
@@ -65,6 +68,7 @@ export class LabelPainter {
 
     for (const l of labels) {
       const on = l === selected;
+      const lake = l.target.peak.kind === 'lake';
       const cx = Math.max(l.bx + 6, Math.min(l.bx + l.bw - 6, l.ax));
 
       c.strokeStyle = on ? s.accent : s.leader;
@@ -87,7 +91,7 @@ export class LabelPainter {
 
       let y = l.by + 3;
       l.lines.forEach((line, i) => {
-        c.font = this.font(i === 0);
+        c.font = this.font(i === 0, lake && i === 0);
         c.textAlign = 'center';
         const mid = l.bx + l.bw / 2;
         if (!on) {
@@ -95,7 +99,7 @@ export class LabelPainter {
           c.lineWidth = 3;
           c.strokeText(line, mid, y);
         }
-        c.fillStyle = on ? s.accentInk : (i === 0 ? s.ink : s.leader);
+        c.fillStyle = on ? s.accentInk : (i === 0 ? (lake ? s.water : s.ink) : s.leader);
         c.fillText(line, mid, y);
         y += (i === 0 ? s.nameSize : s.detailSize) + 3;
       });

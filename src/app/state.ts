@@ -81,6 +81,8 @@ export interface AppOptions {
   tiles?: string;
   /** Summit catalogue cell template; by default the cells built next to the app. */
   peaks: string;
+  /** Lake catalogue cell template, likewise. */
+  lakes: string;
 }
 
 export function readOptions(search = location.search): AppOptions {
@@ -89,11 +91,13 @@ export function readOptions(search = location.search): AppOptions {
   const ql = q.get('q');
   const tiles = q.get('tiles');
   const peaks = q.get('peaks') || 'peaks';
+  const lakes = q.get('lakes') || 'lakes';
   return {
     backend: b === 'webgpu' ? 'webgpu' : 'webgl2',
     quality: ql === 'high' || ql === 'low' ? ql : 'auto',
     tiles: tiles ? (tiles.endsWith('/') ? tiles : tiles + '/') + '{z}/{x}/{y}.webp' : undefined,
     peaks: (peaks.endsWith('/') ? peaks : peaks + '/') + '{x}_{y}.json',
+    lakes: (lakes.endsWith('/') ? lakes : lakes + '/') + '{x}_{y}.json',
   };
 }
 

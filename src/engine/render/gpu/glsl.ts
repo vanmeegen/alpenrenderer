@@ -228,6 +228,7 @@ uniform vec3  uSun;          // towards the sun, ENU, unit
 uniform float uSnowLine;     // metres
 uniform float uFogRange;     // metres to 1/e of the terrain colour
 uniform vec3  uHorizonColor;
+uniform vec3  uWaterColor;   // lakes, where the atlas's blue channel says so
 
 uniform sampler2D heights;
 
@@ -253,6 +254,17 @@ vec2 gradientAt(int lv, float dLon, float dIso) {
   return vec2((hE - hW) * B.x / (2.0 * mpp), (hN - hS) * B.x / (2.0 * mpp));
 }
 
+/**
+ * 1 where the lake mask marks the DEM post this point falls on, 0 on dry
+ * ground: the atlas's blue channel, burnt in from the lake catalogue.
+ */
+float waterAt(int lv, float dLon, float dIso) {
+  vec4 A = uLvlA[lv];
+  float px = clamp(floor(A.x + dLon * A.z), 0.0, uLevelPx - 1.0);
+  float py = clamp(floor(A.y - dIso * A.z), 0.0, uLevelPx - 1.0) + float(lv) * uLevelPx;
+  return step(0.5, texelFetch(heights, ivec2(int(px), int(py)), 0).b);
+}
+
 void main(void) {
   float r = vRange;
   float dLon = vDLon;
@@ -261,10 +273,14 @@ void main(void) {
 
   int lv = levelFor(r);
   vec2 g = gradientAt(lv, dLon, dIso);
+  float wet = waterAt(lv, dLon, dIso);
   if (float(lv) + 1.0 < uLevelCount) {
     float outer = uLvlA[lv].w;
     float fade = smoothstep(outer * 0.86, outer, r);
-    if (fade > 0.0) { g = mix(g, gradientAt(lv + 1, dLon, dIso), fade); }
+    if (fade > 0.0) {
+      g = mix(g, gradientAt(lv + 1, dLon, dIso), fade);
+      wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
+    }
   }
   vec3 n = normalize(vec3(-g.x, -g.y, 1.0));
   float slope = 1.0 - n.z;               // 0 flat .. 1 vertical
@@ -282,6 +298,7 @@ void main(void) {
   float snowy = smoothstep(uSnowLine - 350.0, uSnowLine + 50.0, h)
               * (1.0 - smoothstep(0.45, 0.7, slope));
   col = mix(col, snow, snowy);
+  col = mix(col, uWaterColor, wet);
 
   // Plain Lambert with a floor: shadow sides keep their shape, lit faces
   // stand out. A sky term that lifted north faces flattened the relief.

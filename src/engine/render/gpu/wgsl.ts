@@ -38,7 +38,7 @@ export const TERRAIN_UNIFORMS = [
 /** The shade material takes every terrain uniform plus these. */
 export const SHADE_UNIFORMS = [
   ...TERRAIN_UNIFORMS,
-  'uSun', 'uSnowLine', 'uFogRange', 'uHorizonColor',
+  'uSun', 'uSnowLine', 'uFogRange', 'uHorizonColor', 'uWaterColor',
 ] as const;
 
 export const COMPOSITE_UNIFORMS = [
@@ -252,6 +252,7 @@ uniform uSun        : vec3<f32>;      // towards the sun, ENU, unit
 uniform uSnowLine   : f32;            // metres
 uniform uFogRange   : f32;            // metres to 1/e of the terrain colour
 uniform uHorizonColor : vec3<f32>;
+uniform uWaterColor : vec3<f32>;
 
 var heightsSampler : sampler;
 var heights        : texture_2d<f32>;
@@ -276,6 +277,15 @@ fn gradient(lv : i32, dLon : f32, dIso : f32) -> vec2<f32> {
   return vec2<f32>((hE - hW) * B.x / (2.0 * mpp), (hN - hS) * B.x / (2.0 * mpp));
 }
 
+/** 1 where the lake mask (the atlas's blue channel) marks this DEM post, 0 on dry ground. */
+fn waterAt(lv : i32, dLon : f32, dIso : f32) -> f32 {
+  let A = uniforms.uLvlA[lv];
+  let px = clamp(floor(A.x + dLon * A.z), 0.0, uniforms.uLevelPx - 1.0);
+  let py = clamp(floor(A.y - dIso * A.z), 0.0, uniforms.uLevelPx - 1.0) + f32(lv) * uniforms.uLevelPx;
+  let uv = vec2<f32>((px + 0.5) / uniforms.uTexSize.x, (py + 0.5) / uniforms.uTexSize.y);
+  return step(0.5, textureSampleLevel(heights, heightsSampler, uv, 0.0).b);
+}
+
 @fragment
 fn main(input : FragmentInputs) -> FragmentOutputs {
   let r = fragmentInputs.vRange;
@@ -285,10 +295,14 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
 
   let lv = levelFor(r);
   var g = gradient(lv, dLon, dIso);
+  var wet = waterAt(lv, dLon, dIso);
   if (f32(lv) + 1.0 < uniforms.uLevelCount) {
     let outer = uniforms.uLvlA[lv].w;
     let fade = smoothstep(outer * 0.86, outer, r);
-    if (fade > 0.0) { g = mix(g, gradient(lv + 1, dLon, dIso), fade); }
+    if (fade > 0.0) {
+      g = mix(g, gradient(lv + 1, dLon, dIso), fade);
+      wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
+    }
   }
   let n = normalize(vec3<f32>(-g.x, -g.y, 1.0));
   let slope = 1.0 - n.z;                 // 0 flat .. 1 vertical
@@ -306,6 +320,7 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   let snowy = smoothstep(uniforms.uSnowLine - 350.0, uniforms.uSnowLine + 50.0, h)
             * (1.0 - smoothstep(0.45, 0.7, slope));
   col = mix(col, snow, snowy);
+  col = mix(col, uniforms.uWaterColor, wet);
 
   // Plain Lambert with a floor: shadow sides keep their shape, lit faces
   // stand out. A sky term that lifted north faces flattened the relief.

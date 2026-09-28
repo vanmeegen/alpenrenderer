@@ -17,6 +17,8 @@ export const SNOW_LINE = 2900;
 /** Metres to 1/e of the terrain colour. */
 export const FOG_RANGE = 55000;
 export const HORIZON_COLOR: [number, number, number] = [0.80, 0.87, 0.95];
+/** Lakes: a mountain-lake blue, lit and hazed like the ground around it. */
+export const WATER_COLOR: [number, number, number] = [0.17, 0.33, 0.50];
 
 const DEG = Math.PI / 180;
 
@@ -40,9 +42,10 @@ const mix = (a: [number, number, number], b: [number, number, number], t: number
 
 /**
  * Linear RGB of a terrain pixel at altitude `h` metres, with the surface
- * normal `n` (east, north, up; unit) and ground range `range` metres.
+ * normal `n` (east, north, up; unit) and ground range `range` metres;
+ * `water` where the lake mask marks the post.
  */
-export function terrainColor(h: number, n: [number, number, number], range: number): [number, number, number] {
+export function terrainColor(h: number, n: [number, number, number], range: number, water = false): [number, number, number] {
   const slope = 1 - n[2];
   const valley: [number, number, number] = [0.47, 0.60, 0.33];
   const forest: [number, number, number] = [0.28, 0.43, 0.24];
@@ -55,6 +58,7 @@ export function terrainColor(h: number, n: [number, number, number], range: numb
   col = mix(col, rock, smoothstep(0.35, 0.6, slope) * 0.85);
   const snowy = smoothstep(SNOW_LINE - 350, SNOW_LINE + 50, h) * (1 - smoothstep(0.45, 0.7, slope));
   col = mix(col, snow, snowy);
+  if (water) col = [...WATER_COLOR];
   const s = sunVector();
   const diff = n[0] * s[0] + n[1] * s[1] + n[2] * s[2];
   const shade = shadeFactor(diff);

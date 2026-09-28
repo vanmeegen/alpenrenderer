@@ -37,7 +37,9 @@ describe('formatHash', () => {
 
 describe('readOptions', () => {
   test('defaults to WebGL2 and automatic quality', () => {
-    expect(readOptions('')).toEqual({ backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json' });
+    expect(readOptions('')).toEqual({
+      backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json', lakes: 'lakes/{x}_{y}.json',
+    });
   });
 
   test('tiles base becomes a URL template with a trailing slash', () => {
@@ -48,6 +50,10 @@ describe('readOptions', () => {
   test('peaks base becomes a cell URL template, default next to the app', () => {
     expect(readOptions('?peaks=/tests/e2e/fixtures/peaks').peaks).toBe('/tests/e2e/fixtures/peaks/{x}_{y}.json');
     expect(readOptions('?peaks=/p/').peaks).toBe('/p/{x}_{y}.json');
+  });
+
+  test('lakes base becomes a cell URL template like the peaks', () => {
+    expect(readOptions('?lakes=/tests/e2e/fixtures/lakes').lakes).toBe('/tests/e2e/fixtures/lakes/{x}_{y}.json');
   });
 
   test('backend and quality overrides', () => {

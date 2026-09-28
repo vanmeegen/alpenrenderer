@@ -55,7 +55,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { Camera } from '../../core/camera';
 import { DEG, MERC_PX, REFRACTION_K, effectiveRadiusAt, localRadius } from '../../core/geodesy';
 import { HeightField, Observer } from '../../core/heightfield';
-import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, SUN } from '../shading';
+import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, SUN, WATER_COLOR } from '../shading';
 import {
   COMPOSITE_FRAGMENT_GL, COMPOSITE_VERTEX_GL, TERRAIN_FRAGMENT_GL,
   TERRAIN_SHADE_FRAGMENT_GL, TERRAIN_VERTEX_GL,
@@ -156,6 +156,7 @@ export class GpuRenderer {
   fogRange = FOG_RANGE;
   skyTop: [number, number, number] = [0.36, 0.56, 0.86];
   horizonColor: [number, number, number] = [...HORIZON_COLOR];
+  waterColor: [number, number, number] = [...WATER_COLOR];
 
   /** How far the camera image is washed towards white, 0..1. */
   whiten = 0.62;
@@ -201,7 +202,7 @@ export class GpuRenderer {
   private stillSize: { width: number; height: number } | null = null;
   private lvlA = new Float32Array(MAX_LEVELS * 4);
   private lvlB = new Float32Array(MAX_LEVELS * 4);
-  private uploaded: number[] = [];
+  private uploaded: string[] = [];
   private frameTimes: number[] = [];
   private disposed = false;
 
@@ -327,7 +328,7 @@ export class GpuRenderer {
     this.engine.onContextRestoredObservable.add(() => {
       this.atlas?.dispose();
       this.atlas = null;
-      this.uploaded = this.uploaded.map(() => -1);
+      this.uploaded = this.uploaded.map(() => '');
       if (this.heightField) this.setHeightField(this.heightField);
     });
   }
@@ -516,7 +517,7 @@ export class GpuRenderer {
 
   /**
    * Uploads the clipmap as one stacked rgba8 atlas: levels tile down the
-   * texture, height packed as (R*256 + G) + bias. Integer and float texture
+   * texture, height packed as (R*256 + G) + bias, the lake mask in B. Integer and float texture
    * formats each come with device-dependent conditions; eight-bit channels do
    * not, and three bytes of range at one-metre steps is all the model holds.
    */
@@ -533,16 +534,18 @@ export class GpuRenderer {
       this.atlasData = new Uint8Array(need);
       this.atlas?.dispose();
       this.atlas = null;
-      this.uploaded = levels.map(() => -1);
+      this.uploaded = levels.map(() => '');
     }
     this.atlasLevelPx = h;
 
     let changed = false;
     levels.forEach((l, i) => {
-      if (this.uploaded[i] === l.version && this.atlas) return;
+      const stamp = `${l.version}:${l.waterVersion ?? 0}`;
+      if (this.uploaded[i] === stamp && this.atlas) return;
       changed = true;
       const base = i * w * h * 4;
       const raw = l.raw;
+      const water = l.water && l.water.length === raw.length ? l.water : null;
       for (let p = 0, o = base; p < raw.length; p++, o += 4) {
         // The stored value is already quantised; re-express it at one metre so
         // one packing works for every level.
@@ -550,10 +553,10 @@ export class GpuRenderer {
         const v = m < 0 ? 0 : m > 65535 ? 65535 : m;
         this.atlasData![o] = v >> 8;
         this.atlasData![o + 1] = v & 255;
-        this.atlasData![o + 2] = 0;
+        this.atlasData![o + 2] = water ? water[p] : 0;   // lake mask, see core/water.ts
         this.atlasData![o + 3] = 255;
       }
-      this.uploaded[i] = l.version;
+      this.uploaded[i] = stamp;
     });
 
     if (!this.atlas) {
@@ -732,6 +735,7 @@ export class GpuRenderer {
     sm.setFloat('uSnowLine', this.snowLine);
     sm.setFloat('uFogRange', this.fogRange);
     sm.setVector3('uHorizonColor', Vector3.FromArray(this.horizonColor));
+    sm.setVector3('uWaterColor', Vector3.FromArray(this.waterColor));
     // The shade pass is only worth its vertex cost when it will be seen.
     this.colorRtt.renderList = this.shaded ? this.sectors : [];
 

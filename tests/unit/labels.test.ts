@@ -6,11 +6,12 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { Camera } from '../../src/engine/core/camera';
-import { latToMercY, lonToMercX } from '../../src/engine/core/geodesy';
+import { latToMercY, lonToMercX, mercYToLat } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
 import { computeVisibility } from '../../src/engine/core/horizon';
 import { buildTargets, fmtEle, fmtRange, layoutLabels, pickLabel } from '../../src/engine/core/labels';
 import { Peak } from '../../src/engine/core/peaks';
+import { lakeLabel } from '../../src/engine/core/water';
 
 const LON = 10.0, LAT = 47.0;
 const PLAIN = 1500, WALL = 2600;
@@ -63,6 +64,47 @@ describe('buildTargets', () => {
     expect(wall.bearing).toBeCloseTo(0, 0);
     expect(wall.elevation).toBeCloseTo(Math.atan2(WALL - PLAIN - 1.7, WALL_M) * 180 / Math.PI, 0);
     expect(t.find((x) => x.peak.id === 'far')).toBeUndefined();
+  });
+
+  test('a lake anchors on its water surface, not on the highest ground around it', () => {
+    // The label point one DEM row south of the wall: a summit there would
+    // climb onto the wall (2600 m), a lake stays on its own surface (1500 m).
+    const shoreLat = mercYToLat(latToMercY(wallLat, 8) + 1, 8);
+    const lake = lakeLabel({ id: 'osm:way/1', name: 'Mauersee', lon: LON, lat: shoreLat, rings: [] });
+    expect(lake.kind).toBe('lake');
+    const t = buildTargets([lake, { id: 'p', name: 'Uferkopf', lon: LON, lat: shoreLat }], obs, hf, hf.maxRange);
+    const byId = Object.fromEntries(t.map((x) => [x.peak.id, x]));
+    expect(byId['osm:way/1'].anchorAlt).toBeCloseTo(PLAIN, 0);
+    expect(byId.p.anchorAlt).toBe(WALL);
+    // Its second line gives the surface height the DEM has, when OSM has none.
+    for (const x of t) x.visible = true;
+    const placed = layoutLabels(t.filter((x) => x.peak.kind === 'lake'), camera(0), opt());
+    expect(placed[0].lines).toEqual(['Mauersee', `1500 m · ${(byId['osm:way/1'].range / 1000).toFixed(1)} km`]);
+  });
+
+  test('a big lake whose centre is hidden behind a ridge is named where it shows, once', () => {
+    // A lake from 5 to 12 km north, 2 km wide: its label point at 10 km lies
+    // behind the wall at 8 km, its southern part in front of it is in view.
+    const ring = [LON - 0.013, north(5), LON + 0.013, north(5), LON + 0.013, north(12), LON - 0.013, north(12)];
+    const lake = lakeLabel({ id: 'osm:relation/9', name: 'Langsee', lon: LON, lat: north(10), area: 14e6, rings: [ring] });
+    expect(lake.spots?.length).toBeGreaterThan(0);
+    const t = buildTargets([lake], obs, hf, hf.maxRange);
+    computeVisibility(t, hf, PLAIN + 1.7);
+    const main = t.find((x) => x.spot === 0)!;
+    expect(main.visible).toBe(false);                     // the centre is behind the wall
+    const placed = layoutLabels(t, camera(0), opt());
+    expect(placed.map((p) => p.target.peak.name)).toEqual(['Langsee']);
+    expect(placed[0].target.range).toBeLessThan(WALL_M);  // on the part in front of the wall
+  });
+
+  test('a lake in full view keeps its label on its centre, not on the nearest spot', () => {
+    const ring = [LON - 0.013, north(2), LON + 0.013, north(2), LON + 0.013, north(6), LON - 0.013, north(6)];
+    const lake = lakeLabel({ id: 'osm:relation/8', name: 'Vorsee', lon: LON, lat: north(4), area: 8e6, rings: [ring] });
+    const t = buildTargets([lake], obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const placed = layoutLabels(t, camera(0), opt());
+    expect(placed.length).toBe(1);
+    expect(placed[0].target.spot).toBe(0);
   });
 
   test('orders by distance: the nearest summit first, however famous the ones behind', () => {

@@ -29,6 +29,8 @@ export interface LabelTarget {
   visible: boolean;
   /** Whether the sightline has been checked yet; until then `visible` is a placeholder false. */
   decided: boolean;
+  /** 0 at the main point; 1.. at the peak's spare spots, in order of preference. */
+  spot: number;
 }
 
 export interface PlacedLabel {
@@ -69,20 +71,26 @@ export function buildTargets(
   const eye = obs.ground + obs.eye;
   const out: LabelTarget[] = [];
   for (const p of peaks) {
-    // Anchor on the summit the renderer actually draws. A catalogue elevation
-    // can sit 130 m above the DEM's idea of the same summit; anchoring there
-    // leaves the label floating in the sky above its own mountain.
-    const anchorAlt = p.demEle ?? hf.summitNear(p.lon, p.lat, NEAR_ANCHOR_M);
-    const o = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye },
-      { lon: p.lon, lat: p.lat, alt: anchorAlt });
-    if (o.range > maxRange || o.range < 20) continue;
-    out.push({
-      peak: p,
-      east: o.east, north: o.north, up: o.up,
-      range: o.range, bearing: o.bearing, elevation: o.elevation,
-      anchorAlt,
-      visible: false,
-      decided: false,
+    const anchors = p.spots ? [{ lon: p.lon, lat: p.lat }, ...p.spots] : [{ lon: p.lon, lat: p.lat }];
+    anchors.forEach((a, spot) => {
+      // Anchor on the summit the renderer actually draws. A catalogue elevation
+      // can sit 130 m above the DEM's idea of the same summit; anchoring there
+      // leaves the label floating in the sky above its own mountain. A lake's
+      // label point is on its water; the summit search would climb the shore.
+      const anchorAlt = (spot === 0 ? p.demEle : undefined)
+        ?? (p.kind === 'lake' ? hf.groundAt(a.lon, a.lat) : hf.summitNear(a.lon, a.lat, NEAR_ANCHOR_M));
+      const o = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye },
+        { lon: a.lon, lat: a.lat, alt: anchorAlt });
+      if (o.range > maxRange || o.range < 20) return;
+      out.push({
+        peak: p,
+        east: o.east, north: o.north, up: o.up,
+        range: o.range, bearing: o.bearing, elevation: o.elevation,
+        anchorAlt,
+        visible: false,
+        decided: false,
+        spot,
+      });
     });
   }
   // Near before far. The hill in front is what a person on the spot asks
@@ -108,9 +116,18 @@ export function layoutLabels(
   const boxes: PlacedLabel[] = [];
   const margin = 4;
 
+  // One label per summit or lake: among its visible anchors, the most
+  // preferred (its main point if that shows, else the first spare spot).
+  const chosen = new Map<string, LabelTarget>();
+  for (const t of targets) {
+    if (!t.visible) continue;
+    const c = chosen.get(t.peak.id);
+    if (!c || t.spot < c.spot) chosen.set(t.peak.id, t);
+  }
+
   for (let i = 0; i < targets.length && placed.length < opt.maxLabels; i++) {
     const t = targets[i];
-    if (!t.visible) continue;
+    if (!t.visible || chosen.get(t.peak.id) !== t) continue;
     const w = cam.project(t.east, t.north, t.up, ndc);
     if (w <= 0) continue;
     const ax = (ndc[0] * 0.5 + 0.5) * opt.width;
@@ -119,7 +136,7 @@ export function layoutLabels(
 
     const detailed = placed.length < opt.detailed;
     const lines = detailed
-      ? [t.peak.name, `${fmtEle(t.peak)} · ${fmtRange(t.range)}`]
+      ? [t.peak.name, `${fmtEle(t.peak) || (t.peak.kind === 'lake' ? `${Math.round(t.anchorAlt)} m` : '')} · ${fmtRange(t.range)}`]
       : [t.peak.name];
     const bw = Math.max(...lines.map((s, li) => opt.measure(s, li === 0))) + 12;
     const bh = lines.length * opt.lineHeight + 6;

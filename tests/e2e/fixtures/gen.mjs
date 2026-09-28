@@ -201,6 +201,13 @@ mkdirSync(peaksDir, { recursive: true });
 writeFileSync(join(peaksDir, '10_47.json'), JSON.stringify(T.PEAKS));
 console.log(`fixture peaks: ${T.PEAKS.length} in ${peaksDir}/10_47.json`);
 
+// The lake catalogue: the Testsee, filed under the cell of its label point.
+const lakesDir = join(here, 'lakes');
+mkdirSync(lakesDir, { recursive: true });
+const lakeCell = `${Math.floor(T.LAKE.lon)}_${Math.floor(T.LAKE.lat)}.json`;
+writeFileSync(join(lakesDir, lakeCell), JSON.stringify(T.LAKES));
+console.log(`fixture lakes: ${T.LAKES.length} in ${lakesDir}/${lakeCell}`);
+
 // The fake camera: one 640x480 frame, light grey above, dark grey below (Y4M
 // 4:2:0, no chroma, so no colour-matrix ambiguity). Chromium plays it as the
 // device camera with --use-file-for-fake-video-capture.

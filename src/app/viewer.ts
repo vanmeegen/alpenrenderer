@@ -13,6 +13,8 @@ import { LabelTarget, PlacedLabel, buildTargets, layoutLabels, pickLabel } from 
 import { Peak } from '../engine/core/peaks';
 import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
 import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
+import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
+import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
 import { ClipmapStreamer, ClipmapConfig, DEFAULT_CLIPMAP, LOW_CLIPMAP } from '../engine/sources/clipmap';
 import { TerrariumSource } from '../engine/sources/terrarium';
 import { TileStore } from '../engine/sources/tilestore';
@@ -33,6 +35,11 @@ const VISIBILITY_BUDGET_MS = 4;
 const REBUILD_SETTLE_MS = 300;
 /** Summits beyond this are not labelled, km. */
 const LABEL_RANGE_KM = 260;
+/**
+ * Lakes are loaded this far out: beyond it even Lake Geneva is a sliver on
+ * the horizon, and the coarse outer levels could not draw it anyway.
+ */
+const LAKE_RANGE_KM = 120;
 const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
 
 /** What the card shows about a tapped summit. */
@@ -40,6 +47,8 @@ export interface PeakInfo {
   id: string;
   name: string;
   ele?: number;
+  /** A summit or a lake (the card says "See" for a lake). */
+  kind: 'peak' | 'lake';
   /** Ground range, metres, and true bearing, degrees. */
   range: number;
   bearing: number;
@@ -102,10 +111,18 @@ export class Viewer {
   readonly source: TerrariumSource;
   readonly quality: 'high' | 'low';
   readonly catalog: PeakCatalog;
+  readonly lakeCatalog: LakeCatalog;
   readonly feed = new CameraFeed();
   private photo: (PhotoStatus & { pixels: Uint8ClampedArray; exif: ExifInfo }) | null = null;
   private painter: LabelPainter | null;
   private peaks: Peak[] = [];
+  private lakes: Lake[] = [];
+  private lakeLabels: Peak[] = [];
+  private lakeGeneration = 0;
+  /** Bumped when the lake list changes, so every level's mask is redrawn. */
+  private lakesVersion = 0;
+  /** Per level: what its current water mask was drawn from. */
+  private waterStamp = new WeakMap<object, string>();
   private targets: LabelTarget[] = [];
   private visibility: VisibilityJob | null = null;
   private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
@@ -147,6 +164,7 @@ export class Viewer {
     this.controls.model.onTap = (x, y) => this.tap(x, y);
     this.sensors = new SensorLook(this.camera);
     this.catalog = new PeakCatalog(urlFetcher(opt.peaks));
+    this.lakeCatalog = new LakeCatalog(lakeFetcher(opt.lakes));
     this.painter = overlay ? new LabelPainter(overlay) : null;
     this.camera.set({ yaw: view.yaw, pitch: view.pitch, fov: view.fov });
   }
@@ -358,6 +376,7 @@ export class Viewer {
     this.onView?.(this.current);
     void this.coverage.around(this.view.lon, this.view.lat).then((s) => { this.surveys = s; });
     this.loadPeaks();
+    this.loadLakes();
     await this.streamer.setCenter(this.view.lon, this.view.lat);
   }
 
@@ -372,15 +391,46 @@ export class Viewer {
     });
   }
 
+  /** Lakes around the standpoint: water on the terrain and names among the labels. */
+  private loadLakes() {
+    const gen = ++this.lakeGeneration;
+    const { lon, lat } = this.view;
+    void this.lakeCatalog.around(lon, lat, LAKE_RANGE_KM).then((lakes) => {
+      if (gen !== this.lakeGeneration) return;
+      this.lakes = lakes;
+      this.lakeLabels = lakes.map(lakeLabel);
+      this.lakesVersion++;
+      this.applyWater();
+      this.renderer.setHeightField(this.streamer.heightField);
+      this.rebuildTargets();
+    });
+  }
+
+  /**
+   * Burns the lakes into every filled level whose grid or data changed since
+   * its mask was drawn (a refill, a recentre, a new lake list).
+   */
+  private applyWater() {
+    for (const l of this.streamer.heightField.levels) {
+      if (!l.filled) continue;
+      const stamp = `${l.version}|${l.px0},${l.py0}|${this.lakesVersion}`;
+      if (this.waterStamp.get(l) === stamp) continue;
+      this.waterStamp.set(l, stamp);
+      l.water = this.lakes.length ? rasterizeLakes(l, this.lakes) : undefined;
+      l.waterVersion = (l.waterVersion ?? 0) + 1;
+    }
+  }
+
   /** Summit geometry and what the terrain hides: once per position or level, not per frame. */
   private rebuildTargets() {
     const hf = this.streamer.heightField;
     // The selection survives a rebuild: drawLabels re-binds it to the same
     // summit by id. Only a new standpoint (relocate) clears it.
-    if (!this.peaks.length || !hf.levels.length) { this.targets = []; this.visibleCount = 0; return; }
+    const named = this.lakeLabels.length ? [...this.peaks, ...this.lakeLabels] : this.peaks;
+    if (!named.length || !hf.levels.length) { this.targets = []; this.visibleCount = 0; return; }
     const eye = this.renderer.eyeAltitude;
     const obs = { lon: this.view.lon, lat: this.view.lat, ground: eye, eye: 0 };
-    this.targets = buildTargets(this.peaks, obs, hf, Math.min(LABEL_RANGE_KM * 1000, hf.maxRange));
+    this.targets = buildTargets(named, obs, hf, Math.min(LABEL_RANGE_KM * 1000, hf.maxRange));
     // Sightlines over frames, not in one go: see VisibilityJob.
     this.visibility = new VisibilityJob(this.targets, hf, eye);
     this.visibleCount = 0;
@@ -435,6 +485,7 @@ export class Viewer {
 
   private onLevel() {
     this.applyAltitude();
+    this.applyWater();
     this.renderer.setHeightField(this.streamer.heightField);
     this.scheduleRebuildTargets();
   }
@@ -518,7 +569,8 @@ function describe(l: PlacedLabel): PeakInfo {
   return {
     id: p.id,
     name: p.name,
-    ele: p.ele ?? p.demEle,
+    ele: p.ele ?? p.demEle ?? (p.kind === 'lake' ? l.target.anchorAlt : undefined),
+    kind: p.kind === 'lake' ? 'lake' : 'peak',
     range: l.target.range,
     bearing: l.target.bearing,
     compass: COMPASS[Math.round(l.target.bearing / 45) % 8],

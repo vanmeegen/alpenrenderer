@@ -42,6 +42,13 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   „Ausrichten“ legt die berechnete Skyline auf die des Fotos (Richtung,
   Neigung, Rolle, bei unbekanntem Objektiv auch das Sichtfeld) und sagt, wie
   sicher es sich ist; ein Finger korrigiert weiterhin von Hand.
+- **Seen**: Benannte Seen aus OpenStreetMap (ab 1 ha, ohne Flüsse und
+  Kanäle) liegen blau auf dem Gelände und tragen ihren Namen blau und kursiv
+  mit Seehöhe; ein großer See, dessen Mitte hinter einem Grat liegt, wird
+  dort beschriftet, wo er zu sehen ist. Der Katalog liegt statisch unter
+  `public/lakes/` (Build: `node tools/build_lakes.mjs`), die Wassermaske
+  wird pro Clipmap-Level gerastert und im freien Kanal des Höhenatlas an den
+  Shader gegeben.
 - **Bedienung**: Das Menü ist eine schmale Icon-Leiste am linken Rand,
   Status und Panels stehen daneben und scrollen statt über den Bildschirm
   zu laufen; „Menü ausblenden“ lässt nur einen Knopf stehen (Handy quer).
@@ -94,7 +101,8 @@ der App per `?tiles=` mitgeben:
 URL-Parameter: `#lon`, `lat`, `alt` (absolute Augenhöhe, sonst 1,7 m über dem höchsten Boden im Umkreis des Höhenbereichs, Standard 1 km, damit das Auge nicht im Hang oder hinter der nächsten Kuppe steckt),
 `yaw`, `pitch`, `fov`, `p=<ort>` für einen der Standpunkte im Menü;
 `?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität,
-`?peaks=<verzeichnis>` für einen anderen Gipfelkatalog (Zellen `{x}_{y}.json`).
+`?peaks=<verzeichnis>` für einen anderen Gipfelkatalog (Zellen `{x}_{y}.json`),
+`?lakes=<verzeichnis>` ebenso für den Seenkatalog.
 
 ## Aufbau
 
@@ -116,7 +124,8 @@ Shading-Pass erweitert.
   offener nationaler Höhenmodelle (swissALTI3D, BEV, Bayern DGM1, Südtirol,
   Aosta, IGN …) mit Copernicus GLO-30 als globalem Fallback. Die Quellen
   unter dem jeweiligen Standpunkt zeigt die App unter „Quellen“.
-- Gipfel (`public/peaks/`, `natural=peak` mit Namen, per Overpass gebaut) und
+- Gipfel (`public/peaks/`, `natural=peak` mit Namen, per Overpass gebaut),
+  Seen (`public/lakes/`, `natural=water` mit Namen, per Overpass gebaut) und
   Standpunkt-Karte: © OpenStreetMap contributors, ODbL; die Kartenkacheln
   kommen vom Standard-Tile-Layer der OpenStreetMap Foundation.
 - Code: MIT. Drittkomponenten in `THIRD-PARTY-NOTICES.md`.

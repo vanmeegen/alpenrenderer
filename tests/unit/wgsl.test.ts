@@ -114,6 +114,18 @@ describe('shader dialect parity', () => {
     expect(GL.COMPOSITE_FRAGMENT_GL).toContain('precision highp sampler2D;');
   });
 
+  test('both dialects paint water where the atlas\'s blue channel marks it', async () => {
+    // The water mask rides in the atlas's spare channel (renderer.ts packs
+    // it); the shade pass reads it at the cell and mixes in uWaterColor.
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    expect(S.SHADE_UNIFORMS).toContain('uWaterColor');
+    for (const src of [GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_SHADE_FRAGMENT]) {
+      expect(src).toMatch(/fn waterAt|float waterAt/);
+      expect(src).toContain('.b');
+      expect(src).toContain('uWaterColor');
+    }
+  });
+
   test('the GLSL file declares the same uniform names as the WGSL lists', async () => {
     const GL = await import('../../src/engine/render/gpu/glsl');
     const declared = (src: string) => new Set([...src.matchAll(/uniform\s+\w+\s+(\w+)/g)].map((m) => m[1]));
