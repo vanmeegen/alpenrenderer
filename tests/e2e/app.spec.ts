@@ -11,7 +11,7 @@ const R_EFF_M = 6371008.8 / (1 - 0.13);
 const W = 1000, H = 600;
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, q: 'high', ...query });
+  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', q: 'high', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;
@@ -361,9 +361,9 @@ test.describe('appearance', () => {
     // over ten seconds on a slow CI runner, and the matcher needs two of
     // them in a row before it compares: give it time.
     test.slow();
-    // The test range's own three summits, not the Alpine catalogue: the golden
-    // must not change when the catalogue or the label choice does.
-    await page.goto(url({}, { peaks: '/tests/e2e/fixtures/peaks/' }));
+    // The test range's own summits and lake (url() sets them), not the Alpine
+    // catalogues: the golden must not change when a catalogue does.
+    await page.goto(url());
     await ready(page);
     await expect(page).toHaveScreenshot('testhorn.png', {
       mask: [page.locator('.pointer-events-auto'), page.locator('.alp-compass')],

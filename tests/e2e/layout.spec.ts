@@ -12,7 +12,7 @@ const W = 844, H = 390;
 test.use({ viewport: { width: W, height: H }, hasTouch: true });
 
 function url() {
-  const q = new URLSearchParams({ tiles: TILES, q: 'high' });
+  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', q: 'high' });
   const h = new URLSearchParams({ lon: String(STAND.lon), lat: String(STAND.lat), yaw: '90', pitch: '0', fov: '60' });
   return `/dist/?${q}#${h}`;
 }

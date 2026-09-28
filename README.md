@@ -125,7 +125,7 @@ Shading-Pass erweitert.
   Aosta, IGN …) mit Copernicus GLO-30 als globalem Fallback. Die Quellen
   unter dem jeweiligen Standpunkt zeigt die App unter „Quellen“.
 - Gipfel (`public/peaks/`, `natural=peak` mit Namen, per Overpass gebaut),
-  Seen (`public/lakes/`, `natural=water` mit Namen, per Overpass gebaut) und
+  Seen (`public/lakes/`, 10 374 Seen, `natural=water` mit Namen, per Overpass gebaut) und
   Standpunkt-Karte: © OpenStreetMap contributors, ODbL; die Kartenkacheln
   kommen vom Standard-Tile-Layer der OpenStreetMap Foundation.
 - Code: MIT. Drittkomponenten in `THIRD-PARTY-NOTICES.md`.
