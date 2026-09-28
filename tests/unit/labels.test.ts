@@ -65,9 +65,11 @@ describe('buildTargets', () => {
     expect(t.find((x) => x.peak.id === 'far')).toBeUndefined();
   });
 
-  test('ranks by importance: the high, prominent name first', () => {
+  test('orders by distance: the nearest summit first, however famous the ones behind', () => {
+    // Hinterhorn (3500 m) outranks the Osthügel (1510 m) by any measure of
+    // fame; standing there, the hill in front is the one to name first.
     const t = buildTargets(peaks, obs, hf, hf.maxRange);
-    expect(t[0].peak.id).toBe('behind');
+    expect(t.map((x) => x.peak.id)).toEqual(['east', 'wall', 'behind']);
   });
 });
 
@@ -84,7 +86,7 @@ describe('computeVisibility', () => {
     // Forty thousand catalogue summits take a second or two of sightlines;
     // done in one go on the main thread, the app freezes for that long at
     // every level that arrives. The job decides as many as its budget allows
-    // per frame, most important first, and the rest wait for the next frame.
+    // per frame, nearest first, and the rest wait for the next frame.
     const { VisibilityJob } = await import('../../src/engine/core/horizon');
     const t = buildTargets(peaks, obs, hf, hf.maxRange);
     let clock = 0;
@@ -161,6 +163,24 @@ describe('layoutLabels', () => {
     expect(m.ay).toBeLessThan(60);
     expect(m.by).toBeGreaterThanOrEqual(2);
     expect(m.by + m.bh).toBeLessThan(600);
+  });
+
+  test('near before far: with room for one label the near hill gets it; zoomed onto the famous peak, it gets its own', () => {
+    // A nameless-looking hill 3 km east and a famous 4000er 6 km out at 97°:
+    // at 60° both are in view and the near one wins the only slot.
+    const pair: Peak[] = [
+      { id: 'near', name: 'Nahkopf', lon: east(3), lat: LAT, ele: 1510 },
+      { id: 'famous', name: 'Fernhorn', lon: LON + (6000 * Math.sin((97 * Math.PI) / 180)) / M_PER_DEG_LON, lat: LAT + (6000 * Math.cos((97 * Math.PI) / 180)) / M_PER_DEG_LAT, ele: 4000, prom: 2500 },
+    ];
+    const t = buildTargets(pair, obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    expect(layoutLabels(t, camera(90), opt(1000, 600, 1)).map((p) => p.target.peak.id)).toEqual(['near']);
+    // Zoomed in on 97°, the hill leaves the frame and the famous peak is named.
+    const cam = new Camera();
+    cam.aspect = 1000 / 600;
+    cam.set({ yaw: 97, pitch: 0, fov: 5 });
+    cam.update();
+    expect(layoutLabels(t, cam, opt(1000, 600, 1)).map((p) => p.target.peak.id)).toEqual(['famous']);
   });
 
   test('looking away, nothing is placed', () => {

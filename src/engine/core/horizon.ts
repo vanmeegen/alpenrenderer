@@ -66,8 +66,8 @@ function sightlineClear(t: LabelTarget, hf: HeightField, eyeAlt: number, opt: Ho
 /**
  * The sightline check spread over frames. Forty thousand catalogue summits
  * take a second or two of DEM marches; done in one go that is a frozen app
- * at every level that arrives. `step` decides targets in order (most
- * important first, as `buildTargets` sorts them) until the budget is spent,
+ * at every level that arrives. `step` decides targets in order (nearest
+ * first, as `buildTargets` sorts them) until the budget is spent,
  * and the render loop calls it again next frame. Undecided targets read as
  * not visible, so labels appear as they are confirmed rather than all at once.
  */

@@ -361,7 +361,9 @@ test.describe('appearance', () => {
     // over ten seconds on a slow CI runner, and the matcher needs two of
     // them in a row before it compares: give it time.
     test.slow();
-    await page.goto(url());
+    // The test range's own three summits, not the Alpine catalogue: the golden
+    // must not change when the catalogue or the label choice does.
+    await page.goto(url({}, { peaks: '/tests/e2e/fixtures/peaks/' }));
     await ready(page);
     await expect(page).toHaveScreenshot('testhorn.png', {
       mask: [page.locator('.pointer-events-auto'), page.locator('.alp-compass')],

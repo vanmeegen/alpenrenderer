@@ -12,7 +12,7 @@
 import { Camera } from './camera';
 import { localOffset } from './geodesy';
 import { HeightField, Observer } from './heightfield';
-import { Peak, peakImportance } from './peaks';
+import { Peak } from './peaks';
 
 export interface LabelTarget {
   peak: Peak;
@@ -26,8 +26,6 @@ export interface LabelTarget {
   elevation: number;
   /** Altitude the anchor sits at — the DEM's summit, not the catalogue's. */
   anchorAlt: number;
-  /** Sort key: how much this summit deserves the screen space. */
-  score: number;
   visible: boolean;
   /** Whether the sightline has been checked yet; until then `visible` is a placeholder false. */
   decided: boolean;
@@ -83,19 +81,22 @@ export function buildTargets(
       east: o.east, north: o.north, up: o.up,
       range: o.range, bearing: o.bearing, elevation: o.elevation,
       anchorAlt,
-      // Importance falls off with distance, but slowly: Mont Blanc at 85 km
-      // still earns a label over a nameless 3000er at 6 km.
-      score: peakImportance(p) - o.range / 260,
       visible: false,
       decided: false,
     });
   }
-  out.sort((a, b) => b.score - a.score);
+  // Near before far. The hill in front is what a person on the spot asks
+  // about; famous summits behind it get their names once zooming leaves room
+  // (fewer near summits in the frame, labels further apart). Ranking by fame
+  // instead filled the slots with 3000ers 50 km out and left the mountain
+  // next to the standpoint unnamed. The sightline job works in this order
+  // too, so the near labels are also the first to appear.
+  out.sort((a, b) => a.range - b.range);
   return out;
 }
 
 /**
- * Screen placement. Labels are claimed in importance order and stacked
+ * Screen placement. Labels are claimed in target order (nearest first) and stacked
  * upwards from their summit; a label that cannot find a free slot is dropped
  * rather than allowed to overlap, so the ones that survive stay readable.
  */

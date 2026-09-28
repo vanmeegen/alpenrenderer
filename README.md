@@ -29,7 +29,8 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   der Kompassrose.
 - **Inkrement 3a** (Gipfelnamen): Gipfel aus OpenStreetMap stehen als Label
   im Panorama, verdeckte bleiben weg (DEM-Marsch mit Krümmung und
-  Refraktion), Tippen öffnet Höhe, Entfernung, Peilung und Wikipedia. Der
+  Refraktion), nahe Gipfel zuerst, ferne kommen beim Zoomen dazu; Tippen
+  öffnet Höhe, Entfernung, Peilung und Wikipedia. Der
   Katalog liegt statisch als Zellen unter `public/peaks/` (Build:
   `node tools/build_peaks.mjs`), die App fragt Overpass nie selbst.
 - **Inkrement 3b** (Live-Kamera): „Kamera“ legt die Grate und Gipfelnamen
