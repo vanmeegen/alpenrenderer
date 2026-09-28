@@ -553,6 +553,25 @@ Fertig, wenn: Ein Handyfoto vom Gornergrat mit EXIF-GPS ergibt ohne manuelle
 Korrektur ein Overlay, bei dem Matterhorn, Dent Blanche und Weisshorn richtig
 beschriftet sind, und der Live-Modus auf iOS und Android läuft.
 
+### 8.x Seen (2026-09-28)
+
+Zur Orientierung liegen benannte Seen aus OpenStreetMap blau auf dem
+Gelände und tragen ihren Namen. Umsetzung:
+
+- Katalog `public/lakes/{x}_{y}.json` wie bei den Gipfeln, gebaut von
+  `tools/build_lakes.mjs` (Overpass, `natural=water` mit Namen, ohne
+  Flüsse, Kanäle und Becken, ab 1 ha; Ringe aus Multipolygon-Stücken,
+  Douglas-Peucker 5–25 m, Label-Punkt auf offenem Wasser, jeder See in der
+  Zelle seines Label-Punkts).
+- Wassermaske pro Clipmap-Level auf dem DEM-Raster (even-odd, Inseln
+  trocken), im freien B-Kanal des Höhenatlas; der Shade-Pass mischt dort
+  die Wasserfarbe unter dasselbe Licht und denselben Dunst.
+- Seen-Labels ankern auf der Wasseroberfläche; große Seen haben bis zu acht
+  Ersatzpunkte, damit ein halb verdeckter See (Walchensee vom Herzogstand)
+  dort benannt wird, wo er zu sehen ist.
+- Offen: Spiegelung/Glanz auf dem Wasser, Flüsse als Linien, ein eigener
+  Schalter für Seen-Labels.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):
