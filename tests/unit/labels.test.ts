@@ -107,6 +107,32 @@ describe('buildTargets', () => {
     expect(placed[0].target.spot).toBe(0);
   });
 
+  test('with the drawn surface given, a label on screen sits on the summit as drawn; only labels on screen pay for it', () => {
+    // The mesh draws the wall 40 m lower than the DEM holds it; the label goes there.
+    const asked: string[] = [];
+    const drawn = (lon: number, lat: number) => { asked.push(`${lon.toFixed(4)},${lat.toFixed(4)}`); return WALL - 40; };
+    const lake = lakeLabel({ id: 'osm:way/2', name: 'Nordsee', lon: LON + 0.001, lat: north(4), rings: [] });
+    const t = buildTargets([...peaks, lake], obs, hf, hf.maxRange, drawn);
+    expect(asked.length).toBe(0);                                  // nothing computed up front
+    for (const x of t) x.visible = true;
+    const placed = layoutLabels(t, camera(0), opt());
+    const wall = placed.find((p) => p.target.peak.id === 'wall')!;
+    expect(wall.target.anchorAlt).toBe(WALL - 40);
+    const elev = Math.atan2(WALL - 40 - PLAIN - 1.7, WALL_M);
+    expect(wall.ay).toBeCloseTo(300 - 300 * Math.tan(elev) / Math.tan(Math.PI / 6), 0);
+    // The lake keeps its water; the Osthügel, off to the east, was never asked about.
+    expect(placed.find((p) => p.target.peak.id === 'osm:way/2')!.target.anchorAlt).toBeCloseTo(PLAIN, 0);
+    expect(asked.length).toBe(2);                                  // the wall and the Hinterhorn, both in view
+    // Asked once, remembered: a second frame asks nothing.
+    layoutLabels(t, camera(0), opt());
+    expect(asked.length).toBe(2);
+    // A surface above the DEM summit never lifts the anchor.
+    const high = buildTargets(peaks, obs, hf, hf.maxRange, () => WALL + 500);
+    for (const x of high) x.visible = true;
+    layoutLabels(high, camera(0), opt());
+    expect(high.find((x) => x.peak.id === 'wall')!.anchorAlt).toBe(WALL);
+  });
+
   test('orders by distance: the nearest summit first, however famous the ones behind', () => {
     // Hinterhorn (3500 m) outranks the Osthügel (1510 m) by any measure of
     // fame; standing there, the hill in front is the one to name first.

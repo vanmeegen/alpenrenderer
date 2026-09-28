@@ -15,6 +15,7 @@ import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
 import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
 import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
+import { meshTopNear } from '../engine/render/mesh';
 import { ClipmapStreamer, ClipmapConfig, DEFAULT_CLIPMAP, LOW_CLIPMAP } from '../engine/sources/clipmap';
 import { TerrariumSource } from '../engine/sources/terrarium';
 import { TileStore } from '../engine/sources/tilestore';
@@ -430,7 +431,10 @@ export class Viewer {
     if (!named.length || !hf.levels.length) { this.targets = []; this.visibleCount = 0; return; }
     const eye = this.renderer.eyeAltitude;
     const obs = { lon: this.view.lon, lat: this.view.lat, ground: eye, eye: 0 };
-    this.targets = buildTargets(named, obs, hf, Math.min(LABEL_RANGE_KM * 1000, hf.maxRange));
+    // Labels sit on the summits as the mesh draws them, not on the DEM's sharper ones.
+    const mesh = this.renderer.meshParams();
+    this.targets = buildTargets(named, obs, hf, Math.min(LABEL_RANGE_KM * 1000, hf.maxRange),
+      mesh ? (lon, lat) => meshTopNear(hf, mesh, lon, lat, eye) : undefined);
     // Sightlines over frames, not in one go: see VisibilityJob.
     this.visibility = new VisibilityJob(this.targets, hf, eye);
     this.visibleCount = 0;

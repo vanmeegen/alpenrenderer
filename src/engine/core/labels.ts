@@ -31,6 +31,11 @@ export interface LabelTarget {
   decided: boolean;
   /** 0 at the main point; 1.. at the peak's spare spots, in order of preference. */
   spot: number;
+  /**
+   * The drawn height at the anchor, asked the first time the label lands on
+   * screen and then dropped (see buildTargets' `drawn`); null once settled.
+   */
+  settle: (() => number) | null;
 }
 
 export interface PlacedLabel {
@@ -67,6 +72,15 @@ const NEAR_ANCHOR_M = 140;
  */
 export function buildTargets(
   peaks: Peak[], obs: Observer, hf: HeightField, maxRange: number,
+  /**
+   * The height the renderer actually draws around a point (render/mesh.ts
+   * `meshTopNear`). Far out the mesh rings are a percent or two of the range
+   * apart and a sharp summit is drawn lower than the DEM holds it; zoomed
+   * in, a label on the DEM summit floats above the drawn one. Never raises
+   * an anchor, only lowers it onto the drawn summit. Asked lazily, by
+   * layoutLabels, for labels that land on screen.
+   */
+  drawn?: (lon: number, lat: number) => number,
 ): LabelTarget[] {
   const eye = obs.ground + obs.eye;
   const out: LabelTarget[] = [];
@@ -90,6 +104,9 @@ export function buildTargets(
         visible: false,
         decided: false,
         spot,
+        // Sixteen mesh samples a summit: cheap for the few on screen, a
+        // frozen phone for forty thousand at every rebuild. So later.
+        settle: drawn && p.kind !== 'lake' ? () => drawn(a.lon, a.lat) : null,
       });
     });
   }
@@ -128,11 +145,23 @@ export function layoutLabels(
   for (let i = 0; i < targets.length && placed.length < opt.maxLabels; i++) {
     const t = targets[i];
     if (!t.visible || chosen.get(t.peak.id) !== t) continue;
-    const w = cam.project(t.east, t.north, t.up, ndc);
+    let w = cam.project(t.east, t.north, t.up, ndc);
     if (w <= 0) continue;
     const ax = (ndc[0] * 0.5 + 0.5) * opt.width;
-    const ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
+    let ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
     if (ax < -40 || ax > opt.width + 40 || ay < -40 || ay > opt.height + 40) continue;
+    if (t.settle) {
+      // On screen for the first time: down onto the summit as the mesh draws it.
+      const drawnAlt = t.settle();
+      t.settle = null;
+      if (drawnAlt < t.anchorAlt) {
+        t.up -= t.anchorAlt - drawnAlt;
+        t.anchorAlt = drawnAlt;
+        t.elevation = (Math.atan2(t.up, t.range) * 180) / Math.PI;
+        w = cam.project(t.east, t.north, t.up, ndc);
+        ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
+      }
+    }
 
     const detailed = placed.length < opt.detailed;
     const lines = detailed

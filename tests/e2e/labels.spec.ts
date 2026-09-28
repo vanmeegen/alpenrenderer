@@ -58,6 +58,31 @@ test.describe('summit labels', () => {
     await expect(page.getByText('Gipfel 2/3')).toBeVisible();
   });
 
+  test('zoomed in on a phone-quality mesh, the Testhorn label sits on the apex as drawn, not above it', async ({ page }) => {
+    // Beyond a few kilometres the polar mesh steps a percent or two of the
+    // range between rings, so a sharp apex falls between two rings and is
+    // drawn lower than the DEM holds it. At 60° nobody sees that; zoomed to
+    // 5° a label anchored on the DEM summit floats tens of pixels above the
+    // drawn one (Schynige Platte, 2026). The anchor follows the mesh.
+    const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low' });
+    await page.goto(`/dist/?${q}#lon=${STAND.lon}&lat=${STAND.lat}&yaw=90&pitch=26&fov=5`);
+    await ready(page);
+    await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Testhorn']);
+    const [t] = await labels(page);
+    // The drawn apex: the first terrain row from the top in the label's column.
+    const apex = await page.evaluate(async (x) => {
+      const r = await (window as any).alp.renderer.readRange();
+      const c = Math.round((x * r.width) / 1000);
+      for (let y = 0; y < r.height; y++) {
+        const row = r.height - 1 - y;                  // render targets read back bottom-up
+        if (r.pixels[(row * r.width + c) * 4 + 3] > 0) return (y * 600) / r.height;
+      }
+      return null;
+    }, t.ax);
+    expect(apex).not.toBeNull();
+    expect(Math.abs(t.ay - apex!)).toBeLessThan(3);
+  });
+
   test('looking north, the ridge is labelled where curvature and refraction put it', async ({ page }) => {
     await page.goto(url({ yaw: 0 }));
     const s = await ready(page);

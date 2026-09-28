@@ -56,6 +56,7 @@ import { Camera } from '../../core/camera';
 import { DEG, MERC_PX, REFRACTION_K, effectiveRadiusAt, localRadius } from '../../core/geodesy';
 import { HeightField, Observer } from '../../core/heightfield';
 import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, SUN, WATER_COLOR } from '../shading';
+import { RadialParams, radialParams } from '../mesh';
 import {
   COMPOSITE_FRAGMENT_GL, COMPOSITE_VERTEX_GL, TERRAIN_FRAGMENT_GL,
   TERRAIN_SHADE_FRAGMENT_GL, TERRAIN_VERTEX_GL,
@@ -642,25 +643,12 @@ export class GpuRenderer {
   // ----------------------------------------------------------------- render
 
   private radialParams(hf: HeightField) {
-    const { azimuths, rows } = this.quality;
-    const azStep = (2 * Math.PI) / azimuths;
-    // Step through the middle segment at the finest level's post spacing, but
-    // never finer than 12 m: with 6.6 m LiDAR-grade data the rows would all be
-    // spent inside the first two kilometres and the far field would coarsen.
-    // The finest level still feeds the *height* of every vertex it covers.
-    const post = Math.max(12, hf.levels[0]?.res ?? 30);
-    const maxRange = Math.max(hf.maxRange, post * 64);
-    const r0 = 2;
-    const ratioNear = 1.15;
-    const logRatioNear = Math.log(ratioNear);
-    const jNear = Math.max(1, Math.ceil(Math.log(post / (ratioNear - 1) / r0) / logRatioNear));
-    const rNearEnd = r0 * Math.exp(jNear * logRatioNear);
-    const splitTarget = Math.min(post / azStep, maxRange * 0.6);
-    const jSplit = Math.min(rows - 8, jNear
-      + Math.max(2, Math.round((splitTarget - rNearEnd) / post)));
-    const rSplit = rNearEnd + (jSplit - jNear) * post;
-    const logRatioFar = Math.log(Math.max(maxRange, rSplit * 1.5) / rSplit) / (rows - 1 - jSplit);
-    return { azStep, r0, logRatioNear, jNear, rNearEnd, post, jSplit, rSplit, logRatioFar };
+    return radialParams(this.quality, hf);
+  }
+
+  /** The ring layout the mesh uses now; see render/mesh.ts. */
+  meshParams(): RadialParams | null {
+    return this.heightField ? radialParams(this.quality, this.heightField) : null;
   }
 
   resize(): { w: number; h: number } {
