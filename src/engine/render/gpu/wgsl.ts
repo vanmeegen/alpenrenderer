@@ -24,11 +24,20 @@
  *             the camera image together.
  */
 
+import { WATER_SHINE } from '../shading';
+
+/** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
+const F0 = WATER_SHINE.f0.toFixed(3);
+const SKY = WATER_SHINE.sky.toFixed(3);
+const GLINT = WATER_SHINE.glint.toFixed(3);
+const SHARP = WATER_SHINE.sharpness.toFixed(1);
+
 /**
  * Uniform names each material declares. Kept next to the shader source so the
  * build check can prove the two agree — a name that appears in one and not the
  * other fails silently at runtime as an unset uniform.
  */
+
 export const TERRAIN_UNIFORMS = [
   'uAzStep', 'uRadial', 'uRadialB', 'uSinLat0', 'uCosLat0', 'uEyeAlt',
   'uRadius', 'uRefRadius', 'uDropScale', 'uLevelCount', 'uTexSize',
@@ -253,6 +262,9 @@ uniform uSnowLine   : f32;            // metres
 uniform uFogRange   : f32;            // metres to 1/e of the terrain colour
 uniform uHorizonColor : vec3<f32>;
 uniform uWaterColor : vec3<f32>;
+uniform uEyeAlt : f32;
+uniform uRefRadius : f32;
+uniform uDropScale : f32;
 
 var heightsSampler : sampler;
 var heights        : texture_2d<f32>;
@@ -284,6 +296,26 @@ fn waterAt(lv : i32, dLon : f32, dIso : f32) -> f32 {
   let py = clamp(floor(A.y - dIso * A.z), 0.0, uniforms.uLevelPx - 1.0) + f32(lv) * uniforms.uLevelPx;
   let uv = vec2<f32>((px + 0.5) / uniforms.uTexSize.x, (py + 0.5) / uniforms.uTexSize.y);
   return step(0.5, textureSampleLevel(heights, heightsSampler, uv, 0.0).b);
+}
+
+/** Unit vector from the eye to this point, east-north-up (see glsl.ts). */
+fn viewDir() -> vec3<f32> {
+  let hz = vec2<f32>(fragmentInputs.vDLon, fragmentInputs.vDIso);
+  let lh = length(hz);
+  let dirH = select(vec2<f32>(0.0, 1.0), hz / max(lh, 1e-12), lh > 0.0);
+  let s = sin(fragmentInputs.vRange / (2.0 * uniforms.uRefRadius));
+  let drop = 2.0 * (uniforms.uRefRadius + fragmentInputs.vH) * s * s * uniforms.uDropScale;
+  let vz = clamp(((fragmentInputs.vH - uniforms.uEyeAlt) - drop) / max(fragmentInputs.vRange, 1.0), -1.0, 1.0);
+  return vec3<f32>(dirH * sqrt(1.0 - vz * vz), vz);
+}
+
+/** A little sky (Fresnel) and a soft sun glint on flat water; see WATER_SHINE in shading.ts. */
+fn waterShine(c : vec3<f32>, v : vec3<f32>) -> vec3<f32> {
+  let cosI = max(0.0, -v.z);
+  let fresnel = ${F0} + (1.0 - ${F0}) * pow(1.0 - cosI, 5.0);
+  let col = mix(c, uniforms.uHorizonColor, fresnel * ${SKY});
+  let mirrored = max(0.0, dot(vec3<f32>(v.x, v.y, -v.z), uniforms.uSun));
+  return min(col + vec3<f32>(${GLINT} * pow(mirrored, ${SHARP})), vec3<f32>(1.0));
 }
 
 @fragment
@@ -327,6 +359,7 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   let diff = max(dot(n, uniforms.uSun), 0.0);
   let shade = 0.28 + 0.72 * diff;
   col = col * shade;
+  if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 
   // Aerial perspective: distant ridges recede into the horizon colour but
   // never vanish into it, so the skyline stays a skyline.

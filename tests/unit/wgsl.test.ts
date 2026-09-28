@@ -126,6 +126,20 @@ describe('shader dialect parity', () => {
     }
   });
 
+  test('both dialects put the same shine on the water, with the constants from shading.ts', async () => {
+    // Fresnel toward the sky and a sun glint, computed from the view vector
+    // the pass already has: no texture fetch, no extra pass.
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { WATER_SHINE } = await import('../../src/engine/render/shading');
+    for (const src of [GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_SHADE_FRAGMENT]) {
+      expect(src).toMatch(/fn waterShine|vec3 waterShine/);
+      expect(src).toContain(WATER_SHINE.f0.toFixed(3));
+      expect(src).toContain(WATER_SHINE.sky.toFixed(3));
+      expect(src).toContain(WATER_SHINE.glint.toFixed(3));
+      expect(src).toContain(WATER_SHINE.sharpness.toFixed(1));
+    }
+  });
+
   test('the GLSL file declares the same uniform names as the WGSL lists', async () => {
     const GL = await import('../../src/engine/render/gpu/glsl');
     const declared = (src: string) => new Set([...src.matchAll(/uniform\s+\w+\s+(\w+)/g)].map((m) => m[1]));

@@ -569,8 +569,11 @@ Gelände und tragen ihren Namen. Umsetzung:
 - Seen-Labels ankern auf der Wasseroberfläche; große Seen haben bis zu acht
   Ersatzpunkte, damit ein halb verdeckter See (Walchensee vom Herzogstand)
   dort benannt wird, wo er zu sehen ist.
-- Offen: Spiegelung/Glanz auf dem Wasser, Flüsse als Linien, ein eigener
-  Schalter für Seen-Labels.
+- Glanz (2026-09-28): Fresnel-Anteil Himmel (Schlick, f0 0,02, gedeckelt
+  bei 0,6) und weicher Sonnenglanz (Phong 60, Stärke 0,35) im Shade-Pass,
+  nur wo Wasser ist; keine Spiegelung des Geländes, weil die einen zweiten
+  Pass bräuchte, zu teuer für 200-Euro-Handys.
+- Offen: Flüsse als Linien, ein eigener Schalter für Seen-Labels.
 
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 

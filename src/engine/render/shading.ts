@@ -19,6 +19,14 @@ export const FOG_RANGE = 55000;
 export const HORIZON_COLOR: [number, number, number] = [0.80, 0.87, 0.95];
 /** Lakes: a mountain-lake blue, lit and hazed like the ground around it. */
 export const WATER_COLOR: [number, number, number] = [0.17, 0.33, 0.50];
+/**
+ * A little shine on the water, cheap enough for a 200-euro phone: no second
+ * pass for real reflections, only what the view vector gives. Schlick's
+ * Fresnel with the reflectance of water (f0) pulls the lake toward the sky
+ * at grazing angles, capped at `sky` so it stays a lake; the sun's mirror
+ * image is a soft glint of strength `glint`, `sharpness` its Phong power.
+ */
+export const WATER_SHINE = { f0: 0.02, sky: 0.6, glint: 0.35, sharpness: 60 };
 
 const DEG = Math.PI / 180;
 
@@ -41,11 +49,29 @@ const mix = (a: [number, number, number], b: [number, number, number], t: number
   [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 /**
+ * Sky reflection and sun glint on lit water, `view` the unit vector from the
+ * eye to the point (east, north, up). The water is taken as flat: lakes are.
+ */
+export function waterShine(col: [number, number, number], view: [number, number, number]): [number, number, number] {
+  const cosI = Math.max(0, -view[2]);
+  const fresnel = WATER_SHINE.f0 + (1 - WATER_SHINE.f0) * (1 - cosI) ** 5;
+  let out = mix(col, HORIZON_COLOR, fresnel * WATER_SHINE.sky);
+  const s = sunVector();
+  const mirrored = view[0] * s[0] + view[1] * s[1] - view[2] * s[2];
+  const glint = WATER_SHINE.glint * Math.max(0, mirrored) ** WATER_SHINE.sharpness;
+  out = [Math.min(1, out[0] + glint), Math.min(1, out[1] + glint), Math.min(1, out[2] + glint)];
+  return out;
+}
+
+/**
  * Linear RGB of a terrain pixel at altitude `h` metres, with the surface
  * normal `n` (east, north, up; unit) and ground range `range` metres;
- * `water` where the lake mask marks the post.
+ * `water` where the lake mask marks the post, and with `view` (unit, eye to
+ * point) the water shines.
  */
-export function terrainColor(h: number, n: [number, number, number], range: number, water = false): [number, number, number] {
+export function terrainColor(
+  h: number, n: [number, number, number], range: number, water = false, view?: [number, number, number],
+): [number, number, number] {
   const slope = 1 - n[2];
   const valley: [number, number, number] = [0.47, 0.60, 0.33];
   const forest: [number, number, number] = [0.28, 0.43, 0.24];
@@ -63,6 +89,7 @@ export function terrainColor(h: number, n: [number, number, number], range: numb
   const diff = n[0] * s[0] + n[1] * s[1] + n[2] * s[2];
   const shade = shadeFactor(diff);
   col = [col[0] * shade, col[1] * shade, col[2] * shade];
+  if (water && view) col = waterShine(col, view);
   const fog = 1 - Math.exp(-range / FOG_RANGE);
   return mix(col, HORIZON_COLOR, fog * 0.88);
 }

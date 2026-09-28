@@ -5,6 +5,7 @@
  */
 import { expect, Page, test } from '@playwright/test';
 import { LAKE, STAND, inLake, terrainHit } from './fixtures/terrain';
+import { luminance, terrainColor } from '../../src/engine/render/shading';
 
 const W = 1000, H = 600;
 const EYE = 2500;
@@ -67,6 +68,32 @@ test.describe('lakes', () => {
     const seen = await rgbs(page, clear.map((r) => [W / 2 - 2, r.y - 2, 4, 4] as Win));
     const wrong = clear.filter((r, i) => blue(seen[i]) !== r.wet).length;
     expect(wrong).toBe(0);
+  });
+
+  test('the water shines as the formula says: more sky toward its far shore, where the view grazes it', async ({ page }) => {
+    await page.goto(url());
+    await ready(page);
+    const probe = (y: number) => {
+      const hit = terrainHit(LAKE.bearing, W / 2, y, EYE, 60, W, H)!;
+      expect(inLake(hit.lon, hit.lat)).toBe(true);
+      const b = (LAKE.bearing * Math.PI) / 180, dz = hit.h - EYE;
+      const len = Math.hypot(hit.range, dz);
+      const view: [number, number, number] = [(Math.sin(b) * hit.range) / len, (Math.cos(b) * hit.range) / len, dz / len];
+      return luminance(terrainColor(hit.h, [0, 0, 1], hit.range, true, view));
+    };
+    // Rows well inside the lake: near shore (steeper view) and far shore (flatter view).
+    const rows: number[] = [];
+    for (let y = 420; y < H; y += 2) {
+      const hit = terrainHit(LAKE.bearing, W / 2, y, EYE, 60, W, H);
+      if (hit && inLake(hit.lon, hit.lat)) rows.push(y);
+    }
+    const far = rows[3], near = rows[rows.length - 4];
+    const expected = { far: probe(far), near: probe(near) };
+    expect(expected.far).toBeGreaterThan(expected.near + 0.02);      // the Fresnel term itself separates them
+    const [f, n] = await rgbs(page, [[W / 2 - 3, far - 1, 6, 3], [W / 2 - 3, near - 1, 6, 3]]);
+    const lum = (c: [number, number, number]) => luminance([c[0] / 255, c[1] / 255, c[2] / 255]);
+    expect(Math.abs(lum(f) - expected.far)).toBeLessThan(0.015);
+    expect(Math.abs(lum(n) - expected.near)).toBeLessThan(0.015);
   });
 
   test('the Testsee is named on its surface, straight ahead', async ({ page }) => {

@@ -24,6 +24,14 @@
  * is already valid GLSL ES 3.00 and passes through untouched.
  */
 
+import { WATER_SHINE } from '../shading';
+
+/** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
+const F0 = WATER_SHINE.f0.toFixed(3);
+const SKY = WATER_SHINE.sky.toFixed(3);
+const GLINT = WATER_SHINE.glint.toFixed(3);
+const SHARP = WATER_SHINE.sharpness.toFixed(1);
+
 /** Range packing. Byte-for-byte identical to the WGSL in wgsl.ts. */
 const RANGE_CODEC = /* glsl */ `
 const float RANGE_MIN = 8.0;
@@ -229,6 +237,9 @@ uniform float uSnowLine;     // metres
 uniform float uFogRange;     // metres to 1/e of the terrain colour
 uniform vec3  uHorizonColor;
 uniform vec3  uWaterColor;   // lakes, where the atlas's blue channel says so
+uniform float uEyeAlt;
+uniform float uRefRadius;
+uniform float uDropScale;
 
 uniform sampler2D heights;
 
@@ -263,6 +274,31 @@ float waterAt(int lv, float dLon, float dIso) {
   float px = clamp(floor(A.x + dLon * A.z), 0.0, uLevelPx - 1.0);
   float py = clamp(floor(A.y - dIso * A.z), 0.0, uLevelPx - 1.0) + float(lv) * uLevelPx;
   return step(0.5, texelFetch(heights, ivec2(int(px), int(py)), 0).b);
+}
+
+/**
+ * Unit vector from the eye to this point, east-north-up, from what the pass
+ * already has: the horizontal direction from the offsets (Mercator is
+ * conformal, so east and north scale alike), the vertical from the height
+ * difference less the curvature drop the vertex stage applied.
+ */
+vec3 viewDir() {
+  vec2 hz = vec2(vDLon, vDIso);
+  float lh = length(hz);
+  vec2 dirH = lh > 0.0 ? hz / lh : vec2(0.0, 1.0);
+  float s = sin(vRange / (2.0 * uRefRadius));
+  float drop = 2.0 * (uRefRadius + vH) * s * s * uDropScale;
+  float vz = clamp(((vH - uEyeAlt) - drop) / max(vRange, 1.0), -1.0, 1.0);
+  return vec3(dirH * sqrt(1.0 - vz * vz), vz);
+}
+
+/** A little sky (Fresnel) and a soft sun glint on flat water; see WATER_SHINE in shading.ts. */
+vec3 waterShine(vec3 col, vec3 v) {
+  float cosI = max(0.0, -v.z);
+  float fresnel = ${F0} + (1.0 - ${F0}) * pow(1.0 - cosI, 5.0);
+  col = mix(col, uHorizonColor, fresnel * ${SKY});
+  float mirrored = max(0.0, dot(vec3(v.x, v.y, -v.z), uSun));
+  return min(col + vec3(${GLINT} * pow(mirrored, ${SHARP})), vec3(1.0));
 }
 
 void main(void) {
@@ -305,6 +341,7 @@ void main(void) {
   float diff = max(dot(n, uSun), 0.0);
   float shade = 0.28 + 0.72 * diff;
   col = col * shade;
+  if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 
   // Aerial perspective: distant ridges recede into the horizon colour but
   // never vanish into it, so the skyline stays a skyline.

@@ -44,7 +44,11 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   sicher es sich ist; ein Finger korrigiert weiterhin von Hand.
 - **Seen**: Benannte Seen aus OpenStreetMap (ab 1 ha, ohne Flüsse und
   Kanäle) liegen blau auf dem Gelände und tragen ihren Namen blau und kursiv
-  mit Seehöhe; ein großer See, dessen Mitte hinter einem Grat liegt, wird
+  mit Seehöhe. Das Wasser glänzt ein wenig: zum flachen Blick hin spiegelt
+  es den Himmel (Fresnel), wo die Sonne sich spiegelt, liegt ein weicher
+  Glanz; beides rechnet der vorhandene Shade-Pass aus dem Blickvektor, ohne
+  zusätzliche Texturzugriffe oder Pässe, damit es auch auf einfachen
+  Android-Handys flüssig bleibt. Ein großer See, dessen Mitte hinter einem Grat liegt, wird
   dort beschriftet, wo er zu sehen ist. Der Katalog liegt statisch unter
   `public/lakes/` (Build: `node tools/build_lakes.mjs`), die Wassermaske
   wird pro Clipmap-Level gerastert und im freien Kanal des Höhenatlas an den
