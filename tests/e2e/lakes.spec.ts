@@ -27,19 +27,23 @@ async function ready(page: Page) {
   }, null, { timeout: 120_000 });
 }
 
-/** Mean RGB of the composited image in a window, top-down coordinates. */
-async function rgb(page: Page, x0: number, y0: number, w: number, h: number): Promise<[number, number, number]> {
-  return page.evaluate(async ([x0, y0, w, h]) => {
+type Win = [number, number, number, number];
+
+/** Mean RGB of the composited image in several windows (x, y, w, h, top-down), from one capture. */
+async function rgbs(page: Page, wins: Win[]): Promise<[number, number, number][]> {
+  return page.evaluate(async (wins) => {
     const c = await (window as any).alp.renderer.capture();
-    const s = [0, 0, 0];
-    for (let y = y0; y < y0 + h; y++) {
-      for (let x = x0; x < x0 + w; x++) {
-        const o = (y * c.width + x) * 4;
-        s[0] += c.pixels[o]; s[1] += c.pixels[o + 1]; s[2] += c.pixels[o + 2];
+    return wins.map(([x0, y0, w, h]) => {
+      const s = [0, 0, 0];
+      for (let y = y0; y < y0 + h; y++) {
+        for (let x = x0; x < x0 + w; x++) {
+          const o = (y * c.width + x) * 4;
+          s[0] += c.pixels[o]; s[1] += c.pixels[o + 1]; s[2] += c.pixels[o + 2];
+        }
       }
-    }
-    return s.map((v) => v / (w * h)) as [number, number, number];
-  }, [x0, y0, w, h]);
+      return s.map((v) => v / (w * h)) as [number, number, number];
+    });
+  }, wins);
 }
 
 const blue = (c: [number, number, number]) => c[2] > c[1] + 10 && c[2] > c[0] + 20;
@@ -56,14 +60,12 @@ test.describe('lakes', () => {
     }
     const wetRows = rows.filter((r) => r.wet).map((r) => r.y);
     expect(wetRows.length).toBeGreaterThan(10);                 // the lake spans a good band of the screen
-    await expect.poll(async () => blue(await rgb(page, W / 2 - 3, wetRows[Math.floor(wetRows.length / 2)] - 3, 6, 6)),
-      { timeout: 30_000 }).toBe(true);
-    let wrong = 0;
-    for (const r of rows) {
-      const shore = rows.some((o) => o.wet !== r.wet && Math.abs(o.y - r.y) <= 4);
-      if (shore) continue;                                      // the shoreline itself is a DEM post wide
-      if (blue(await rgb(page, W / 2 - 2, r.y - 2, 4, 4)) !== r.wet) wrong++;
-    }
+    const mid = wetRows[Math.floor(wetRows.length / 2)];
+    await expect.poll(async () => blue((await rgbs(page, [[W / 2 - 3, mid - 3, 6, 6]]))[0]), { timeout: 30_000 }).toBe(true);
+    // Away from the shoreline itself (a DEM post wide), every row is water or not as the formula says.
+    const clear = rows.filter((r) => !rows.some((o) => o.wet !== r.wet && Math.abs(o.y - r.y) <= 4));
+    const seen = await rgbs(page, clear.map((r) => [W / 2 - 2, r.y - 2, 4, 4] as Win));
+    const wrong = clear.filter((r, i) => blue(seen[i]) !== r.wet).length;
     expect(wrong).toBe(0);
   });
 
