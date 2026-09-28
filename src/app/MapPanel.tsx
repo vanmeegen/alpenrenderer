@@ -7,7 +7,8 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
-import { LocateError, LocationHelp, MAP_ZOOM, OSM_ATTRIBUTION, OSM_TILES, PickedPosition, locateDevice, locationHelp } from './mapPicker';
+import { LocationHelp, MAP_ZOOM, OSM_ATTRIBUTION, OSM_TILES, PickedPosition, locateChecked, sitePermission } from './mapPicker';
+import { LocationHelpBox } from './LocationHelpBox';
 
 export interface MapPanelProps {
   lon: number;
@@ -27,15 +28,6 @@ function arrowIcon(yaw: number): L.DivIcon {
       + '<svg viewBox="0 0 28 28" width="28" height="28"><circle cx="14" cy="14" r="6" fill="#1d4ed8" stroke="#fff" stroke-width="2"/>'
       + '<path d="M14 1 L19 10 L14 8 L9 10 Z" fill="#1d4ed8" stroke="#fff" stroke-width="1"/></svg></div>',
   });
-}
-
-/** The site's geolocation permission, where the browser tells. */
-async function sitePermission(): Promise<PermissionState | 'unknown'> {
-  try {
-    return (await navigator.permissions.query({ name: 'geolocation' })).state;
-  } catch {
-    return 'unknown';
-  }
 }
 
 export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
@@ -80,15 +72,9 @@ export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
     setMessage(null);
     setHelp(null);
     try {
-      const p = await locateDevice();
-      onPick(p);
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
-      setHelp(locationHelp({
-        code: e instanceof LocateError ? e.code : 0,
-        permission: await sitePermission(),
-        secure: window.isSecureContext,
-      }));
+      const r = await locateChecked({ secure: window.isSecureContext, permission: sitePermission });
+      if (r.ok) onPick(r.position);
+      else { setMessage(r.message); setHelp(r.help); }
     } finally {
       setBusy(false);
     }
@@ -105,18 +91,7 @@ export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
         <span className="text-[12px] text-neutral-600">Karte verschieben, Punkt antippen, dann „Panorama von hier“.</span>
         {message && <span className="text-[12px] text-red-700">{message}</span>}
       </div>
-      {help && (
-        <div role="note" aria-label="Standort-Hilfe"
-          className="mx-3 mb-2 max-h-[40vh] overflow-auto rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-neutral-800">
-          <div className="flex items-baseline gap-3">
-            <b className="font-semibold">{help.title}</b>
-            <button className="ml-auto text-blue-700" onClick={() => setHelp(null)}>Ausblenden</button>
-          </div>
-          <ol className="mt-1 list-decimal pl-4">
-            {help.steps.map((t) => <li key={t}>{t}</li>)}
-          </ol>
-        </div>
-      )}
+      {help && <LocationHelpBox help={help} onHide={() => setHelp(null)} className="mx-3 mb-2" />}
       <div ref={host} className="min-h-0 flex-1" />
     </div>
   );

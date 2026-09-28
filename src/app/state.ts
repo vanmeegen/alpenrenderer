@@ -35,6 +35,7 @@ export const PLACES: Place[] = [
   { id: 'saentis', name: 'Säntis (CH)', lon: 9.3433, lat: 47.2494, yaw: 190 },
   { id: 'nebelhorn', name: 'Nebelhorn (DE)', lon: 10.3417, lat: 47.4211, yaw: 160 },
   { id: 'schilthorn', name: 'Schilthorn (CH)', lon: 7.8350, lat: 46.5583, yaw: 120 },
+  { id: 'sonnenspitz', name: 'Kochelsee vom Sonnenspitz (DE)', lon: 11.37606, lat: 47.63938, yaw: 290 },
 ];
 
 export const DEFAULT_VIEW: ViewState = {

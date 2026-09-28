@@ -100,6 +100,42 @@ test.describe('GPS', () => {
     await expect(page.locator('.leaflet-container')).toBeHidden();
     await expect(page.getByText(/GPS/)).toBeVisible();
   });
+
+  test('the Standpunkt menu offers "Mein Standort" first, and it moves there too', async ({ page }) => {
+    await page.goto(url());
+    await ready(page);
+    await page.getByRole('button', { name: 'Standpunkt' }).click();
+    const panel = page.getByRole('region', { name: 'Standpunkt wählen' });
+    const first = panel.getByRole('button').first();
+    await expect(first).toHaveText('Mein Standort');
+    await first.click();
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(STAND.lon + 0.002, 4);
+    await expect.poll(() => hashNum(page, 'lat'), { timeout: 30_000 }).toBeCloseTo(STAND.lat + 0.001, 4);
+    await expect(page.getByText(/GPS/)).toBeVisible();
+    await expect(panel).toBeHidden();
+  });
+});
+
+test.describe('GPS blocked for the site', () => {
+  test('"Mein Standort" in the Standpunkt menu shows how to unblock it, without a doomed request', async ({ page }) => {
+    // The site setting says "blocked": the Permissions API tells before any request.
+    await page.addInitScript(() => {
+      (window as any).__asked = 0;
+      navigator.geolocation.getCurrentPosition = () => { (window as any).__asked++; };
+      const query = navigator.permissions.query.bind(navigator.permissions);
+      navigator.permissions.query = (d: PermissionDescriptor) =>
+        d.name === 'geolocation' ? Promise.resolve({ state: 'denied' } as PermissionStatus) : query(d);
+    });
+    await page.goto(url());
+    await ready(page);
+    await page.getByRole('button', { name: 'Standpunkt' }).click();
+    await page.getByRole('region', { name: 'Standpunkt wählen' }).getByRole('button', { name: 'Mein Standort' }).click();
+    const help = page.getByRole('note', { name: 'Standort-Hilfe' });
+    await expect(help).toContainText('Standort für diese Seite blockiert', { timeout: 30_000 });
+    await expect(help).toContainText('Berechtigungen → Standort');
+    expect(await page.evaluate(() => (window as any).__asked)).toBe(0);
+    expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon, 4);
+  });
 });
 
 test.describe('GPS refused', () => {

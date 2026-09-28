@@ -18,6 +18,9 @@ Live: https://vanmeegen.github.io/alpenrenderer/
 - **Inkrement 2a** (Standpunkt wählen): „Karte“ öffnet OpenStreetMap, mit den
   Fingern verschieben und zoomen, Punkt antippen, „Panorama von hier“;
   „Mein Standort“ nimmt die GPS-Position. Der Blick bleibt dabei erhalten.
+  „Mein Standort“ steht auch ganz oben im Standpunkt-Menü; vor der Abfrage
+  prüft die App https und ob die Seite gesperrt ist, und zeigt dann gleich
+  die Schritte statt einer Abfrage, die nur scheitern kann.
   Verweigert der Browser den Standort, sagt die App, wo er einzuschalten ist
   (Seitenberechtigung am Schloss-Symbol, Standort in den Android-Einstellungen,
   Standort-Berechtigung der Chrome-App); eine Webseite kann diese Einstellungen

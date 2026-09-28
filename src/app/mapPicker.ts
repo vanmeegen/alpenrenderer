@@ -125,3 +125,49 @@ export function locationHelp(o: {
     retry: true,
   };
 }
+
+export type LocateResult =
+  | { ok: true; position: PickedPosition }
+  | { ok: false; message: string; help: LocationHelp };
+
+/**
+ * "Mein Standort" with the checks around it: a page that is not https, or a
+ * site the browser has already blocked, gets the steps to fix that straight
+ * away instead of a request that can only fail; otherwise the device is
+ * asked, and a failure is explained with the permission as it stands after
+ * the prompt (a "Nicht erlauben" just now reads as blocked).
+ */
+export async function locateChecked(o: {
+  geo?: Geolocation;
+  secure: boolean;
+  permission: () => Promise<PermissionState | 'unknown'>;
+}): Promise<LocateResult> {
+  if (!o.secure) {
+    return { ok: false, message: 'Standort nicht verfügbar: Seite nicht über https.', help: locationHelp({ code: 1, permission: 'unknown', secure: false }) };
+  }
+  if ((await o.permission()) === 'denied') {
+    return {
+      ok: false,
+      message: 'Standort für diese Seite blockiert.',
+      help: locationHelp({ code: 1, permission: 'denied', secure: true }),
+    };
+  }
+  try {
+    return { ok: true, position: await locateDevice(o.geo) };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : String(e),
+      help: locationHelp({ code: e instanceof LocateError ? e.code : 0, permission: await o.permission(), secure: true }),
+    };
+  }
+}
+
+/** The site's geolocation permission, where the browser tells. */
+export async function sitePermission(): Promise<PermissionState | 'unknown'> {
+  try {
+    return (await navigator.permissions.query({ name: 'geolocation' })).state;
+  } catch {
+    return 'unknown';
+  }
+}

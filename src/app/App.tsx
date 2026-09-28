@@ -4,7 +4,8 @@ import { EYE_RADIUS, formatHash, PLACES, readHash, readOptions, ViewState } from
 import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
-import { PickedPosition } from './mapPicker';
+import { LocationHelp, PickedPosition, locateChecked, sitePermission } from './mapPicker';
+import { LocationHelpBox } from './LocationHelpBox';
 import { CompassRose } from './CompassRose';
 import { Icon, IconName } from './icons';
 
@@ -38,6 +39,8 @@ export function App() {
   const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'settings' | 'map'>('none');
   const [menuOpen, setMenuOpen] = useState(true);
   const [eyeRadius, setEyeRadius] = useState(EYE_RADIUS.initial);
+  const [locating, setLocating] = useState(false);
+  const [locNote, setLocNote] = useState<{ message: string; help: LocationHelp } | null>(null);
   const [outline, setOutline] = useState(true);
   const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place' | 'photo'>('url');
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
@@ -110,6 +113,19 @@ export function App() {
     setPositionSource(p.source);
     setGpsAccuracy(p.source === 'gps' ? p.accuracy ?? null : null);
     setPanel('none');
+  };
+
+  /** "Mein Standort" from the Standpunkt menu: checked first, explained when it fails. */
+  const locateHere = async () => {
+    setLocating(true);
+    setLocNote(null);
+    try {
+      const r = await locateChecked({ secure: window.isSecureContext, permission: sitePermission });
+      if (r.ok) pick(r.position);
+      else setLocNote({ message: r.message, help: r.help });
+    } finally {
+      setLocating(false);
+    }
   };
 
   /** Follow the device's sensors, or stop. A refusal is shown, not thrown. */
@@ -302,10 +318,14 @@ export function App() {
           <div className={PANEL} role="region" aria-label="Standpunkt wählen">
             <div className="mb-1 font-semibold">Standpunkt wählen</div>
             <div className="flex flex-wrap gap-x-3 gap-y-1">
+              <button className="font-semibold text-blue-700 hover:underline disabled:opacity-50" disabled={locating}
+                onClick={() => void locateHere()}>{locating ? 'Suche Position…' : 'Mein Standort'}</button>
               {PLACES.map((p) => (
                 <button key={p.id} className="text-blue-700 hover:underline" onClick={() => go(p.id)}>{p.name}</button>
               ))}
             </div>
+            {locNote && <div className="mt-1 text-red-700">{locNote.message}</div>}
+            {locNote && <LocationHelpBox help={locNote.help} onHide={() => setLocNote(null)} className="mt-1" />}
             <div className="mt-1 text-neutral-500">Oder in der URL: #lon=…&amp;lat=…&amp;alt=…&amp;yaw=…</div>
           </div>
         )}

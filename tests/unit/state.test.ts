@@ -90,3 +90,17 @@ describe('eye radius: the area the eye height is taken from', () => {
     expect(readEyeRadius(s)).toBe(420);
   });
 });
+
+describe('places', () => {
+  test('the Sonnenspitz above Kochel looks out over the Kochelsee', () => {
+    const p = PLACES.find((x) => x.id === 'sonnenspitz')!;
+    expect(p.name).toBe('Kochelsee vom Sonnenspitz (DE)');
+    // The lake's centre, from the lake catalogue: the view points at it within a few degrees.
+    const lake = { lon: 11.34587, lat: 47.64679 };
+    const east = (lake.lon - p.lon) * 111320 * Math.cos((p.lat * Math.PI) / 180);
+    const north = (lake.lat - p.lat) * 111320;
+    const bearing = ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360;
+    expect(Math.abs(p.yaw - bearing)).toBeLessThan(5);
+    expect(Math.hypot(east, north)).toBeLessThan(3000);     // the lake right below, not on the horizon
+  });
+});

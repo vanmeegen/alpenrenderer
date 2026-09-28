@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { LocateError, locateDevice, locationHelp } from '../../src/app/mapPicker';
+import { LocateError, locateChecked, locateDevice, locationHelp } from '../../src/app/mapPicker';
 
 type Success = (p: GeolocationPosition) => void;
 type Failure = (e: GeolocationPositionError) => void;
@@ -105,5 +105,51 @@ describe('locateDevice retries without high accuracy', () => {
     const g = geo((_ok, fail) => { calls++; fail(positionError(1)); });
     await expect(locateDevice(g)).rejects.toThrow();
     expect(calls).toBe(1);
+  });
+});
+
+describe('locateChecked: the checks before and after asking for the position', () => {
+  const fix = geo((ok) => ok({ coords: { latitude: 47.64, longitude: 11.38, accuracy: 5 } } as GeolocationPosition));
+  const counting = () => {
+    let calls = 0;
+    const g = geo((ok) => { calls++; ok({ coords: { latitude: 1, longitude: 2, accuracy: 3 } } as GeolocationPosition); });
+    return { g, calls: () => calls };
+  };
+
+  test('an insecure page gets the https help and the GPS is not asked', async () => {
+    const c = counting();
+    const r = await locateChecked({ geo: c.g, secure: false, permission: async () => 'prompt' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.help.title).toBe('Nur über https');
+    expect(c.calls()).toBe(0);
+  });
+
+  test('a site already blocked gets the unblocking steps at once, without a doomed request', async () => {
+    const c = counting();
+    const r = await locateChecked({ geo: c.g, secure: true, permission: async () => 'denied' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.help.title).toBe('Standort für diese Seite blockiert');
+      expect(r.message).toContain('blockiert');
+    }
+    expect(c.calls()).toBe(0);
+  });
+
+  test('allowed or not yet asked: the position is taken', async () => {
+    for (const state of ['granted', 'prompt', 'unknown'] as const) {
+      const r = await locateChecked({ geo: fix, secure: true, permission: async () => state });
+      expect(r).toEqual({ ok: true, position: { lon: 11.38, lat: 47.64, source: 'gps', accuracy: 5 } });
+    }
+  });
+
+  test('a refusal is explained with the permission as it stands after the prompt', async () => {
+    let asked = false;
+    const g = geo((_ok, fail) => { asked = true; fail(positionError(1)); });
+    const r = await locateChecked({ geo: g, secure: true, permission: async () => (asked ? 'denied' : 'prompt') });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.message).toBe('Standort nicht verfügbar: Zugriff verweigert.');
+      expect(r.help.title).toBe('Standort für diese Seite blockiert');
+    }
   });
 });
