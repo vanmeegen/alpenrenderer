@@ -82,7 +82,11 @@ export interface ViewerStatus {
   surveys: SurveyCredit[];
   diagnostics: RendererDiagnostics;
   sensors: { active: boolean; offsetYaw: number; offsetPitch: number };
-  peaks: { total: number; visible: number; placed: number };
+  /**
+   * `settled`: the targets are from the last rebuild (none pending) and all
+   * their sightlines are decided, so the labels stand where they will stay.
+   */
+  peaks: { total: number; visible: number; placed: number; settled: boolean };
   camera: { active: boolean; fovY: number; fovSource: 'default' | 'reported' | 'manual'; width: number; height: number };
   photo: PhotoStatus | null;
 }
@@ -545,7 +549,10 @@ export class Viewer {
       sensors: {
         active: this.sensors.active, offsetYaw: this.sensors.offsetYaw, offsetPitch: this.sensors.offsetPitch,
       },
-      peaks: { total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length },
+      peaks: {
+        total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length,
+        settled: this.rebuildTimer === null && (this.visibility?.done ?? false),
+      },
       camera: {
         active: this.feed.status.active, fovY: this.feed.status.fovY, fovSource: this.feed.status.fovSource,
         width: this.feed.status.width, height: this.feed.status.height,

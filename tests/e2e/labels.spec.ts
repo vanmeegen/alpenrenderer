@@ -20,12 +20,16 @@ function url(hash: Record<string, number | string> = {}) {
 
 interface Placed { name: string; ax: number; ay: number; bx: number; by: number; bw: number; bh: number }
 
+/**
+ * Terrain loaded and the labels final: a label from a rebuild on half-loaded
+ * levels sits on the coarse mesh until the last rebuild replaces it.
+ */
 async function ready(page: Page) {
   await page.waitForFunction(() => {
     const v = (window as any).alp;
     if (!v) return false;
     const s = v.status();
-    return s.levelsReady >= s.levels && s.diagnostics.framesDrawn > 3;
+    return s.levelsReady >= s.levels && s.diagnostics.framesDrawn > 3 && s.peaks.settled;
   }, null, { timeout: 120_000 });
   return page.evaluate(() => (window as any).alp.status() as { eyeAltitude: number; peaks: { total: number; visible: number } });
 }
@@ -138,7 +142,7 @@ test.describe('summit labels', () => {
     const expectedX = W / 2 + (W / 2) * (east / north) / (Math.tan(Math.PI / 6) * (W / H));
     // A label from a rebuild on half-loaded levels can stand until the last
     // rebuild's sightlines are done; where it ends up is what counts.
-    await expect.poll(async () => Math.abs((await labels(page))[0].ay - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.01);
+    await expect.poll(async () => Math.abs(((await labels(page))[0]?.ay ?? Infinity) - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.01);
     const [g] = await labels(page);
     // Within a ray and a half of the mesh either way: the pin sits on the drawn crest.
     expect(Math.abs(g.ax - expectedX)).toBeLessThan(4);
