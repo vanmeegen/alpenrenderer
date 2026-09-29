@@ -626,6 +626,14 @@ unbegrenzte Suche nach dem steilsten Netzpunkt (läuft bei kleinen Gipfeln
 0,5–1,3 km auf andere Berge), Klemme „nie über dem DEM-Gipfel“ (widerspricht
 „auf der gezeichneten Fläche“).
 
+Darstellung: Der Anker bleibt exakt auf der gezeichneten Fläche, aber die
+Hinweislinie endet `LEADER_GAP` = 6 px darüber (`labelPainter.ts`,
+`leaderLine`). Eine Linie bis auf den Anker steckt im Berg und verdeckt die
+Spitze; 6 px darüber zeigt sie auf den Gipfel. Der Abstand ist ein
+Bildschirmmaß und damit bei jedem Zoom und jeder Entfernung gleich – anders
+als das frühere zufällige Schweben über dem DEM-Gipfel, das beim Zoomen auf
+Dutzende Pixel wuchs.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

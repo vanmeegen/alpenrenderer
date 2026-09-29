@@ -85,6 +85,16 @@ test.describe('summit labels', () => {
     await expect(page.getByText('Gipfel 2/3')).toBeVisible();
   });
 
+  test('the leader line stops a little above the summit instead of sticking in it', async ({ page }) => {
+    await page.goto(url());
+    await ready(page);
+    await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Testhorn']);
+    const [t] = await labels(page);
+    // Nothing painted on the summit itself, the line (and its dot) just above.
+    expect(await inkIn(page, { bx: t.ax - 3, by: t.ay - 2, bw: 6, bh: 5 })).toBe(0);
+    expect(await inkIn(page, { bx: t.ax - 3, by: t.ay - 10, bw: 6, bh: 6 })).toBeGreaterThan(0);
+  });
+
   test('zoomed in on a phone-quality mesh, the Testhorn label sits on the apex as drawn, not above it', async ({ page }) => {
     // Beyond a few kilometres the polar mesh steps a percent or two of the
     // range between rings, so a sharp apex falls between two rings and is

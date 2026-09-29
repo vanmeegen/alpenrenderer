@@ -30,6 +30,22 @@ export const LABEL_STYLE: LabelStyle = {
   water: '#1d4ed8',
 };
 
+/**
+ * Pixels the leader line stops short of its anchor. The anchor is the summit
+ * as the mesh draws it, exactly on the surface; a line ending there sticks in
+ * the mountain. A few pixels above, it points at the summit and leaves the top
+ * visible. A screen distance, so it is the same at every zoom and range.
+ */
+export const LEADER_GAP = 6;
+
+/** The leader line of a label: from its tip just above the anchor to the foot on the box. */
+export function leaderLine(l: Pick<PlacedLabel, 'ax' | 'ay' | 'bx' | 'by' | 'bw' | 'bh'>) {
+  return {
+    tip: { x: l.ax, y: l.ay - LEADER_GAP },
+    foot: { x: Math.max(l.bx + 6, Math.min(l.bx + l.bw - 6, l.ax)), y: l.by + l.bh },
+  };
+}
+
 export class LabelPainter {
   private ctx: CanvasRenderingContext2D;
   style: LabelStyle = LABEL_STYLE;
@@ -69,18 +85,18 @@ export class LabelPainter {
     for (const l of labels) {
       const on = l === selected;
       const lake = l.target.peak.kind === 'lake';
-      const cx = Math.max(l.bx + 6, Math.min(l.bx + l.bw - 6, l.ax));
+      const { tip, foot } = leaderLine(l);
 
       c.strokeStyle = on ? s.accent : s.leader;
       c.lineWidth = on ? 1.6 : 1;
       c.beginPath();
-      c.moveTo(l.ax, l.ay);
-      c.lineTo(cx, l.by + l.bh);
+      c.moveTo(tip.x, tip.y);
+      c.lineTo(foot.x, foot.y);
       c.stroke();
 
       c.fillStyle = on ? s.accent : s.leader;
       c.beginPath();
-      c.arc(l.ax, l.ay, on ? 3.4 : 2.1, 0, Math.PI * 2);
+      c.arc(tip.x, tip.y, on ? 3.4 : 2.1, 0, Math.PI * 2);
       c.fill();
 
       if (on) {
