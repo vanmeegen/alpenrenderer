@@ -99,6 +99,21 @@ describe('HeightField', () => {
     expect(s.h).toBeCloseTo(hf.heightIn(hf.levels[0], LON, LAT), 6);
   });
 
+  test('summitAt finds the nearest local maximum: a bump on a slope, even where the slope climbs higher further out', () => {
+    // Rising 1 m a post to the east, with a 3 m bump three posts east of the
+    // point. The highest post in reach is on the rim, up the slope; the
+    // summit is the bump: the nearest post at least as high as its eight
+    // neighbours.
+    const hf = new HeightField(LON, LAT);
+    const z = 13;
+    const cx = Math.round(lonToMercX(LON, z)), cy = Math.round(latToMercY(LAT, z));
+    level(hf, z, (px, py) => 2000 + (px - cx) + (px === cx + 3 && py === cy ? 3 : 0));
+    const s = hf.summitAt(LON, LAT, 100);
+    expect(s.h).toBe(2006);
+    expect(s.lon).toBeCloseTo(mercXToLon(cx + 3 + 0.5, z), 9);
+    expect(s.lat).toBeCloseTo(mercYToLat(cy + 0.5, z), 9);
+  });
+
   test('summitNear searches a disc: a post in the corner of the square is out of range', () => {
     const hf = new HeightField(LON, LAT);
     const z = 13;

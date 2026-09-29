@@ -74,13 +74,14 @@ const NEAR_ANCHOR_M = 140;
 export function buildTargets(
   peaks: Peak[], obs: Observer, hf: HeightField, maxRange: number,
   /**
-   * The top the renderer actually draws around a point, where and how high
-   * (render/mesh.ts `meshTopNear`). Far out the mesh rings are a percent or
-   * two of the range apart and a sharp summit is drawn lower, and a little
-   * off, from where the DEM holds it; zoomed in, a pin on the DEM summit
-   * stands in the air or in the slope. The pin goes onto the drawn top,
-   * never above the DEM summit. Asked lazily, by layoutLabels, for labels
-   * that land on screen.
+   * The summit as the renderer draws it, where and how high (render/mesh.ts
+   * `meshTopNear`: the visible top of the mesh cell holding the summit). Far
+   * out the mesh rings are a percent or two of the range apart and a sharp
+   * summit is drawn lower, and up to a cell off, from where the DEM holds
+   * it; zoomed in, a pin on the DEM summit stands in the air or in the
+   * slope. The pin goes exactly onto the drawn vertex, so its tip lies on
+   * the drawn surface. Asked lazily, by layoutLabels, for labels that land
+   * on screen.
    */
   drawn?: (lon: number, lat: number) => { lon: number; lat: number; h: number },
 ): LabelTarget[] {
@@ -122,11 +123,10 @@ export function buildTargets(
         settle: drawn && p.kind !== 'lake'
           ? () => {
             const d = drawn(a.lon, a.lat);
-            const alt = Math.min(d.h, anchorAlt);
-            const s = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye }, { lon: d.lon, lat: d.lat, alt });
+            const s = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye }, { lon: d.lon, lat: d.lat, alt: d.h });
             return {
               east: s.east, north: s.north, up: s.up, range: s.range,
-              bearing: s.bearing, elevation: s.elevation, anchorAlt: alt,
+              bearing: s.bearing, elevation: s.elevation, anchorAlt: d.h,
             };
           }
           : null,

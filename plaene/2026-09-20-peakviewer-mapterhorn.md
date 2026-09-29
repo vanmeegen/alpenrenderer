@@ -575,6 +575,57 @@ Gelände und tragen ihren Namen. Umsetzung:
   Pass bräuchte, zu teuer für 200-Euro-Handys.
 - Offen: Flüsse als Linien, ein eigener Schalter für Seen-Labels.
 
+### 8.y Label-Anker: Herleitung und Fehlerbudget (2026-09-29)
+
+Ziel: Die Spitze einer Gipfel-Nadel liegt auf der **gezeichneten** Oberfläche,
+an der sichtbaren Oberkante des Bergs, den der Name meint. Zwischen dem Namen
+und dem Pixel liegen drei Raster aus zwei Quellen:
+
+1. **Katalog (OSM):** Punkt und Höhe von Hand erfasst.
+2. **Höhenmodell (Mapterhorn):** je Clipmap-Level ein Raster, 7–13 m in der
+   Nähe, 52–105 m in 11–23 km, bis 417 m außen; die groben Level sind die
+   Übersichtskacheln des Anbieters, Gipfel dort schon abgerundet. Beim
+   Einlesen auf ganze Meter gerundet.
+3. **Netz (Renderer):** Ringe in 1–2 % der Entfernung, Strahlen alle
+   0,18° (Handy 0,35°); jede Zelle zwei ebene Dreiecke (Diagonale von
+   Ecke (i+1, j) nach (i, j+1)), Höhe der Ecken bilinear aus dem Level für
+   ihre Entfernung. Die gezeichnete Fläche ist stückweise eben; ihre hohen
+   Punkte sind Netzpunkte.
+
+Gemessen (Schynige Platte, Blick N, 22 Gipfel in 0,8–23 km):
+
+| Stufe | Größe |
+|---|---|
+| OSM-Punkt → nächstes Maximum im DEM | 1–110 m seitlich; OSM-Höhe 10–67 m über dem DEM-Maximum; 4 Punkte ohne Maximum in 140 m (Schultern) |
+| DEM-Level in 11–23 km | Postenabstand 52–105 m, gleiches Level wie gezeichnet |
+| Netz gegenüber DEM-Maximum | 0–60 m tiefer, bis eine Zelle (130–330 m × 35–145 m) daneben |
+| Rundung (ganze Meter, float32) | ±0,5 m bzw. mm: in 15 km 0,002°, bei 11° Zoom 0,1 px |
+
+Rundung spielt also keine Rolle; die Abweichungen entstehen durch die Raster.
+
+Herleitung, zwei Schritte mit je einer Definition:
+
+1. **Welcher Gipfel?** Das nächste *regionale Maximum* des DEM im
+   Toleranzkreis (140 m, deckt die gemessenen 1–110 m) um den OSM-Punkt:
+   eine zusammenhängende Fläche gleicher Höhe, deren Nachbarn alle niedriger
+   sind (wegen der ganzen Meter haben breite Gipfel mehrere gleich hohe
+   Posten; eine Ebene neben etwas Höherem ist keines). Liegt der OSM-Punkt im
+   Gipfelposten, bleibt er (er ist dann genauer als das Raster); sonst die
+   Mitte des nächsten Gipfelpostens. Ohne Maximum in Reichweite ist der Punkt
+   eine Schulter dieses DEM und bleibt, wo er ist.
+2. **Wo ist er gezeichnet?** In der Netzzelle, die den Gipfel enthält; ihre
+   sichtbare Oberkante ist die Ecke mit dem größten Höhenwinkel vom Auge
+   (eine höhere, aber weiter hinten liegende Ecke ist von der vorderen
+   verdeckt). Die Nadel geht genau auf diesen Netzpunkt, Lage und Höhe: ihre
+   Spitze liegt dann auf der gezeichneten Fläche, höchstens eine Zelle vom
+   Gipfel.
+
+Nicht mehr verwendet, weil nicht aus einer Definition folgend: Höhe des
+Maximums an der Lage des OSM-Punkts (Nadel neben dem Gipfel in der Luft),
+unbegrenzte Suche nach dem steilsten Netzpunkt (läuft bei kleinen Gipfeln
+0,5–1,3 km auf andere Berge), Klemme „nie über dem DEM-Gipfel“ (widerspricht
+„auf der gezeichneten Fläche“).
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

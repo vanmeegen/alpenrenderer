@@ -172,56 +172,103 @@ export class HeightField {
    * radius is small: a larger one would climb onto a neighbouring pinnacle.
    */
   summitNear(lon: number, lat: number, radius = 60): number {
-    return this.highestNear(lon, lat, radius).h;
+    const l = this.levels.find((lv) => lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
+    if (!l) return 0;
+    const { u, v } = this.project(l, lon, lat);
+    const n = Math.max(1, Math.round(radius / l.res));
+    let best = -Infinity;
+    for (let dy = -n; dy <= n; dy++) {
+      const y = Math.round(v - 0.5) + dy;
+      if (y < 0 || y >= l.h) continue;
+      for (let dx = -n; dx <= n; dx++) {
+        if (dx * dx + dy * dy > n * n) continue;
+        const x = Math.round(u - 0.5) + dx;
+        if (x < 0 || x >= l.w) continue;
+        const h = l.raw[y * l.w + x] * l.quant + l.bias;
+        if (h > best) best = h;
+      }
+    }
+    return best === -Infinity ? this.height(lon, lat) : best;
   }
 
   /**
-   * Where a catalogued summit's top is, and how high, for its label pin: the
-   * highest DEM post within `radius` metres. A catalogue point on the flank
-   * gets its pin on the top this way, not beside it at the top's height. On
-   * a shoulder there is no top within reach: the highest post is on the rim
-   * of the search and the ground climbs on beyond it, so the pin stays on the
-   * catalogue point, at the ground there, instead of walking up the slope.
+   * The summit a catalogue point names: the nearest regional maximum of the
+   * DEM within `radius` metres, on the finest level that covers the point.
+   * `radius` is the tolerance between the two sources, catalogue and DEM
+   * (measured: 1 to 110 m). A regional maximum is a connected patch of
+   * equal height whose every neighbour is lower; with heights in whole
+   * metres a broad top is such a patch of several posts, while a flat plain
+   * next to something higher is none. A patch running off the raster cannot
+   * be judged and is not taken for a summit.
+   *
+   * Position: the catalogue point itself when it lies in the summit's post
+   * (it is then more precise than the raster), else the centre of the
+   * nearest post of the summit. With no summit in reach the point is a
+   * shoulder of this DEM and stays as it is, at the ground there.
    */
   summitAt(lon: number, lat: number, radius = 60): { lon: number; lat: number; h: number } {
-    const m = this.highestNear(lon, lat, radius);
-    if (!m.level) return { lon, lat, h: m.h };
-    if (m.n >= 2 && m.d > (m.n - 1) * (m.n - 1)) {
-      const here = this.heightIn(m.level, lon, lat);
-      return { lon, lat, h: Number.isNaN(here) ? m.h : here };
-    }
-    // Already on the highest post: the point stays where it is. Moved: the
-    // centre of the highest post, the best guess of where the top is; the
-    // mesh (render/mesh.ts) settles a label's pin exactly later.
-    if (m.d === 0 || m.n < 2) return { lon, lat, h: m.h };
-    return { lon: mercXToLon(m.level.px0 + m.x + 0.5, m.level.z), lat: mercYToLat(m.level.py0 + m.y + 0.5, m.level.z), h: m.h };
-  }
-
-  /** The highest post within `radius` metres: its height, post, squared post distance, and the search radius in posts. */
-  private highestNear(lon: number, lat: number, radius: number) {
     const l = this.levels.find((lv) => lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
-    if (!l) return { h: 0, level: null, x: 0, y: 0, d: 0, n: 0 };
+    if (!l) return { lon, lat, h: 0 };
     const { u, v } = this.project(l, lon, lat);
     const n = Math.max(1, Math.round(radius / l.res));
     const x0 = Math.round(u - 0.5), y0 = Math.round(v - 0.5);
-    // On a level crest every post is as high: keep the one nearest the
-    // catalogue point then, rather than whichever the scan meets first.
-    let best = -Infinity, bestD = Infinity, bx = x0, by = y0;
+    const H = (x: number, y: number) => l.raw[y * l.w + x] * l.quant + l.bias;
+    const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < l.w && y < l.h;
+    // Only bounds the work: an equal-height patch of more posts than this
+    // (0.7 km² at the finest level) is flat ground, not a top.
+    const cap = 4096;
+    const settled = new Map<number, boolean>();        // post -> is on a regional maximum
+
+    /** Whether the equal-height patch around (x, y) is a regional maximum; remembered for all its posts. */
+    const regionalMax = (x: number, y: number): boolean => {
+      const key = y * l.w + x;
+      const known = settled.get(key);
+      if (known !== undefined) return known;
+      const h = H(x, y);
+      const patch = [key];
+      const seen = new Set(patch);
+      let ok = true;
+      for (let k = 0; k < patch.length && ok; k++) {
+        const px = patch[k] % l.w, py = (patch[k] - px) / l.w;
+        for (let j = -1; j <= 1 && ok; j++) {
+          for (let i = -1; i <= 1; i++) {
+            if (!i && !j) continue;
+            const qx = px + i, qy = py + j;
+            if (!inside(qx, qy)) { ok = false; break; }            // runs off the raster: cannot tell
+            const q = H(qx, qy), qk = qy * l.w + qx;
+            if (q > h) { ok = false; break; }
+            if (q === h && !seen.has(qk)) {
+              if (patch.length >= cap) { ok = false; break; }      // flat ground, not a top
+              seen.add(qk);
+              patch.push(qk);
+            }
+          }
+        }
+      }
+      for (const k of seen) settled.set(k, ok);
+      return ok;
+    };
+
+    let best: { x: number; y: number; d: number } | null = null;
     for (let dy = -n; dy <= n; dy++) {
-      const y = y0 + dy;
-      if (y < 0 || y >= l.h) continue;
       for (let dx = -n; dx <= n; dx++) {
         const d = dx * dx + dy * dy;
-        if (d > n * n) continue;
-        const x = x0 + dx;
-        if (x < 0 || x >= l.w) continue;
-        const h = l.raw[y * l.w + x] * l.quant + l.bias;
-        if (h > best || (h === best && d < bestD)) { best = h; bestD = d; bx = x; by = y; }
+        if (d > n * n || (best && d >= best.d)) continue;
+        const x = x0 + dx, y = y0 + dy;
+        if (!inside(x, y)) continue;
+        if (regionalMax(x, y)) best = { x, y, d };
       }
     }
-    if (best === -Infinity) return { h: this.height(lon, lat), level: null, x: 0, y: 0, d: 0, n };
-    return { h: best, level: l, x: bx, y: by, d: bestD, n };
+    if (!best) {
+      const here = this.heightIn(l, lon, lat);
+      return { lon, lat, h: Number.isNaN(here) ? this.height(lon, lat) : here };
+    }
+    const h = H(best.x, best.y);
+    if (best.d === 0) return { lon, lat, h };
+    return { lon: mercXToLon(l.px0 + best.x + 0.5, l.z), lat: mercYToLat(l.py0 + best.y + 0.5, l.z), h };
   }
+
+
 
 
 }

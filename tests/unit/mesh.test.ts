@@ -110,6 +110,30 @@ describe('meshTopNear: the summit as the mesh draws it, where and how high', () 
     }
   });
 
+  test('of the cell\'s corners, the one that stands highest on screen, not the one highest above the sea', () => {
+    // Ground 400 m above the eye at 5 km, rising on 3.6 % away from it: the
+    // far corner of a cell is a few metres higher, but seen from the eye it
+    // is lower, and hidden behind the near one. The pin goes on the visible top.
+    const hf = new HeightField(LON, LAT);
+    const z = 13, w = 2048, h = 2048;
+    const px0 = Math.round(lonToMercX(LON, z)) - w / 2;
+    const py0 = Math.round(latToMercY(LAT, z)) - h / 2;
+    const raw = new Uint16Array(w * h);
+    const x5 = lonToMercX(destination(LON, LAT, 90, 5000, localRadius(LAT)).lon, z) - px0;
+    const mpp = (156543.03 * Math.cos((LAT * Math.PI) / 180)) / 2 ** z;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw[y * w + x] = Math.round(1900 + 0.036 * (x + 0.5 - x5) * mpp) + 1000;
+    hf.addLevel({ z, px0, py0, w, h, quant: 1, bias: -1000 }, raw, true);
+    const zc = 6, wc = 256;
+    hf.addLevel({ z: zc, px0: Math.round(lonToMercX(LON, zc)) - wc / 2, py0: Math.round(latToMercY(LAT, zc)) - wc / 2, w: wc, h: wc, quant: 1, bias: -1000 },
+      new Uint16Array(wc * wc).fill(1900 + 1000), true);
+    const p = radialParams(QUALITY_LOW, hf);
+    const at = destination(LON, LAT, 90, 5040, localRadius(LAT));
+    const top = meshTopNear(hf, p, at.lon, at.lat, EYE);
+    const f = Math.floor(rowAt(p, 5040));
+    expect(radiusAt(p, f + 1) - radiusAt(p, f)).toBeGreaterThan(50);          // a cell deep enough to matter
+    expect(groundRange(LON, LAT, top.lon, top.lat)).toBeLessThan(5040);      // the near corner
+  });
+
   test('never above the DEM', () => {
     const { hf, at } = field([{ range: 900, bearing: 90 }, { range: 6000, bearing: 200 }]);
     for (const q of [QUALITY_HIGH, QUALITY_LOW]) {
