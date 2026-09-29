@@ -70,9 +70,16 @@ export function heightAt(lon: number, lat: number): number {
  * catalogued at 3500 m, but the DEM knows only the plain there, so it is
  * hidden and must never get a label.
  */
+/**
+ * Where the Gratspitze stands: on the ridge, at a crest of the ripple (628 m
+ * east of the standpoint's meridian), so that it is a top of the DEM and not
+ * a point on a crest that climbs to one side.
+ */
+export const RIDGE_CREST = { lon: STAND.lon + (200 * Math.PI) / M_PER_DEG_LON, lat: RIDGE.lat };
+
 export const PEAKS = [
   { i: 1, n: 'Testhorn', o: TESTHORN.lon, a: TESTHORN.lat, e: TESTHORN.summit, p: 2500, w: 'Q1', k: 'de:Testhorn' },
-  { i: 2, n: 'Gratspitze', o: STAND.lon, a: RIDGE.lat, e: RIDGE.height },
+  { i: 2, n: 'Gratspitze', o: RIDGE_CREST.lon, a: RIDGE_CREST.lat, e: RIDGE.height },
   { i: 3, n: 'Hinterhorn', o: STAND.lon + 12000 / M_PER_DEG_LON, a: STAND.lat, e: 3500 },
 ];
 export const RIDGE_RANGE = 20000;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { latToMercY, lonToMercX } from '../../src/engine/core/geodesy';
+import { latToMercY, lonToMercX, mercXToLon, mercYToLat } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
 
 const LON = 10.0, LAT = 47.0;
@@ -65,6 +65,38 @@ describe('HeightField', () => {
     expect(hf.summitNear(LON, LAT, 100)).toBe(3000);
     // A radius too small to reach it stays on the plain.
     expect(hf.summitNear(LON, LAT, 5)).toBe(2000);
+  });
+
+  test('summitAt says where the highest post is, not only how high: its centre, or the point itself when already on it', () => {
+    const hf = new HeightField(LON, LAT);
+    const z = 13;
+    const cx = Math.round(lonToMercX(LON, z)), cy = Math.round(latToMercY(LAT, z));
+    level(hf, z, (px, py) => (px === cx + 2 && py === cy - 1) ? 3000 : 2000);
+    const s = hf.summitAt(LON, LAT, 100);
+    expect(s.h).toBe(3000);
+    expect(s.lon).toBeCloseTo(mercXToLon(cx + 2 + 0.5, z), 9);
+    expect(s.lat).toBeCloseTo(mercYToLat(cy - 1 + 0.5, z), 9);
+    // Already on the highest post: not moved at all.
+    const flat = new HeightField(LON, LAT);
+    level(flat, z, () => 2000);
+    expect(flat.summitAt(LON, LAT, 100)).toEqual({ lon: LON, lat: LAT, h: 2000 });
+    // Out of reach, the point itself with the height there.
+    const near = hf.summitAt(LON, LAT, 5);
+    expect(near.h).toBe(2000);
+  });
+
+  test('summitAt on a slope with no top in reach stays at the point, at the height there', () => {
+    // Rising 1 m a post to the east: the highest post within reach is on the
+    // rim, and further out it only climbs on. A shoulder, not a summit: the
+    // pin stays on the catalogue point instead of walking up the slope.
+    const hf = new HeightField(LON, LAT);
+    const z = 13;
+    const cx = Math.round(lonToMercX(LON, z));
+    level(hf, z, (px) => 2000 + (px - cx));
+    const s = hf.summitAt(LON, LAT, 100);
+    expect(s.lon).toBe(LON);
+    expect(s.lat).toBe(LAT);
+    expect(s.h).toBeCloseTo(hf.heightIn(hf.levels[0], LON, LAT), 6);
   });
 
   test('summitNear searches a disc: a post in the corner of the square is out of range', () => {

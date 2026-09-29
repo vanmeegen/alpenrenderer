@@ -32,10 +32,11 @@ export interface LabelTarget {
   /** 0 at the main point; 1.. at the peak's spare spots, in order of preference. */
   spot: number;
   /**
-   * The drawn height at the anchor, asked the first time the label lands on
-   * screen and then dropped (see buildTargets' `drawn`); null once settled.
+   * Moves the anchor onto the drawn top, asked the first time the label
+   * lands on screen and then dropped (see buildTargets' `drawn`); null once
+   * settled.
    */
-  settle: (() => number) | null;
+  settle: (() => Pick<LabelTarget, 'east' | 'north' | 'up' | 'range' | 'bearing' | 'elevation' | 'anchorAlt'>) | null;
 }
 
 export interface PlacedLabel {
@@ -73,26 +74,38 @@ const NEAR_ANCHOR_M = 140;
 export function buildTargets(
   peaks: Peak[], obs: Observer, hf: HeightField, maxRange: number,
   /**
-   * The height the renderer actually draws around a point (render/mesh.ts
-   * `meshTopNear`). Far out the mesh rings are a percent or two of the range
-   * apart and a sharp summit is drawn lower than the DEM holds it; zoomed
-   * in, a label on the DEM summit floats above the drawn one. Never raises
-   * an anchor, only lowers it onto the drawn summit. Asked lazily, by
-   * layoutLabels, for labels that land on screen.
+   * The top the renderer actually draws around a point, where and how high
+   * (render/mesh.ts `meshTopNear`). Far out the mesh rings are a percent or
+   * two of the range apart and a sharp summit is drawn lower, and a little
+   * off, from where the DEM holds it; zoomed in, a pin on the DEM summit
+   * stands in the air or in the slope. The pin goes onto the drawn top,
+   * never above the DEM summit. Asked lazily, by layoutLabels, for labels
+   * that land on screen.
    */
-  drawn?: (lon: number, lat: number) => number,
+  drawn?: (lon: number, lat: number) => { lon: number; lat: number; h: number },
 ): LabelTarget[] {
   const eye = obs.ground + obs.eye;
   const out: LabelTarget[] = [];
   for (const p of peaks) {
     const anchors = p.spots ? [{ lon: p.lon, lat: p.lat }, ...p.spots] : [{ lon: p.lon, lat: p.lat }];
-    anchors.forEach((a, spot) => {
+    anchors.forEach((c, spot) => {
       // Anchor on the summit the renderer actually draws. A catalogue elevation
       // can sit 130 m above the DEM's idea of the same summit; anchoring there
-      // leaves the label floating in the sky above its own mountain. A lake's
-      // label point is on its water; the summit search would climb the shore.
-      const anchorAlt = (spot === 0 ? p.demEle : undefined)
-        ?? (p.kind === 'lake' ? hf.groundAt(a.lon, a.lat) : hf.summitNear(a.lon, a.lat, NEAR_ANCHOR_M));
+      // leaves the label floating in the sky above its own mountain. And a
+      // catalogue point on the flank is moved onto the top, position and
+      // height from the same DEM post: the top's height at the flank point
+      // stood the pin in the air beside the summit, and lowered onto the
+      // drawn surface there, in the slope. A lake's label point is on its
+      // water; the summit search would climb the shore.
+      let a = c;
+      let anchorAlt: number;
+      if (spot === 0 && p.demEle !== undefined) anchorAlt = p.demEle;
+      else if (p.kind === 'lake') anchorAlt = hf.groundAt(c.lon, c.lat);
+      else {
+        const top = hf.summitAt(c.lon, c.lat, NEAR_ANCHOR_M);
+        a = { lon: top.lon, lat: top.lat };
+        anchorAlt = top.h;
+      }
       const o = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye },
         { lon: a.lon, lat: a.lat, alt: anchorAlt });
       if (o.range > maxRange || o.range < 20) return;
@@ -106,7 +119,17 @@ export function buildTargets(
         spot,
         // Sixteen mesh samples a summit: cheap for the few on screen, a
         // frozen phone for forty thousand at every rebuild. So later.
-        settle: drawn && p.kind !== 'lake' ? () => drawn(a.lon, a.lat) : null,
+        settle: drawn && p.kind !== 'lake'
+          ? () => {
+            const d = drawn(a.lon, a.lat);
+            const alt = Math.min(d.h, anchorAlt);
+            const s = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye }, { lon: d.lon, lat: d.lat, alt });
+            return {
+              east: s.east, north: s.north, up: s.up, range: s.range,
+              bearing: s.bearing, elevation: s.elevation, anchorAlt: alt,
+            };
+          }
+          : null,
       });
     });
   }
@@ -147,20 +170,17 @@ export function layoutLabels(
     if (!t.visible || chosen.get(t.peak.id) !== t) continue;
     let w = cam.project(t.east, t.north, t.up, ndc);
     if (w <= 0) continue;
-    const ax = (ndc[0] * 0.5 + 0.5) * opt.width;
+    let ax = (ndc[0] * 0.5 + 0.5) * opt.width;
     let ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
     if (ax < -40 || ax > opt.width + 40 || ay < -40 || ay > opt.height + 40) continue;
     if (t.settle) {
-      // On screen for the first time: down onto the summit as the mesh draws it.
-      const drawnAlt = t.settle();
+      // On screen for the first time: onto the summit as the mesh draws it.
+      Object.assign(t, t.settle());
       t.settle = null;
-      if (drawnAlt < t.anchorAlt) {
-        t.up -= t.anchorAlt - drawnAlt;
-        t.anchorAlt = drawnAlt;
-        t.elevation = (Math.atan2(t.up, t.range) * 180) / Math.PI;
-        w = cam.project(t.east, t.north, t.up, ndc);
-        ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
-      }
+      w = cam.project(t.east, t.north, t.up, ndc);
+      if (w <= 0) continue;
+      ax = (ndc[0] * 0.5 + 0.5) * opt.width;
+      ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
     }
 
     const detailed = placed.length < opt.detailed;

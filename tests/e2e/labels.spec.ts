@@ -4,7 +4,7 @@
  * where a label sits come from the terrain formula, not from a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { PEAKS, RIDGE, RIDGE_RANGE, STAND, summitScreenY } from './fixtures/terrain';
+import { PEAKS, RIDGE_CREST, STAND, heightAt, summitScreenY } from './fixtures/terrain';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
 const PEAK_CELLS = '/tests/e2e/fixtures/peaks/';
@@ -31,6 +31,33 @@ async function ready(page: Page) {
 }
 
 const labels = (page: Page) => page.evaluate(() => (window as any).alp.labels() as Placed[]);
+
+/** The drawn apex of the view: the column whose terrain reaches highest, and that row (range buffer, read bottom-up). */
+const drawnApex = (page: Page) => page.evaluate(async () => {
+  const r = await (window as any).alp.renderer.readRange();
+  let best = { x: -1, y: Infinity };
+  for (let c = 0; c < r.width; c++) {
+    for (let y = 0; y < r.height; y++) {
+      if (r.pixels[((r.height - 1 - y) * r.width + c) * 4 + 3] > 0) {
+        if (y < best.y) best = { x: (c * 1000) / r.width, y: (y * 600) / r.height };
+        break;
+      }
+    }
+  }
+  return best;
+});
+
+/**
+ * How far the Testhorn's pin is from the drawn apex, in units of the
+ * tolerance (3 px across, 3 px down): below 1 means on it. A label from a
+ * rebuild on half-loaded levels can stand for a moment; the final one counts.
+ */
+const pinOffApex = async (page: Page) => {
+  const t = (await labels(page)).find((l) => l.name === 'Testhorn');
+  if (!t) return Infinity;
+  const apex = await drawnApex(page);
+  return Math.max(Math.abs(t.ax - apex.x) / 3, Math.abs(t.ay - apex.y) / 3);
+};
 
 /** Painted pixels of the label overlay inside a box. */
 async function inkIn(page: Page, box: { bx: number; by: number; bw: number; bh: number }): Promise<number> {
@@ -68,33 +95,43 @@ test.describe('summit labels', () => {
     await page.goto(`/dist/?${q}#lon=${STAND.lon}&lat=${STAND.lat}&yaw=90&pitch=26&fov=5`);
     await ready(page);
     await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Testhorn']);
-    const [t] = await labels(page);
-    // The drawn apex: the first terrain row from the top in the label's column.
-    const apex = await page.evaluate(async (x) => {
-      const r = await (window as any).alp.renderer.readRange();
-      const c = Math.round((x * r.width) / 1000);
-      for (let y = 0; y < r.height; y++) {
-        const row = r.height - 1 - y;                  // render targets read back bottom-up
-        if (r.pixels[(row * r.width + c) * 4 + 3] > 0) return (y * 600) / r.height;
-      }
-      return null;
-    }, t.ax);
-    expect(apex).not.toBeNull();
-    expect(Math.abs(t.ay - apex!)).toBeLessThan(3);
+    await expect.poll(() => pinOffApex(page), { timeout: 30_000 }).toBeLessThan(1);
+  });
+
+  test('a summit catalogued on its flank gets its pin on the drawn top, not in the air beside it or in the slope', async ({ page }) => {
+    // OSM points often sit some tens of metres off the top. Here the Testhorn
+    // is catalogued 60 m north of its apex, on the flank: the pin belongs on
+    // the apex as drawn (Schynige Platte, 2026: pins in the slope).
+    await page.route(/fixtures\/peaks\/10_47\.json/, (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(PEAKS.map((p) => (p.n === 'Testhorn' ? { ...p, a: p.a + 60 / 111320 } : p))),
+    }));
+    const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low' });
+    await page.goto(`/dist/?${q}#lon=${STAND.lon}&lat=${STAND.lat}&yaw=90&pitch=26&fov=5`);
+    await ready(page);
+    await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Testhorn']);
+    await expect.poll(() => pinOffApex(page), { timeout: 30_000 }).toBeLessThan(1);
   });
 
   test('looking north, the ridge is labelled where curvature and refraction put it', async ({ page }) => {
     await page.goto(url({ yaw: 0 }));
     const s = await ready(page);
     await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Gratspitze']);
-    const drop = RIDGE_RANGE ** 2 / (2 * R_EFF_M);
-    const elev = Math.atan2(RIDGE.height - s.eyeAltitude - drop, RIDGE_RANGE);
+    // The Gratspitze on the ripple's crest of the ridge: its bearing and range
+    // and its height from the formula.
+    const east = (RIDGE_CREST.lon - STAND.lon) * 111320 * Math.cos((STAND.lat * Math.PI) / 180);
+    const north = (RIDGE_CREST.lat - STAND.lat) * 111320;
+    const range = Math.hypot(east, north);
+    const drop = range ** 2 / (2 * R_EFF_M);
+    const elev = Math.atan2(heightAt(RIDGE_CREST.lon, RIDGE_CREST.lat) - s.eyeAltitude - drop, range);
     const expectedY = H / 2 - (H / 2) * Math.tan(elev) / Math.tan(Math.PI / 6);
+    const expectedX = W / 2 + (W / 2) * (east / north) / (Math.tan(Math.PI / 6) * (W / H));
     // A label from a rebuild on half-loaded levels can stand until the last
     // rebuild's sightlines are done; where it ends up is what counts.
     await expect.poll(async () => Math.abs((await labels(page))[0].ay - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.01);
     const [g] = await labels(page);
-    expect(Math.abs(g.ax - W / 2)).toBeLessThan(3);
+    // Within a ray and a half of the mesh either way: the pin sits on the drawn crest.
+    expect(Math.abs(g.ax - expectedX)).toBeLessThan(4);
   });
 
   test('tapping a label opens its card with height, range and bearing', async ({ page }) => {

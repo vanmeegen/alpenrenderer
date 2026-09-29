@@ -91,27 +91,30 @@ export function vertexHeight(hf: HeightField, lon: number, lat: number, r: numbe
 }
 
 /**
- * The top of the summit as drawn, as a height at the point's own range: of
- * the mesh vertices in the cells either side of the point, the one that
- * rises steepest seen from the eye decides the silhouette, and its angle is
- * turned back into the height that would show at the point. A vertex a few
- * metres in front of the summit and nearly as high stands higher on screen
- * than the summit itself; comparing heights alone put labels below the drawn
- * apex. Curvature and refraction as the labels have them.
+ * The top of the summit as drawn: the highest of the four mesh vertices
+ * around the point, the corners of the one cell the drawn surface there is
+ * made of. Its position and its height, so that a label pin can be put
+ * exactly onto the drawn surface at its highest point there. Only that cell:
+ * a wider search picks the slope behind a hill, which rises higher on screen
+ * than the hill itself (Bitschigrind from the Schynige Platte, 2026). Of two
+ * corners equally high, the one that stands higher on screen.
  */
-export function meshTopNear(hf: HeightField, p: RadialParams, lon: number, lat: number, eyeAlt: number): number {
+export function meshTopNear(
+  hf: HeightField, p: RadialParams, lon: number, lat: number, eyeAlt: number,
+): { lon: number; lat: number; h: number } {
   const radius = localRadius(hf.lat);
   const range = groundRange(hf.lon, hf.lat, lon, lat, radius);
   const az = (bearing(hf.lon, hf.lat, lon, lat) * Math.PI) / 180;
   const a0 = Math.floor(az / p.azStep), f0 = Math.floor(rowAt(p, range));
-  let best = -Infinity;
-  for (let f = Math.max(0, f0 - 1); f <= Math.min(p.rows - 1, f0 + 2); f++) {
+  let top = { lon, lat, h: -Infinity }, topRise = -Infinity;
+  for (let f = Math.max(0, f0); f <= Math.min(p.rows - 1, f0 + 1); f++) {
     const r = radiusAt(p, f);
-    for (let a = a0 - 1; a <= a0 + 2; a++) {
+    for (let a = a0; a <= a0 + 1; a++) {
       const v = destination(hf.lon, hf.lat, (a * p.azStep * 180) / Math.PI, r, radius);
-      const rise = (vertexHeight(hf, v.lon, v.lat, r) - eyeAlt - curvatureDrop(r, radius)) / r;
-      if (rise > best) best = rise;
+      const h = vertexHeight(hf, v.lon, v.lat, r);
+      const rise = (h - eyeAlt - curvatureDrop(r, radius)) / r;
+      if (h > top.h || (h === top.h && rise > topRise)) { top = { lon: v.lon, lat: v.lat, h }; topRise = rise; }
     }
   }
-  return eyeAlt + curvatureDrop(range, radius) + best * range;
+  return top.h === -Infinity ? { lon, lat, h: hf.height(lon, lat, range) } : top;
 }

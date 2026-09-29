@@ -431,7 +431,7 @@ export class Viewer {
     if (!named.length || !hf.levels.length) { this.targets = []; this.visibleCount = 0; return; }
     const eye = this.renderer.eyeAltitude;
     const obs = { lon: this.view.lon, lat: this.view.lat, ground: eye, eye: 0 };
-    // Labels sit on the summits as the mesh draws them, not on the DEM's sharper ones.
+    // Label pins go onto the summits as the mesh draws them, not the DEM's sharper ones.
     const mesh = this.renderer.meshParams();
     this.targets = buildTargets(named, obs, hf, Math.min(LABEL_RANGE_KM * 1000, hf.maxRange),
       mesh ? (lon, lat) => meshTopNear(hf, mesh, lon, lat, eye) : undefined);

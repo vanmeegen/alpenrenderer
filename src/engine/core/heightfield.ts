@@ -6,7 +6,7 @@
  * as far as everything above this file is concerned.
  */
 
-import { MERC_PX, isometricLat, latToMercY, lonToMercX, mercResolution } from './geodesy';
+import { MERC_PX, isometricLat, latToMercY, lonToMercX, mercResolution, mercXToLon, mercYToLat } from './geodesy';
 
 export interface LevelSpec {
   /** Web Mercator zoom this level is cropped from. */
@@ -172,22 +172,56 @@ export class HeightField {
    * radius is small: a larger one would climb onto a neighbouring pinnacle.
    */
   summitNear(lon: number, lat: number, radius = 60): number {
+    return this.highestNear(lon, lat, radius).h;
+  }
+
+  /**
+   * Where a catalogued summit's top is, and how high, for its label pin: the
+   * highest DEM post within `radius` metres. A catalogue point on the flank
+   * gets its pin on the top this way, not beside it at the top's height. On
+   * a shoulder there is no top within reach: the highest post is on the rim
+   * of the search and the ground climbs on beyond it, so the pin stays on the
+   * catalogue point, at the ground there, instead of walking up the slope.
+   */
+  summitAt(lon: number, lat: number, radius = 60): { lon: number; lat: number; h: number } {
+    const m = this.highestNear(lon, lat, radius);
+    if (!m.level) return { lon, lat, h: m.h };
+    if (m.n >= 2 && m.d > (m.n - 1) * (m.n - 1)) {
+      const here = this.heightIn(m.level, lon, lat);
+      return { lon, lat, h: Number.isNaN(here) ? m.h : here };
+    }
+    // Already on the highest post: the point stays where it is. Moved: the
+    // centre of the highest post, the best guess of where the top is; the
+    // mesh (render/mesh.ts) settles a label's pin exactly later.
+    if (m.d === 0 || m.n < 2) return { lon, lat, h: m.h };
+    return { lon: mercXToLon(m.level.px0 + m.x + 0.5, m.level.z), lat: mercYToLat(m.level.py0 + m.y + 0.5, m.level.z), h: m.h };
+  }
+
+  /** The highest post within `radius` metres: its height, post, squared post distance, and the search radius in posts. */
+  private highestNear(lon: number, lat: number, radius: number) {
     const l = this.levels.find((lv) => lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
-    if (!l) return 0;
+    if (!l) return { h: 0, level: null, x: 0, y: 0, d: 0, n: 0 };
     const { u, v } = this.project(l, lon, lat);
     const n = Math.max(1, Math.round(radius / l.res));
-    let best = -Infinity;
+    const x0 = Math.round(u - 0.5), y0 = Math.round(v - 0.5);
+    // On a level crest every post is as high: keep the one nearest the
+    // catalogue point then, rather than whichever the scan meets first.
+    let best = -Infinity, bestD = Infinity, bx = x0, by = y0;
     for (let dy = -n; dy <= n; dy++) {
-      const y = Math.round(v - 0.5) + dy;
+      const y = y0 + dy;
       if (y < 0 || y >= l.h) continue;
       for (let dx = -n; dx <= n; dx++) {
-        if (dx * dx + dy * dy > n * n) continue;
-        const x = Math.round(u - 0.5) + dx;
+        const d = dx * dx + dy * dy;
+        if (d > n * n) continue;
+        const x = x0 + dx;
         if (x < 0 || x >= l.w) continue;
         const h = l.raw[y * l.w + x] * l.quant + l.bias;
-        if (h > best) best = h;
+        if (h > best || (h === best && d < bestD)) { best = h; bestD = d; bx = x; by = y; }
       }
     }
-    return best === -Infinity ? this.height(lon, lat) : best;
+    if (best === -Infinity) return { h: this.height(lon, lat), level: null, x: 0, y: 0, d: 0, n };
+    return { h: best, level: l, x: bx, y: by, d: bestD, n };
   }
+
+
 }

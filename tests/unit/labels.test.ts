@@ -66,6 +66,32 @@ describe('buildTargets', () => {
     expect(t.find((x) => x.peak.id === 'far')).toBeUndefined();
   });
 
+  test('a summit catalogued on its flank is anchored on its top: where the pin points, not only how high', () => {
+    // A fine level (13 m posts) with a ridge row 3 km north; the catalogue
+    // point two posts south of it, on the flank. The pin goes to the ridge
+    // row at the ridge's height, not to the flank point at the ridge's height
+    // (a pin in the air beside the summit, or, lowered onto the drawn flank,
+    // a pin in the slope).
+    const fine = new HeightField(LON, LAT);
+    const z = 13, w = 640, h = 640;
+    const px0 = Math.round(lonToMercX(LON, z)) - w / 2, py0 = Math.round(latToMercY(LAT, z)) - h / 2;
+    const ridgeRow = Math.round(latToMercY(north(3), z)) - py0;
+    const raw = new Uint16Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw[y * w + x] = (y === ridgeRow ? WALL : PLAIN) + 1000;
+    fine.addLevel({ z, px0, py0, w, h, quant: 1, bias: -1000 }, raw, true);
+    const ridgeLat = mercYToLat(py0 + ridgeRow + 0.5, z);
+    const flankLat = mercYToLat(py0 + ridgeRow + 2 + 0.5, z);
+    const asked: number[] = [];
+    const t = buildTargets([{ id: 'p', name: 'Flankenpunkt', lon: LON, lat: flankLat }], obs, fine, fine.maxRange,
+      (lon, lat) => { asked.push(lat); return { lon, lat, h: WALL }; });
+    expect(t[0].anchorAlt).toBe(WALL);
+    expect(t[0].north).toBeCloseTo((ridgeLat - LAT) * M_PER_DEG_LAT, -1);   // on the ridge row, not 26 m short of it
+    for (const x of t) x.visible = true;
+    layoutLabels(t, camera(0), opt());
+    expect(asked.length).toBe(1);
+    expect(asked[0]).toBeCloseTo(ridgeLat, 6);                            // the drawn surface is asked at the top
+  });
+
   test('a lake anchors on its water surface, not on the highest ground around it', () => {
     // The label point one DEM row south of the wall: a summit there would
     // climb onto the wall (2600 m), a lake stays on its own surface (1500 m).
@@ -107,10 +133,12 @@ describe('buildTargets', () => {
     expect(placed[0].target.spot).toBe(0);
   });
 
-  test('with the drawn surface given, a label on screen sits on the summit as drawn; only labels on screen pay for it', () => {
-    // The mesh draws the wall 40 m lower than the DEM holds it; the label goes there.
+  test('with the drawn surface given, a label on screen goes onto the drawn top, where and how high; only labels on screen pay for it', () => {
+    // The mesh draws the wall's top 40 m lower and one DEM row (420 m) nearer
+    // than the DEM holds it: the pin goes there, exactly onto the drawn top.
+    const nearerLat = mercYToLat(latToMercY(wallLat, 8) + 1, 8);
     const asked: string[] = [];
-    const drawn = (lon: number, lat: number) => { asked.push(`${lon.toFixed(4)},${lat.toFixed(4)}`); return WALL - 40; };
+    const drawn = (lon: number, lat: number) => { asked.push(`${lon.toFixed(4)},${lat.toFixed(4)}`); return { lon, lat: nearerLat, h: WALL - 40 }; };
     const lake = lakeLabel({ id: 'osm:way/2', name: 'Nordsee', lon: LON + 0.001, lat: north(4), rings: [] });
     const t = buildTargets([...peaks, lake], obs, hf, hf.maxRange, drawn);
     expect(asked.length).toBe(0);                                  // nothing computed up front
@@ -118,7 +146,10 @@ describe('buildTargets', () => {
     const placed = layoutLabels(t, camera(0), opt());
     const wall = placed.find((p) => p.target.peak.id === 'wall')!;
     expect(wall.target.anchorAlt).toBe(WALL - 40);
-    const elev = Math.atan2(WALL - 40 - PLAIN - 1.7, WALL_M);
+    const range = (nearerLat - LAT) * M_PER_DEG_LAT;
+    expect(wall.target.range).toBeCloseTo(range, -1);
+    const drop = (range * range) / (2 * (6371008.8 / 0.87));
+    const elev = Math.atan2(WALL - 40 - PLAIN - 1.7 - drop, range);
     expect(wall.ay).toBeCloseTo(300 - 300 * Math.tan(elev) / Math.tan(Math.PI / 6), 0);
     // The lake keeps its water; the Osthügel, off to the east, was never asked about.
     expect(placed.find((p) => p.target.peak.id === 'osm:way/2')!.target.anchorAlt).toBeCloseTo(PLAIN, 0);
@@ -126,8 +157,8 @@ describe('buildTargets', () => {
     // Asked once, remembered: a second frame asks nothing.
     layoutLabels(t, camera(0), opt());
     expect(asked.length).toBe(2);
-    // A surface above the DEM summit never lifts the anchor.
-    const high = buildTargets(peaks, obs, hf, hf.maxRange, () => WALL + 500);
+    // A drawn top above the DEM summit never lifts the pin above the summit.
+    const high = buildTargets(peaks, obs, hf, hf.maxRange, (lon, lat) => ({ lon, lat, h: WALL + 500 }));
     for (const x of high) x.visible = true;
     layoutLabels(high, camera(0), opt());
     expect(high.find((x) => x.peak.id === 'wall')!.anchorAlt).toBe(WALL);
