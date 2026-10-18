@@ -89,14 +89,45 @@ float sampleLevel(int lv, float dLon, float dIso) {
   return h * B.x + B.y;
 }
 
-/** Finest level that still covers a ground range. */
+/** Finest observer level that still covers a ground range (a look level, flagged < 0, never). */
 int levelFor(float r) {
   int lv = int(uLevelCount) - 1;
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < 10; i++) {
     if (float(i) >= uLevelCount) { break; }
-    if (r <= uLvlA[i].w) { lv = i; break; }
+    float reach = uLvlA[i].w;
+    if (reach > 0.0 && r <= reach) { lv = i; break; }
   }
+  // The coarsest observer level, not a look level, as the last resort.
+  if (uLvlA[lv].w < 0.0) { for (int i = 9; i >= 0; i--) { if (float(i) < uLevelCount && uLvlA[i].w > 0.0) { lv = i; break; } } }
   return lv;
+}
+
+/**
+ * The telescope's window this point lies in (finest first), or -1. A look
+ * level is cut around the point looked at, not the observer, so it is taken
+ * by position: inside the window with room for the bilinear taps.
+ */
+int lookLevel(float dLon, float dIso) {
+  for (int i = 0; i < 10; i++) {
+    if (float(i) >= uLevelCount) { break; }
+    if (uLvlA[i].w >= 0.0) { continue; }
+    vec4 A = uLvlA[i];
+    vec4 B = uLvlB[i];
+    float u = A.x + dLon * A.z;
+    float v = A.y - dIso * A.z;
+    if (u > 1.5 && u < B.z - 2.5 && v > 1.5 && v < B.w - 2.5) { return i; }
+  }
+  return -1;
+}
+
+/** 0 well inside a look window, 1 at its edge: the blend back into the observer's levels. */
+float lookFade(int lk, float dLon, float dIso) {
+  vec4 A = uLvlA[lk];
+  vec4 B = uLvlB[lk];
+  float u = A.x + dLon * A.z;
+  float v = A.y - dIso * A.z;
+  float d = max(abs(u - 0.5 * B.z) / (0.5 * B.z), abs(v - 0.5 * B.w) / (0.5 * B.w));
+  return smoothstep(0.80, 0.95, d);
 }
 `;
 
@@ -128,8 +159,8 @@ uniform vec2  uTexSize;
 uniform float uLevelPx;     // pixels per clipmap level in the stacked atlas
 uniform mat4  uViewProj;
 uniform float uFar;
-uniform vec4  uLvlA[8];     // cx, cy, pxPerRad, maxRange
-uniform vec4  uLvlB[8];     // quant, bias, w, h
+uniform vec4  uLvlA[10];    // cx, cy, pxPerRad, maxRange (< 0: a look level, taken by position)
+uniform vec4  uLvlB[10];    // quant, bias, w, h
 
 uniform sampler2D heights;
 
@@ -184,11 +215,14 @@ void main(void) {
   // LOD change never shows up as a step in the skyline.
   int lv = levelFor(r);
   float h = sampleLevel(lv, dLon, dIso);
-  if (float(lv) + 1.0 < uLevelCount) {
+  if (float(lv) + 1.0 < uLevelCount && uLvlA[lv + 1].w > 0.0) {
     float outer = uLvlA[lv].w;
     float fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) { h = mix(h, sampleLevel(lv + 1, dLon, dIso), fade); }
   }
+  // Inside the telescope's window its finer posts take over, blended out at the window's edge.
+  int lk = lookLevel(dLon, dIso);
+  if (lk >= 0) { h = mix(sampleLevel(lk, dLon, dIso), h, lookFade(lk, dLon, dIso)); }
 
   float horiz = (uRadius + h) * sinD;
   float s = sin(r / (2.0 * uRefRadius));
@@ -231,8 +265,8 @@ uniform vec2  uTexSize;
 uniform float uLevelPx;
 uniform float uRadius;
 uniform float uCosLat0;
-uniform vec4  uLvlA[8];
-uniform vec4  uLvlB[8];
+uniform vec4  uLvlA[10];
+uniform vec4  uLvlB[10];
 uniform vec3  uSun;          // towards the sun, ENU, unit
 uniform float uSnowLine;     // metres
 uniform float uFogRange;     // metres to 1/e of the terrain colour
@@ -311,13 +345,19 @@ void main(void) {
   int lv = levelFor(r);
   vec2 g = gradientAt(lv, dLon, dIso);
   float wet = waterAt(lv, dLon, dIso);
-  if (float(lv) + 1.0 < uLevelCount) {
+  if (float(lv) + 1.0 < uLevelCount && uLvlA[lv + 1].w > 0.0) {
     float outer = uLvlA[lv].w;
     float fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) {
       g = mix(g, gradientAt(lv + 1, dLon, dIso), fade);
       wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
     }
+  }
+  int lk = lookLevel(dLon, dIso);
+  if (lk >= 0) {
+    float lf = lookFade(lk, dLon, dIso);
+    g = mix(gradientAt(lk, dLon, dIso), g, lf);
+    wet = mix(waterAt(lk, dLon, dIso), wet, lf);
   }
   vec3 n = normalize(vec3(-g.x, -g.y, 1.0));
   float slope = 1.0 - n.z;               // 0 flat .. 1 vertical

@@ -168,7 +168,9 @@ function tiff({ lon, lat, focal35, taken }) {
 
 // --- tiles -------------------------------------------------------------------
 let written = 0, kept = 0;
-for (const centre of [T.STAND, T.FLANK]) for (const z of LEVELS) {
+// The telescope's look windows (z14, z13) are cut around what is looked at: the Testhorn and the ridge crest.
+const CENTRES = [[T.STAND, LEVELS], [T.FLANK, LEVELS], [T.TESTHORN, [14, 13]], [T.RIDGE_CREST, [14, 13]]];
+for (const [centre, zooms] of CENTRES) for (const z of zooms) {
   const tz = z - 1;
   const px0 = Math.round(mercX(centre.lon, z)) - SIZE / 2;
   const py0 = Math.round(mercY(centre.lat, z)) - SIZE / 2;

@@ -124,4 +124,22 @@ describe('HeightField', () => {
     expect(hf.summitNear(LON, LAT, 11 * res)).toBe(2000);
     expect(hf.summitNear(LON, LAT, 15 * res)).toBe(3000);
   });
+
+  test('a look level (the telescope\'s window) is drawn but never read on the CPU: height, ground, summits and the range come from the eye levels', () => {
+    const hf = new HeightField(LON, LAT);
+    const z = 10;
+    const cx = Math.round(lonToMercX(LON, z)), cy = Math.round(latToMercY(LAT, z));
+    level(hf, z, () => 2000);
+    const w = 64, h = 64;
+    const px0 = Math.round(lonToMercX(LON, 13)) - w / 2, py0 = Math.round(latToMercY(LAT, 13)) - h / 2;
+    hf.addLevel({ z: 13, px0, py0, w, h, quant: 1, bias: -1000, role: 'look' }, new Uint16Array(w * h).fill(3000 + 1000), true);
+    expect(hf.levels.length).toBe(2);
+    expect(hf.eyeLevels().length).toBe(1);
+    expect(hf.height(LON, LAT)).toBe(2000);
+    expect(hf.groundAt(LON, LAT)).toBe(2000);
+    expect(hf.summitNear(LON, LAT, 100)).toBe(2000);
+    expect(hf.summitAt(LON, LAT, 100).h).toBe(2000);
+    expect(hf.maxRange).toBe(hf.eyeLevels()[0].maxRange);
+    void cx; void cy;
+  });
 });

@@ -10,6 +10,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ClipmapStreamer, DEFAULT_CLIPMAP, LOW_CLIPMAP } from '../../src/engine/sources/clipmap';
 import { TileKey, TileSource } from '../../src/engine/sources/types';
+import { latToMercY, lonToMercX } from '../../src/engine/core/geodesy';
 
 const LON = 10.98527, LAT = 47.42111;
 const value = (pz: number, gx: number, gy: number) => (pz * 7919 + gx * 31 + gy * 17) % 50000;
@@ -69,9 +70,11 @@ describe.each([256, 512])('clipmap fill from %i-px tiles', (tileSize) => {
 });
 
 describe('clipmap configurations', () => {
-  test('default has eight levels 14..7, low six levels 13..8', () => {
+  test('default has eight levels 14..7 and two look levels 14, 13; low six levels 13..8 and look levels 13, 12', () => {
     expect(DEFAULT_CLIPMAP.levels.map((l) => l.z)).toEqual([14, 13, 12, 11, 10, 9, 8, 7]);
+    expect(DEFAULT_CLIPMAP.look?.map((l) => l.z)).toEqual([14, 13]);
     expect(LOW_CLIPMAP.levels.map((l) => l.z)).toEqual([13, 12, 11, 10, 9, 8]);
+    expect(LOW_CLIPMAP.look?.map((l) => l.z)).toEqual([13, 12]);
   });
 
   test('recentring only refetches levels whose window moved', async () => {
@@ -93,5 +96,52 @@ describe('clipmap configurations', () => {
     const zooms = new Set(keys.map((k) => k.z));
     expect([...zooms].sort((a, b) => a - b)).toEqual([6, 7, 8, 9, 10, 11, 12, 13]);
     expect(keys.length).toBeLessThan(120);
+  });
+});
+
+describe('look levels: the telescope\'s fine windows around the point looked at', () => {
+  const M_LON = 111320 * Math.cos((LAT * Math.PI) / 180);
+
+  test('are cut around the look point on setLook, hold their pixels, are kept out of the eye levels and off the CPU, and are dropped on clearLook', async () => {
+    const asked: TileKey[] = [];
+    const cfg = { size: 640, levels: [{ z: 12 }, { z: 9 }], look: [{ z: 14 }] };
+    const s = new ClipmapStreamer(syntheticSource(512, asked), cfg, LON, LAT);
+    await s.setCenter(LON, LAT);
+    const hf = s.heightField;
+    expect(s.progress.levelsReady).toBe(2);
+    expect(hf.eyeLevels().map((l) => l.z)).toEqual([12, 9]);
+    const look = hf.levels.find((l) => l.role === 'look')!;
+    expect(look.z).toBe(14);
+    expect(look.filled).toBe(false);
+
+    // Looking at a point 10 km east: the window is centred there, not on the observer.
+    const target = { lon: LON + 10000 / M_LON, lat: LAT };
+    const before = hf.height(target.lon, target.lat, 10000);
+    const askedBefore = asked.length;
+    await s.setLook(target.lon, target.lat);
+    expect(look.filled).toBe(true);
+    expect(look.px0 + 320).toBe(Math.round(lonToMercX(target.lon, 14)));
+    expect(look.py0 + 320).toBe(Math.round(latToMercY(target.lat, 14)));
+    expect(asked.length).toBeGreaterThan(askedBefore);
+    let bad = 0;
+    for (let y = 0; y < look.h; y += 7) for (let x = 0; x < look.w; x += 5) {
+      if (Math.abs(look.raw[y * look.w + x] * look.quant + look.bias - value(14, look.px0 + x, look.py0 + y)) > 0.5) bad++;
+    }
+    expect(bad).toBe(0);
+    // The eye's progress is untouched, and the CPU (labels, sightlines, the eye) never reads a look level.
+    expect(s.progress.levelsReady).toBe(2);
+    expect(hf.height(target.lon, target.lat, 10000)).toBe(before);
+    expect(hf.groundAt(target.lon, target.lat)).toBe(before);
+
+    // Looking a little aside stays inside the window: no refetch.
+    const n = asked.length;
+    await s.setLook(target.lon + 500 / M_LON, target.lat);
+    expect(asked.length).toBe(n);
+    // Looking well beyond it refetches around the new point.
+    await s.setLook(target.lon + 3000 / M_LON, target.lat);
+    expect(asked.length).toBeGreaterThan(n);
+
+    s.clearLook();
+    expect(look.filled).toBe(false);
   });
 });

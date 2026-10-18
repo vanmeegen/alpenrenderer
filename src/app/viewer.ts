@@ -16,6 +16,7 @@ import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
 import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
 import { bandFor, lookRange, meshTopNear } from '../engine/render/mesh';
+import { destination, localRadius } from '../engine/core/geodesy';
 import { ClipmapStreamer, ClipmapConfig, DEFAULT_CLIPMAP, LOW_CLIPMAP } from '../engine/sources/clipmap';
 import { TerrariumSource } from '../engine/sources/terrarium';
 import { TileStore } from '../engine/sources/tilestore';
@@ -374,12 +375,23 @@ export class Viewer {
    */
   private aimTelescope() {
     const hf = this.streamer.heightField;
-    const band = this.camera.fov < Viewer.TELESCOPE_FOV && hf.levels.length
-      ? bandFor(lookRange(hf, this.renderer.eyeAltitude, this.camera.yaw, this.camera.pitch))
-      : null;
+    const zoomed = this.camera.fov < Viewer.TELESCOPE_FOV && hf.levels.length > 0;
+    const r = zoomed ? lookRange(hf, this.renderer.eyeAltitude, this.camera.yaw, this.camera.pitch) : null;
+    const band = bandFor(r);
     const cur = this.renderer.band;
     if ((band?.r1 ?? -1) !== (cur?.r1 ?? -1) || (band?.r2 ?? -1) !== (cur?.r2 ?? -1)) this.renderer.band = band;
+    // The fine data windows (clipmap.ts look levels) go to the same point; one fetch at a time.
+    if (r !== null) {
+      if (!this.looking) {
+        const at = destination(hf.lon, hf.lat, this.camera.yaw, r, localRadius(hf.lat));
+        this.looking = this.streamer.setLook(at.lon, at.lat).finally(() => { this.looking = null; });
+      }
+    } else if (!zoomed) {
+      this.streamer.clearLook();
+    }
   }
+
+  private looking: Promise<void> | null = null;
 
   /**
    * A phone turned over keeps the angle along its long side: 60° across the
@@ -583,7 +595,7 @@ export class Viewer {
     const hf = this.streamer.heightField;
     return {
       tilesDone: p.done, tilesTotal: p.total, levelsReady: p.levelsReady,
-      levels: hf.levels.length,
+      levels: hf.eyeLevels().length,
       ground: hf.groundAt(this.view.lon, this.view.lat),
       eyeAltitude: this.renderer.eyeAltitude,
       altitudeSource: this.view.alt === undefined ? 'dem' : 'given',

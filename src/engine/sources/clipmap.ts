@@ -25,6 +25,13 @@ export interface ClipmapConfig {
   size: number;
   /** Finest first. */
   levels: ClipmapLevelSpec[];
+  /**
+   * The telescope's windows: levels cut around the point looked at instead
+   * of the observer (setLook), finest first. Zoomed in, the summit looked
+   * at is drawn from 6.6 m posts instead of the 26–53 m of the level that
+   * reaches it from the observer.
+   */
+  look?: ClipmapLevelSpec[];
 }
 
 /**
@@ -37,12 +44,15 @@ export interface ClipmapConfig {
 export const DEFAULT_CLIPMAP: ClipmapConfig = {
   size: 640,
   levels: [{ z: 14 }, { z: 13 }, { z: 12 }, { z: 11 }, { z: 10 }, { z: 9 }, { z: 8 }, { z: 7 }],
+  // The telescope: 6.6 m and 13 m posts around the summit looked at, zoomed in.
+  look: [{ z: 14 }, { z: 13 }],
 };
 
-/** Six levels for phones: 13 m posts out to ~4 km, same reach. */
+/** Six levels for phones: 13 m posts out to ~4 km, half the reach (~135 km). */
 export const LOW_CLIPMAP: ClipmapConfig = {
   size: 640,
   levels: [{ z: 13 }, { z: 12 }, { z: 11 }, { z: 10 }, { z: 9 }, { z: 8 }],
+  look: [{ z: 13 }, { z: 12 }],
 };
 
 const QUANT = 1;
@@ -66,6 +76,11 @@ export class ClipmapStreamer {
   private loaded: (string | null)[] = [];
   private generation = 0;
   private abort: AbortController | null = null;
+  /** The telescope's windows (config.look), cut around the point looked at; see setLook. */
+  private lookLevels: Level[] = [];
+  private lookLoaded: (string | null)[] = [];
+  private lookGeneration = 0;
+  private lookAbort: AbortController | null = null;
 
   onUpdate: ((level: number) => void) | null = null;
 
@@ -89,6 +104,76 @@ export class ClipmapStreamer {
       this.levels.push(lv);
       this.loaded.push(null);
     }
+    for (const spec of config.look ?? []) {
+      const px0 = Math.round(lonToMercX(lon, spec.z)) - (size >> 1);
+      const py0 = Math.round(latToMercY(lat, spec.z)) - (size >> 1);
+      const lv = this.heightField.addLevel({
+        z: spec.z, px0, py0, w: size, h: size, quant: QUANT, bias: BIAS, role: 'look',
+      }, new Uint16Array(size * size), false);
+      this.lookLevels.push(lv);
+      this.lookLoaded.push(null);
+    }
+  }
+
+  /**
+   * Points the telescope: cuts each look window around (lon, lat) and fills
+   * it, unless the point is still within a quarter window of the current
+   * centre (panning across a summit must not refetch). Outside the eye's
+   * progress: the panorama is complete without it, the window only sharpens
+   * what is looked at.
+   */
+  async setLook(lon: number, lat: number): Promise<void> {
+    const size = this.config.size;
+    const jobs: { index: number; keys: TileKey[]; px0: number; py0: number }[] = [];
+    this.lookLevels.forEach((lv, i) => {
+      const cx = lonToMercX(lon, lv.z), cy = latToMercY(lat, lv.z);
+      if (this.lookLoaded[i] && lv.filled
+        && Math.abs(cx - (lv.px0 + size / 2)) < size / 4 && Math.abs(cy - (lv.py0 + size / 2)) < size / 4) return;
+      const px0 = Math.round(cx) - (size >> 1), py0 = Math.round(cy) - (size >> 1);
+      if (this.lookLoaded[i] === `${lv.z}:${px0}:${py0}` && lv.filled) return;
+      const T = this.source.tileSize, tz = tileZoom(lv.z, T);
+      const keys: TileKey[] = [];
+      for (let ty = Math.floor(py0 / T); ty <= Math.floor((py0 + size - 1) / T); ty++) {
+        for (let tx = Math.floor(px0 / T); tx <= Math.floor((px0 + size - 1) / T); tx++) {
+          const k = normaliseTile({ z: tz, x: tx, y: ty });
+          if (k) keys.push(k);
+        }
+      }
+      jobs.push({ index: i, keys, px0, py0 });
+    });
+    if (!jobs.length) return;
+    const gen = ++this.lookGeneration;
+    this.lookAbort?.abort();
+    this.lookAbort = new AbortController();
+    const { signal } = this.lookAbort;
+    for (const job of jobs) {
+      const lv = this.lookLevels[job.index];
+      const tiles = await Promise.all(job.keys.map((key) => this.source.load(key, signal)));
+      if (gen !== this.lookGeneration) return;
+      // A window moves as a whole: cut, filled, then shown, so no frame draws half of each.
+      lv.px0 = job.px0;
+      lv.py0 = job.py0;
+      lv.raw.fill(0);
+      job.keys.forEach((key, k) => { if (tiles[k]) this.blit(lv, job.px0, job.py0, key, tiles[k]!); });
+      this.heightField.setOrigin(this.heightField.lon, this.heightField.lat);
+      lv.version++;
+      lv.filled = true;
+      this.lookLoaded[job.index] = `${lv.z}:${job.px0}:${job.py0}`;
+      this.onUpdate?.(this.levels.length + job.index);
+    }
+  }
+
+  /** The telescope is put down: its windows are empty again and the GPU skips them. */
+  clearLook() {
+    this.lookAbort?.abort();
+    this.lookGeneration++;
+    this.lookLevels.forEach((lv, i) => {
+      if (!lv.filled && !this.lookLoaded[i]) return;
+      lv.filled = false;
+      lv.version++;
+      this.lookLoaded[i] = null;
+    });
+    if (this.lookLevels.length) this.onUpdate?.(this.levels.length);
   }
 
   /** Ground sample distance of each level at the current latitude, metres. */

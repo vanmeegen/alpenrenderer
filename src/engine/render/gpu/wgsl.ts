@@ -112,14 +112,44 @@ fn sampleLevel(lv : i32, dLon : f32, dIso : f32) -> f32 {
   return h * B.x + B.y;
 }
 
-/** Finest level that still covers a ground range. */
+/** Finest observer level that still covers a ground range (a look level, flagged < 0, never). */
 fn levelFor(r : f32) -> i32 {
   var lv : i32 = i32(uniforms.uLevelCount) - 1;
-  for (var i : i32 = 0; i < 8; i = i + 1) {
+  for (var i : i32 = 0; i < 10; i = i + 1) {
     if (f32(i) >= uniforms.uLevelCount) { break; }
-    if (r <= uniforms.uLvlA[i].w) { lv = i; break; }
+    let reach = uniforms.uLvlA[i].w;
+    if (reach > 0.0 && r <= reach) { lv = i; break; }
+  }
+  if (uniforms.uLvlA[lv].w < 0.0) {
+    for (var i : i32 = 9; i >= 0; i = i - 1) {
+      if (f32(i) < uniforms.uLevelCount && uniforms.uLvlA[i].w > 0.0) { lv = i; break; }
+    }
   }
   return lv;
+}
+
+/** The telescope's window this point lies in (finest first), or -1: taken by position, not range. */
+fn lookLevel(dLon : f32, dIso : f32) -> i32 {
+  for (var i : i32 = 0; i < 10; i = i + 1) {
+    if (f32(i) >= uniforms.uLevelCount) { break; }
+    if (uniforms.uLvlA[i].w >= 0.0) { continue; }
+    let A = uniforms.uLvlA[i];
+    let B = uniforms.uLvlB[i];
+    let u = A.x + dLon * A.z;
+    let v = A.y - dIso * A.z;
+    if (u > 1.5 && u < B.z - 2.5 && v > 1.5 && v < B.w - 2.5) { return i; }
+  }
+  return -1;
+}
+
+/** 0 well inside a look window, 1 at its edge: the blend back into the observer's levels. */
+fn lookFade(lk : i32, dLon : f32, dIso : f32) -> f32 {
+  let A = uniforms.uLvlA[lk];
+  let B = uniforms.uLvlB[lk];
+  let u = A.x + dLon * A.z;
+  let v = A.y - dIso * A.z;
+  let d = max(abs(u - 0.5 * B.z) / (0.5 * B.z), abs(v - 0.5 * B.w) / (0.5 * B.w));
+  return smoothstep(0.80, 0.95, d);
 }
 `;
 
@@ -149,8 +179,8 @@ uniform uTexSize   : vec2<f32>;
 uniform uLevelPx   : f32;         // pixels per clipmap level in the stacked atlas
 uniform uViewProj  : mat4x4<f32>;
 uniform uFar       : f32;
-uniform uLvlA      : array<vec4<f32>, 8>;   // cx, cy, pxPerRad, maxRange
-uniform uLvlB      : array<vec4<f32>, 8>;   // quant, bias, w, h
+uniform uLvlA      : array<vec4<f32>, 10>;  // cx, cy, pxPerRad, maxRange (< 0: a look level, taken by position)
+uniform uLvlB      : array<vec4<f32>, 10>;  // quant, bias, w, h
 
 var heightsSampler : sampler;
 var heights        : texture_2d<f32>;
@@ -207,11 +237,14 @@ fn main(input : VertexInputs) -> FragmentInputs {
   // LOD change never shows up as a step in the skyline.
   let lv = levelFor(r);
   var h = sampleLevel(lv, dLon, dIso);
-  if (f32(lv) + 1.0 < uniforms.uLevelCount) {
+  if (f32(lv) + 1.0 < uniforms.uLevelCount && uniforms.uLvlA[lv + 1].w > 0.0) {
     let outer = uniforms.uLvlA[lv].w;
     let fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) { h = mix(h, sampleLevel(lv + 1, dLon, dIso), fade); }
   }
+  // Inside the telescope's window its finer posts take over, blended out at the window's edge.
+  let lk = lookLevel(dLon, dIso);
+  if (lk >= 0) { h = mix(sampleLevel(lk, dLon, dIso), h, lookFade(lk, dLon, dIso)); }
 
   let horiz = (uniforms.uRadius + h) * sinD;
   let s = sin(r / (2.0 * uniforms.uRefRadius));
@@ -256,8 +289,8 @@ uniform uTexSize    : vec2<f32>;
 uniform uLevelPx    : f32;
 uniform uRadius     : f32;
 uniform uCosLat0    : f32;
-uniform uLvlA       : array<vec4<f32>, 8>;
-uniform uLvlB       : array<vec4<f32>, 8>;
+uniform uLvlA       : array<vec4<f32>, 10>;
+uniform uLvlB       : array<vec4<f32>, 10>;
 uniform uSun        : vec3<f32>;      // towards the sun, ENU, unit
 uniform uSnowLine   : f32;            // metres
 uniform uFogRange   : f32;            // metres to 1/e of the terrain colour
@@ -329,13 +362,19 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   let lv = levelFor(r);
   var g = gradient(lv, dLon, dIso);
   var wet = waterAt(lv, dLon, dIso);
-  if (f32(lv) + 1.0 < uniforms.uLevelCount) {
+  if (f32(lv) + 1.0 < uniforms.uLevelCount && uniforms.uLvlA[lv + 1].w > 0.0) {
     let outer = uniforms.uLvlA[lv].w;
     let fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) {
       g = mix(g, gradient(lv + 1, dLon, dIso), fade);
       wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
     }
+  }
+  let lk = lookLevel(dLon, dIso);
+  if (lk >= 0) {
+    let lf = lookFade(lk, dLon, dIso);
+    g = mix(gradient(lk, dLon, dIso), g, lf);
+    wet = mix(waterAt(lk, dLon, dIso), wet, lf);
   }
   let n = normalize(vec3<f32>(-g.x, -g.y, 1.0));
   let slope = 1.0 - n.z;                 // 0 flat .. 1 vertical

@@ -67,7 +67,7 @@ import {
   TERRAIN_VERTEX,
 } from './wgsl';
 
-const MAX_LEVELS = 8;
+const MAX_LEVELS = 10;   // eight around the observer, two telescope windows (clipmap.ts look)
 const TERRAIN_MASK = 0x1;
 const VIEW_MASK = 0x2;
 
@@ -586,7 +586,9 @@ export class GpuRenderer {
       // Otherwise a cold start draws the empty raster's uniform bias as a plain
       // at -1000 m in the foreground, with a cliff up to the real terrain
       // wherever the next level takes over.
-      this.lvlA.set([l.cx, l.cy, pxPerRad, l.filled ? l.maxRange : 0], i * 4);
+      // A look level (the telescope's window) is flagged -1: the shader takes
+      // it wherever the point lies inside its window, not by range.
+      this.lvlA.set([l.cx, l.cy, pxPerRad, l.role === 'look' ? (l.filled ? -1 : 0) : (l.filled ? l.maxRange : 0)], i * 4);
       // Heights were re-expressed at one metre when the atlas was packed.
       this.lvlB.set([1, HEIGHT_BIAS, l.w, l.h], i * 4);
     });

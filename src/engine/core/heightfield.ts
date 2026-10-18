@@ -20,6 +20,13 @@ export interface LevelSpec {
   quant: number;
   /** height = raw * quant + bias */
   bias: number;
+  /**
+   * 'look': a telescope window cut around the point looked at rather than
+   * around the observer (sources/clipmap.ts setLook). Drawn by the GPU where
+   * it covers the ground, never read on the CPU: labels, sightlines and the
+   * eye's height stay on the observer-centred levels, whatever is looked at.
+   */
+  role?: 'look';
 }
 
 export interface Level extends LevelSpec {
@@ -86,7 +93,12 @@ export class HeightField {
     // cross-fade into the next level has room. Shrinks as the observer moves
     // away from where the level was cut.
     const inset = Math.min(l.cx, l.w - l.cx, l.cy, l.h - l.cy);
-    l.maxRange = Math.max(0, inset - 2) * l.res;
+    l.maxRange = l.role === 'look' ? 0 : Math.max(0, inset - 2) * l.res;
+  }
+
+  /** The observer-centred levels, in order of reach: what the CPU reads. */
+  eyeLevels(): Level[] {
+    return this.levels.filter((l) => l.role !== 'look');
   }
 
   /** `filled` is false for a level that is allocated now and streamed later. */
@@ -101,7 +113,8 @@ export class HeightField {
   }
 
   get maxRange(): number {
-    return this.levels.length ? this.levels[this.levels.length - 1].maxRange : 0;
+    const eye = this.eyeLevels();
+    return eye.length ? eye[eye.length - 1].maxRange : 0;
   }
 
   /** Pixel coordinates of a geodetic point inside a level's crop. */
@@ -137,7 +150,7 @@ export class HeightField {
    */
   height(lon: number, lat: number, range = 0): number {
     for (const l of this.levels) {
-      if (range > l.maxRange || !l.filled) continue;
+      if (l.role === 'look' || range > l.maxRange || !l.filled) continue;
       const h = this.heightIn(l, lon, lat);
       if (!Number.isNaN(h)) return h;
     }
@@ -146,7 +159,7 @@ export class HeightField {
     // the coarse levels land first.
     for (let i = this.levels.length - 1; i >= 0; i--) {
       const l = this.levels[i];
-      if (!l.filled) continue;
+      if (l.role === 'look' || !l.filled) continue;
       const h = this.heightIn(l, lon, lat);
       if (!Number.isNaN(h)) return h;
     }
@@ -172,7 +185,7 @@ export class HeightField {
    * radius is small: a larger one would climb onto a neighbouring pinnacle.
    */
   summitNear(lon: number, lat: number, radius = 60): number {
-    const l = this.levels.find((lv) => lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
+    const l = this.levels.find((lv) => lv.role !== 'look' && lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
     if (!l) return 0;
     const { u, v } = this.project(l, lon, lat);
     const n = Math.max(1, Math.round(radius / l.res));
@@ -207,7 +220,7 @@ export class HeightField {
    * shoulder of this DEM and stays as it is, at the ground there.
    */
   summitAt(lon: number, lat: number, radius = 60): { lon: number; lat: number; h: number } {
-    const l = this.levels.find((lv) => lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
+    const l = this.levels.find((lv) => lv.role !== 'look' && lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
     if (!l) return { lon, lat, h: 0 };
     const { u, v } = this.project(l, lon, lat);
     const n = Math.max(1, Math.round(radius / l.res));
