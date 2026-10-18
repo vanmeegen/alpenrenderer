@@ -358,7 +358,9 @@ test.describe('appearance', () => {
     const yp = Math.round(ys + 200);
     const left = await probe(W / 2 - 100, yp);
     const right = await probe(W / 2 + 100, yp);
-    expect(left.expected / right.expected).toBeGreaterThan(1.3);   // the formula itself separates the flanks
+    // The formula itself separates the flanks: 200 px below the summit the
+    // probes face the viewer as much as north or south, so by 1.16, not 1.56.
+    expect(left.expected / right.expected).toBeGreaterThan(1.1);
     // The old light (a sky term over a 0.66 Lambert) read 0.028 too bright on
     // the shadow flank and 0.020 on the lit one; the tolerance sits below that.
     expect(Math.abs(left.measured - left.expected)).toBeLessThan(0.015);
