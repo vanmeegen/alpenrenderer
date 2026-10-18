@@ -26,6 +26,12 @@ export interface LabelTarget {
   elevation: number;
   /** Altitude the anchor sits at — the DEM's summit, not the catalogue's. */
   anchorAlt: number;
+  /**
+   * How big the feature looks from here, radians: the angle its own rise
+   * takes up, atan(prominence / range) for a summit, atan(width / range) for
+   * a lake. What the labels are handed out by; 0 when nothing is known.
+   */
+  rank: number;
   visible: boolean;
   /** Whether the sightline has been checked yet; until then `visible` is a placeholder false. */
   decided: boolean;
@@ -110,11 +116,13 @@ export function buildTargets(
       const o = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye },
         { lon: a.lon, lat: a.lat, alt: anchorAlt });
       if (o.range > maxRange || o.range < 20) return;
+      const size = p.kind === 'lake' ? p.extent : p.prom;
       out.push({
         peak: p,
         east: o.east, north: o.north, up: o.up,
         range: o.range, bearing: o.bearing, elevation: o.elevation,
         anchorAlt,
+        rank: size ? Math.atan2(size, o.range) : 0,
         visible: false,
         decided: false,
         spot,
@@ -133,20 +141,28 @@ export function buildTargets(
       });
     });
   }
-  // Near before far. The hill in front is what a person on the spot asks
-  // about; famous summits behind it get their names once zooming leaves room
-  // (fewer near summits in the frame, labels further apart). Ranking by fame
-  // instead filled the slots with 3000ers 50 km out and left the mountain
-  // next to the standpoint unnamed. The sightline job works in this order
-  // too, so the near labels are also the first to appear.
-  out.sort((a, b) => a.range - b.range);
+  // By apparent prominence, biggest first (PeakVisor ranks by prominence;
+  // OpenTopoMap thins summits by isolation). The angle a summit's own rise
+  // takes up from here says what the eye sees: the 400 m hill 7 km away
+  // (0.057 rad) before the 1000 m summit 40 km behind it (0.025), but the
+  // 4000er with 1700 m of prominence 50 km out (0.034) before the 30 m knoll
+  // at the foot of the hill (0.030). Ranking by fame alone filled the slots
+  // with 3000ers 50 km out; ranking by distance alone named every bump in
+  // front and left the pointed peak behind it nameless. The sightline job
+  // works in this order too, so the labels that matter appear first.
+  out.sort((a, b) => b.rank - a.rank || a.range - b.range);
   return out;
 }
 
 /**
- * Screen placement. Labels are claimed in target order (nearest first) and stacked
- * upwards from their summit; a label that cannot find a free slot is dropped
- * rather than allowed to overlap, so the ones that survive stay readable.
+ * Screen placement. The screen is a grid of cells about one label wide and
+ * two lines tall; each cell names one feature, the best-ranked one whose
+ * anchor falls into it (the tessellation of Raposo, Brewer and Stanislawski
+ * 2013: a retained summit has room for its label). Zooming in spreads the
+ * anchors over more cells, so more summits get their names, as a telescope
+ * does in PeakFinder. Labels are stacked upwards from their summit; one that
+ * finds no free slot is dropped rather than allowed to overlap, and leaves
+ * its cell to the next.
  */
 export function layoutLabels(
   targets: LabelTarget[], cam: Camera, opt: LayoutOptions,
@@ -165,6 +181,10 @@ export function layoutLabels(
     if (!c || t.spot < c.spot) chosen.set(t.peak.id, t);
   }
 
+  const cellW = 9 * opt.lineHeight, cellH = 3 * opt.lineHeight;
+  const taken = new Set<number>();
+  const cellOf = (x: number, y: number) => Math.floor(x / cellW) + 4096 * Math.floor(y / cellH);
+
   for (let i = 0; i < targets.length && placed.length < opt.maxLabels; i++) {
     const t = targets[i];
     if (!t.visible || chosen.get(t.peak.id) !== t) continue;
@@ -173,6 +193,7 @@ export function layoutLabels(
     let ax = (ndc[0] * 0.5 + 0.5) * opt.width;
     let ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
     if (ax < -40 || ax > opt.width + 40 || ay < -40 || ay > opt.height + 40) continue;
+    if (taken.has(cellOf(ax, ay))) continue;
     if (t.settle) {
       // On screen for the first time: onto the summit as the mesh draws it.
       Object.assign(t, t.settle());
@@ -211,6 +232,7 @@ export function layoutLabels(
     const p: PlacedLabel = { target: t, ax, ay, bx, by, bw, bh, lines };
     placed.push(p);
     boxes.push(p);
+    taken.add(cellOf(ax, ay));
   }
   return placed;
 }

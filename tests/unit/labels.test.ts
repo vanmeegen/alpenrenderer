@@ -155,17 +155,17 @@ describe('buildTargets', () => {
     const drop = (range * range) / (2 * (6371008.8 / 0.87));
     const elev = Math.atan2(WALL - 40 - PLAIN - 1.7 - drop, range);
     expect(wall.ay).toBeCloseTo(300 - 300 * Math.tan(elev) / Math.tan(Math.PI / 6), 0);
-    // The lake keeps its water; the Osthügel, off to the east, was never asked about.
+    // The lake keeps its water; the Osthügel, off to the east, was never asked
+    // about, nor the Hinterhorn, which shares the wall's screen cell and is skipped before that.
     expect(placed.find((p) => p.target.peak.id === 'osm:way/2')!.target.anchorAlt).toBeCloseTo(PLAIN, 0);
-    expect(asked.length).toBe(2);                                  // the wall and the Hinterhorn, both in view
+    expect(asked.length).toBe(1);
     // Asked once, remembered: a second frame asks nothing.
     layoutLabels(t, camera(0), opt());
-    expect(asked.length).toBe(2);
+    expect(asked.length).toBe(1);
   });
 
-  test('orders by distance: the nearest summit first, however famous the ones behind', () => {
-    // Hinterhorn (3500 m) outranks the Osthügel (1510 m) by any measure of
-    // fame; standing there, the hill in front is the one to name first.
+  test('without any prominence known, the nearest summit comes first', () => {
+    // None of these has a prominence: all rank 0, and the tie goes to the near one.
     const t = buildTargets(peaks, obs, hf, hf.maxRange);
     expect(t.map((x) => x.peak.id)).toEqual(['east', 'wall', 'behind']);
   });
@@ -226,11 +226,14 @@ describe('layoutLabels', () => {
     expect(m.lines).toEqual(['Mauerspitze', `2650 m · ${(WALL_M / 1000).toFixed(1)} km`]);
   });
 
-  test('two summits at the same spot stack without overlapping, and maxLabels caps the count', () => {
+  test('summits in neighbouring cells whose names would overlap stack without overlapping, and maxLabels caps the count', () => {
+    // Three summits on the wall 13° apart (150 px at 60°, one cell each) with
+    // names 190 px wide: the boxes collide and are stacked, none is dropped.
+    const off = 8000 * Math.tan((13.2 * Math.PI) / 180) / M_PER_DEG_LON;
     const twins: Peak[] = [
-      { id: 'a', name: 'Zwilling A', lon: LON, lat: wallLat, ele: 2650 },
-      { id: 'b', name: 'Zwilling B', lon: LON, lat: wallLat, ele: 2640 },
-      { id: 'c', name: 'Zwilling C', lon: LON, lat: wallLat, ele: 2630 },
+      { id: 'a', name: 'Zwilling Alpha im Westen', lon: LON - off, lat: wallLat, ele: 2650 },
+      { id: 'b', name: 'Zwilling Beta in der Mitte', lon: LON, lat: wallLat, ele: 2640 },
+      { id: 'c', name: 'Zwilling Gamma im Osten', lon: LON + off, lat: wallLat, ele: 2630 },
     ];
     const t = buildTargets(twins, obs, hf, hf.maxRange);
     computeVisibility(t, hf, PLAIN + 1.7);
@@ -263,22 +266,22 @@ describe('layoutLabels', () => {
     expect(m.by + m.bh).toBeLessThan(600);
   });
 
-  test('near before far: with room for one label the near hill gets it; zoomed onto the famous peak, it gets its own', () => {
-    // A nameless-looking hill 3 km east and a famous 4000er 6 km out at 97°:
-    // at 60° both are in view and the near one wins the only slot.
+  test('with room for one label the summit that looks biggest gets it; zoomed past it, the next in frame does', () => {
+    // A hill without known prominence 3 km east and a 4000er with 2500 m of
+    // it 6 km out at 97°: the 4000er looks biggest from here and is named
+    // first; zoomed in on 90°, it leaves the frame and the hill is named.
     const pair: Peak[] = [
       { id: 'near', name: 'Nahkopf', lon: east(3), lat: LAT, ele: 1510 },
       { id: 'famous', name: 'Fernhorn', lon: LON + (6000 * Math.sin((97 * Math.PI) / 180)) / M_PER_DEG_LON, lat: LAT + (6000 * Math.cos((97 * Math.PI) / 180)) / M_PER_DEG_LAT, ele: 4000, prom: 2500 },
     ];
     const t = buildTargets(pair, obs, hf, hf.maxRange);
     for (const x of t) x.visible = true;
-    expect(layoutLabels(t, camera(90), opt(1000, 600, 1)).map((p) => p.target.peak.id)).toEqual(['near']);
-    // Zoomed in on 97°, the hill leaves the frame and the famous peak is named.
+    expect(layoutLabels(t, camera(90), opt(1000, 600, 1)).map((p) => p.target.peak.id)).toEqual(['famous']);
     const cam = new Camera();
     cam.aspect = 1000 / 600;
-    cam.set({ yaw: 97, pitch: 0, fov: 5 });
+    cam.set({ yaw: 90, pitch: 0, fov: 5 });
     cam.update();
-    expect(layoutLabels(t, cam, opt(1000, 600, 1)).map((p) => p.target.peak.id)).toEqual(['famous']);
+    expect(layoutLabels(t, cam, opt(1000, 600, 1)).map((p) => p.target.peak.id)).toEqual(['near']);
   });
 
   test('looking away, nothing is placed', () => {
@@ -305,5 +308,65 @@ describe('pickLabel and formatting', () => {
     expect(fmtEle({ id: 'x', name: 'x', lon: 0, lat: 0, ele: 4477.5 })).toBe('4478 m');
     expect(fmtEle({ id: 'x', name: 'x', lon: 0, lat: 0, demEle: 4470 })).toBe('4470 m');
     expect(fmtEle({ id: 'x', name: 'x', lon: 0, lat: 0 })).toBe('');
+  });
+});
+
+describe('which summits get the room: apparent prominence, one label per screen cell', () => {
+  // Rank = the angle a summit's own rise (its prominence) takes up from here,
+  // atan(prominence / range): the hill in front beats the famous summit far
+  // behind it, the 4000er beats the knoll at the foot of the hill (PeakVisor
+  // ranks by prominence; OpenTopoMap thins by isolation and zoom; the
+  // tessellation is Raposo et al. 2013). Not height, not distance alone.
+  const ranked: Peak[] = [
+    { id: 'knoll', name: 'Buckel', lon: east(1), lat: LAT, ele: 1530, prom: 30 },
+    { id: 'hill', name: 'Hügel', lon: east(7), lat: LAT, ele: 1900, prom: 400 },
+    { id: 'big', name: 'Großer', lon: east(20), lat: LAT, ele: 2500, prom: 1000 },
+    { id: 'giant', name: 'Riese', lon: east(25), lat: LAT, ele: 4000, prom: 1700 },
+    { id: 'nameless', name: 'Ohne Schartenhöhe', lon: east(3), lat: LAT, ele: 1600 },
+  ];
+
+  test('orders by apparent prominence: the 4000er at 25 km, the 400 m hill at 7 km, the 1000 m summit at 20 km, the knoll at 1 km; no prominence comes last', () => {
+    const t = buildTargets(ranked, obs, hf, hf.maxRange);
+    expect(t.map((x) => x.peak.id)).toEqual(['giant', 'hill', 'big', 'knoll', 'nameless']);
+    const giant = t.find((x) => x.peak.id === 'giant')!;
+    expect(giant.rank).toBeCloseTo(Math.atan2(1700, giant.range), 6);
+    expect(t.find((x) => x.peak.id === 'nameless')!.rank).toBe(0);
+  });
+
+  test('a lake ranks by the angle its width takes up', () => {
+    const lake = lakeLabel({ id: 'osm:way/5', name: 'Rundsee', lon: east(5), lat: LAT, area: 1e6, rings: [] });
+    const t = buildTargets([lake], obs, hf, hf.maxRange);
+    expect(t[0].rank).toBeCloseTo(Math.atan2(1000, t[0].range), 6);
+  });
+
+  test('one label per screen cell: eight summits 5° apart fill three cells at 60° and six at 30°, twice as many', () => {
+    // Eight equal summits on the plain, 5° apart in bearing, 10 km out.
+    const eight: Peak[] = Array.from({ length: 8 }, (_, i) => {
+      const brg = ((72 + 5 * i) * Math.PI) / 180;
+      return { id: `s${i}`, name: `Spitze ${i}`, lon: LON + (10000 * Math.sin(brg)) / M_PER_DEG_LON, lat: LAT + (10000 * Math.cos(brg)) / M_PER_DEG_LAT, ele: 1500, prom: 100 };
+    });
+    const t = buildTargets(eight, obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const wide = layoutLabels(t, camera(90), { ...opt(), maxLabels: 50 });
+    // 1000 px over 87.8° of view: 5° is 57 px, a cell 9 line heights = 144 px wide.
+    expect(wide.length).toBe(3);
+    const cam = new Camera();
+    cam.aspect = 1000 / 600;
+    cam.set({ yaw: 90, pitch: 0, fov: 30 });
+    cam.update();
+    // 1000 px over 48° of view: 5° is 104 px, so pairs still share a cell, but twice as many cells are used.
+    const narrow = layoutLabels(t, cam, { ...opt(), maxLabels: 50 });
+    expect(narrow.length).toBe(6);
+  });
+
+  test('in a cell the best-ranked summit wins, and a label the stack cannot place frees the cell for the next', () => {
+    const two: Peak[] = [
+      { id: 'minor', name: 'Nebengipfel', lon: east(10), lat: LAT, ele: 1800, prom: 50 },
+      { id: 'major', name: 'Hauptgipfel', lon: east(10.05), lat: LAT, ele: 1900, prom: 600 },
+    ];
+    const t = buildTargets(two, obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const placed = layoutLabels(t, camera(90), opt());
+    expect(placed.map((p) => p.target.peak.id)).toEqual(['major']);
   });
 });

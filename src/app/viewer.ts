@@ -461,7 +461,7 @@ export class Viewer {
     if (!this.showLabels || !this.targets.length) { this.placed = []; return; }
     this.placed = layoutLabels(this.targets, this.camera, {
       width: cssW, height: cssH, measure: painter.measure,
-      lineHeight: painter.style.nameSize + 3, maxLabels: 22, detailed: 6, gap: 5,
+      lineHeight: painter.style.nameSize + 3, maxLabels: 60, detailed: 6, gap: 5,
     });
     if (this.selected) {
       const id = this.selected.target.peak.id;

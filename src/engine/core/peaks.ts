@@ -22,8 +22,10 @@ export interface Peak {
    * so the marker sits on the summit the renderer actually drew.
    */
   demEle?: number;
-  /** Topographic prominence, metres, when known. */
+  /** Topographic prominence (Schartenhöhe), metres, when known. */
   prom?: number;
+  /** A lake's width, metres (the square root of its area): its size for the label rank. */
+  extent?: number;
   /** Where the record came from. */
   src?: string;
   /** A lake rather than a summit: anchored on its surface, drawn in blue. */

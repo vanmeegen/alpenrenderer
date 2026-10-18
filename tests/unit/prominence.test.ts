@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 // @ts-expect-error plain ES module without types, run by node at build time
-import { prominence, summitProminence } from '../../tools/prominence.mjs';
+import { burn, prominence, summitProminence } from '../../tools/prominence.mjs';
 
 /** A w×h grid of whole metres from a function of (x, y). */
 function grid(w: number, h: number, f: (x: number, y: number) => number): Int16Array {
@@ -64,5 +64,27 @@ describe('prominence', () => {
     expect(summitProminence(g, p, w, h, 41, 16, 1.5)).toBe(p[15 * w + 40]);
     // A point on the plain far from any summit: nothing within reach, undefined.
     expect(summitProminence(g, p, w, h, 25, 3, 1.5)).toBeUndefined();
+  });
+
+  test('the catalogue\'s elevation, burned into its cell, decides which of two neighbours owns the massif', () => {
+    // A 212 m grid rounds a sharp summit off more than a broad one: the Rofan's
+    // Hochiss (2299 m) read 2185 in its cell, the broader Rofanspitze (2259 m)
+    // 2200, and the grid handed the massif's 1250 m of prominence to the
+    // wrong one. With the surveyed heights burned into their cells the order
+    // is right again, and each takes its drop to their common col.
+    const w = 40, h = 20;
+    const g = grid(w, h, (x, y) => Math.max(1000, 2185 - 60 * Math.hypot(x - 10, y - 10), 2200 - 60 * Math.hypot(x - 30, y - 10)));
+    const before = prominence(g, w, h);
+    expect(before[10 * w + 30]).toBe(2200);                 // the grid's highest cell: the broad one
+    // The col is the lowest cell on the ridge between them, where the two slopes meet.
+    const col = g[10 * w + 20];
+    expect(col).toBeLessThan(Math.min(g[10 * w + 19], g[10 * w + 21]));
+    expect(before[10 * w + 10]).toBe(2185 - col);
+    const burnt = burn(g, w, h, [[10, 10, 2299], [30, 10, 2259]]);
+    const after = prominence(burnt, w, h);
+    expect(after[10 * w + 10]).toBe(2299);
+    expect(after[10 * w + 30]).toBe(2259 - col);
+    // A catalogue height below the cell's own leaves the cell alone.
+    expect(burn(g, w, h, [[10, 10, 1500]])[10 * w + 10]).toBe(2185);
   });
 });

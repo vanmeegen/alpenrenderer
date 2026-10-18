@@ -94,3 +94,21 @@ export function summitProminence(heights, prom, w, h, x, y, radius) {
   }
   return bestProm === undefined || Number.isNaN(bestProm) ? undefined : bestProm;
 }
+
+/**
+ * The catalogue's surveyed heights burned into the grid: a copy of `heights`
+ * where each listed cell (x, y, ele) is raised to `ele` when the grid holds
+ * less. A coarse grid rounds a sharp summit off more than a broad one and
+ * can hand a massif's prominence to the lower of two neighbours; with the
+ * surveyed heights in place the order between summits is the surveyed one,
+ * and each catalogue point is the highest cell at its own position.
+ */
+export function burn(heights, w, h, cells) {
+  const out = heights.slice();
+  for (const [x, y, ele] of cells) {
+    if (x < 0 || y < 0 || x >= w || y >= h || !Number.isFinite(ele)) continue;
+    const i = y * w + x;
+    if (ele > out[i]) out[i] = ele;
+  }
+  return out;
+}

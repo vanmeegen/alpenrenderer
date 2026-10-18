@@ -74,7 +74,7 @@ function sightlineClear(t: LabelTarget, hf: HeightField, eyeAlt: number, opt: Ho
 export class VisibilityJob {
   private i = 0;
   private readonly radius: number;
-  /** Targets confirmed visible so far. */
+  /** Summits confirmed visible so far (a lake's spare spots are not counted). */
   visible = 0;
 
   constructor(
@@ -97,7 +97,7 @@ export class VisibilityJob {
       const t = this.targets[this.i++];
       t.visible = sightlineClear(t, this.hf, this.eyeAlt, this.opt, this.radius);
       t.decided = true;
-      if (t.visible) this.visible++;
+      if (t.visible && t.spot === 0 && t.peak.kind !== 'lake') this.visible++;
       if (this.now() - t0 >= budgetMs) break;
     }
     return this.done;

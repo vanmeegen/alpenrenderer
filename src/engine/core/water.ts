@@ -149,6 +149,7 @@ export function lakeLabel(l: Lake): Peak {
   return {
     id: l.id, name: l.name, lon: l.lon, lat: l.lat, kind: 'lake', src: 'OpenStreetMap',
     ...(l.ele !== undefined ? { ele: l.ele } : {}),
+    ...(l.area !== undefined ? { extent: Math.sqrt(l.area) } : {}),
     ...(l.tags ? { tags: l.tags } : {}),
     ...(spots.length ? { spots } : {}),
   };

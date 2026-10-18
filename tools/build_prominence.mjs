@@ -13,7 +13,9 @@
  * of some 30 M cells, prominence by union-find (tools/prominence.mjs). Each
  * catalogue peak takes the prominence of the highest grid cell within 1.5
  * cells (320 m) of its position, then 2.5 cells; an OSM `prominence` tag is
- * kept unless --force. Tiles come through curl into tile-cache/ (as
+ * kept unless --force, as is a value from an earlier pass: run zoom 9 for
+ * the big summits first (a third of the catalogue has no summit of its own
+ * on a 212 m grid), then zoom 10 (106 m) for the rest. Tiles come through curl into tile-cache/ (as
  * cache_tiles.mjs does) and are decoded by headless Chromium, the one WebP
  * decoder this repository already has.
  */
@@ -22,7 +24,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { prominence, summitProminence } from './prominence.mjs';
+import { burn, prominence, summitProminence } from './prominence.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -103,25 +105,34 @@ try {
   server.kill();
 }
 
+// --- the catalogue's heights into the grid ------------------------------------
+// A 212 m cell holds the box-filtered mean of the summit's surroundings and
+// rounds a sharp top off more than a broad one: the Rofan's Hochiss (2299 m)
+// read 2185, the broader Rofanspitze (2259 m) 2200, and the massif's 1250 m
+// of prominence went to the wrong one. The surveyed heights settle the order.
+const px0 = tx0 * TILE, py0 = ty0 * TILE;
+const cellOf = (r) => [Math.floor(mercX(r.o) - px0), Math.floor(mercY(r.a) - py0)];
+const files = readdirSync(out).filter((f) => f.endsWith('.json') && f !== 'index.json').map((f) => join(out, f));
+const cells = [];
+for (const path of files) for (const r of JSON.parse(readFileSync(path, 'utf8'))) if (r.e !== undefined) cells.push([...cellOf(r), r.e]);
+const burnt = burn(heights, gw, gh, cells);
+
 // --- prominence -------------------------------------------------------------
 console.time('prominence');
-const prom = prominence(heights, gw, gh);
+const prom = prominence(burnt, gw, gh);
 console.timeEnd('prominence');
 
 // --- into the catalogue -----------------------------------------------------
-const px0 = tx0 * TILE, py0 = ty0 * TILE;
 let total = 0, had = 0, set = 0, none = 0;
 const hist = { '<50': 0, '50-100': 0, '100-300': 0, '300-1000': 0, '>=1000': 0 };
-for (const f of readdirSync(out)) {
-  if (!f.endsWith('.json') || f === 'index.json') continue;
-  const path = join(out, f);
+for (const path of files) {
   const recs = JSON.parse(readFileSync(path, 'utf8'));
   for (const r of recs) {
     total++;
     if (r.p !== undefined && !force) { had++; continue; }
-    const x = Math.floor(mercX(r.o) - px0), y = Math.floor(mercY(r.a) - py0);
+    const [x, y] = cellOf(r);
     if (x < 0 || y < 0 || x >= gw || y >= gh) { none++; continue; }
-    const p = summitProminence(heights, prom, gw, gh, x, y, 1.5) ?? summitProminence(heights, prom, gw, gh, x, y, 2.5);
+    const p = summitProminence(burnt, prom, gw, gh, x, y, 1.5) ?? summitProminence(burnt, prom, gw, gh, x, y, 2.5);
     if (p === undefined) { none++; delete r.p; continue; }
     r.p = Math.round(p);
     set++;
@@ -139,8 +150,10 @@ for (const f of readdirSync(out)) {
 }
 const indexPath = join(out, 'index.json');
 if (existsSync(indexPath)) {
+  // One entry per pass: a coarse pass first, a finer one for the summits the coarse grid does not resolve.
   const index = JSON.parse(readFileSync(indexPath, 'utf8'));
-  index.prominence = { generated: new Date().toISOString(), source: `Mapterhorn pixel zoom ${Z}, key-col union-find (tools/prominence.mjs)`, set, kept: had, none };
+  index.prominence = [...(Array.isArray(index.prominence) ? index.prominence : index.prominence ? [index.prominence] : []),
+    { generated: new Date().toISOString(), source: `Mapterhorn pixel zoom ${Z}, key-col union-find (tools/prominence.mjs)`, set, kept: had, none }];
   writeFileSync(indexPath, JSON.stringify(index, null, 1) + '\n');
 }
 console.log(`peaks ${total}: prominence set ${set}, kept from OSM ${had}, no summit in the grid ${none}`);

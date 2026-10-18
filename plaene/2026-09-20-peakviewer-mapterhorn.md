@@ -674,6 +674,19 @@ starts“; `map.spec.ts` „the app starts at the device position when the URL
 names none“, „a standpoint in the URL is kept and the device is not asked“,
 „refused, the last standpoint stands and the help shows“.
 
+**Messung Pertisau (11,70° O, 47,44° N, Auge 939 m = Boden + 1,7 m), vor C3:**
+Anker treffen das Maximum im 140-m-Umkreis auf 1–5 m (Versatz 1–74 m);
+der befürchtete Mikro-Buckel-Fehler (Anker auf einem Nebenmaximum hinter
+dem Gipfel) tritt nicht auf. Verdeckte Gipfel sind durch Gelände bei 26–82 %
+der Entfernung verdeckt, also durch vorgelagerte Rücken, nicht durch den
+eigenen Gipfel – vom Westufer stehen Hochiss, Rofanspitze, Seekarlspitze
+hinter dem Dalfazer Rand (Marsch-Maximum 16,3° in 2,6 km gegen 14,3°
+Anker), Seebergspitze und Seekarspitze hinter ihrem eigenen Südostfuß. Das
+ist geometrisch plausibel; was das Bild davon abweichend zeigt, liegt am
+Netz (Rücken 0–60 m zu tief gezeichnet, §8.y) und ist C4a, nicht C3a. Von
+den 12 platzierten Labels nach Osten sind alle sichtbaren im Bild gesetzt;
+die Auswahl nach Entfernung (22 Plätze) ist der verbleibende Hebel → C3c.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):
