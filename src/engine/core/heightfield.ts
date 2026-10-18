@@ -239,9 +239,16 @@ export class HeightField {
    * (it is then more precise than the raster), else the centre of the
    * nearest post of the summit. With no summit in reach the point is a
    * shoulder of this DEM and stays as it is, at the ground there.
+   *
+   * Searched on the surface as drawn: inside the telescope's window on the
+   * window's posts (lookAt), else on the finest observer level that covers
+   * the point. A pin whose summit was found on the coarser level sits a
+   * post or two beside the drawn apex.
    */
   summitAt(lon: number, lat: number, radius = 60): { lon: number; lat: number; h: number } {
-    const l = this.levels.find((lv) => lv.role !== 'look' && lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
+    const look = this.lookAt(lon, lat);
+    const l = (look && look.fade < 1 ? look.level : undefined)
+      ?? this.levels.find((lv) => lv.role !== 'look' && lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
     if (!l) return { lon, lat, h: 0 };
     const { u, v } = this.project(l, lon, lat);
     const n = Math.max(1, Math.round(radius / l.res));

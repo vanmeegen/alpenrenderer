@@ -138,8 +138,32 @@ describe('HeightField', () => {
     expect(hf.height(LON, LAT)).toBe(2000);
     expect(hf.groundAt(LON, LAT)).toBe(2000);
     expect(hf.summitNear(LON, LAT, 100)).toBe(2000);
-    expect(hf.summitAt(LON, LAT, 100).h).toBe(2000);
     expect(hf.maxRange).toBe(hf.eyeLevels()[0].maxRange);
     void cx; void cy;
+  });
+
+  test('the label anchor follows the telescope\'s window: summitAt searches the look level where it holds the point, as drawn', () => {
+    // The GPU draws the window's posts (lookAt); a pin whose summit was
+    // searched on the coarser eye level lands a post or two off the drawn
+    // apex, at 5° of view a few pixels beside it.
+    const hf = new HeightField(LON, LAT);
+    level(hf, 10, () => 2000);
+    const w = 64, h = 64, z = 13;
+    const px0 = Math.round(lonToMercX(LON, z)) - w / 2, py0 = Math.round(latToMercY(LAT, z)) - h / 2;
+    const raw = new Uint16Array(w * h).fill(3000 + 1000);
+    const cx = Math.floor(lonToMercX(LON, z) - px0), cy = Math.floor(latToMercY(LAT, z) - py0);
+    raw[cy * w + cx + 5] = 3100 + 1000;                 // a top five posts (~65 m) east of the point
+    const look = hf.addLevel({ z, px0, py0, w, h, quant: 1, bias: -1000, role: 'look' }, raw, true);
+    const top = hf.summitAt(LON, LAT, 100);
+    expect(top.h).toBe(3100);
+    const east = (top.lon - LON) * 111320 * Math.cos((LAT * Math.PI) / 180);
+    expect(east).toBeGreaterThan(4 * look.res);
+    expect(east).toBeLessThan(6 * look.res);
+    expect(Math.abs(top.lat - LAT) * 111320).toBeLessThan(look.res);
+    // Out of reach of the point, the window's flat ground is no summit: the point stays, at the window's height.
+    expect(hf.summitAt(LON, LAT, 30)).toEqual({ lon: LON, lat: LAT, h: 3000 });
+    // Summits, ground and the eye's levels are untouched by the window.
+    expect(hf.summitNear(LON, LAT, 100)).toBe(2000);
+    expect(hf.height(LON, LAT)).toBe(2000);
   });
 });
