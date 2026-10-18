@@ -172,4 +172,20 @@ describe('places', () => {
     expect(Math.abs(p.yaw - bearing)).toBeLessThan(5);
     expect(Math.hypot(east, north)).toBeLessThan(3000);     // the lake right below, not on the horizon
   });
+
+  test('the Mauritzalm above the Rofan top station looks over the Achensee to the Karwendel', () => {
+    const p = PLACES.find((x) => x.id === 'mauritzalm')!;
+    expect(p.name).toBe('Mauritzalm am Rofan (AT)');
+    const local = (to: { lon: number; lat: number }) => {
+      const east = (to.lon - p.lon) * 111320 * Math.cos((p.lat * Math.PI) / 180);
+      const north = (to.lat - p.lat) * 111320;
+      return { range: Math.hypot(east, north), bearing: ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360 };
+    };
+    // A short walk above the top station at the Erfurter Hütte (OSM: 47.44164° N, 11.76297° E).
+    expect(local({ lon: 11.76297, lat: 47.44164 }).range).toBeLessThan(400);
+    // Sonnjoch and Lamsenspitze (catalogue) both inside a 60° view, the lake's south end between them and the Stanser Joch.
+    for (const summit of [{ lon: 11.60514, lat: 47.41238 }, { lon: 11.59119, lat: 47.38268 }]) {
+      expect(Math.abs(local(summit).bearing - p.yaw)).toBeLessThan(30);
+    }
+  });
 });

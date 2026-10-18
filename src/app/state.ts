@@ -38,6 +38,8 @@ export const PLACES: Place[] = [
   { id: 'nebelhorn', name: 'Nebelhorn (DE)', lon: 10.3417, lat: 47.4211, yaw: 160 },
   { id: 'schilthorn', name: 'Schilthorn (CH)', lon: 7.8350, lat: 46.5583, yaw: 120 },
   { id: 'sonnenspitz', name: 'Kochelsee vom Sonnenspitz (DE)', lon: 11.37606, lat: 47.63938, yaw: 290 },
+  // Above the Rofan top station (Erfurter Hütte): over the Achensee to Sonnjoch and Lamsenspitze.
+  { id: 'mauritzalm', name: 'Mauritzalm am Rofan (AT)', lon: 11.76411, lat: 47.44379, yaw: 250 },
 ];
 
 export const DEFAULT_VIEW: ViewState = {
