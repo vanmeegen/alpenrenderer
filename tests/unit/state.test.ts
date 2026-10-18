@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_VIEW, EYE_HEIGHT, PLACES, eyeHeightFromSlider, formatHash, hasStandpoint, readEyeHeight, readHash, readLastView, readOptions, sliderFromEyeHeight, startView, writeEyeHeight, writeLastView } from '../../src/app/state';
+import { DEFAULT_VIEW, EYE_HEIGHT, OUTLINE, PLACES, eyeHeightFromSlider, formatHash, hasStandpoint, readEyeHeight, readHash, readLastView, readOptions, readOutline, sliderFromEyeHeight, startView, writeEyeHeight, writeLastView, writeOutline } from '../../src/app/state';
 
 describe('readHash', () => {
   test('empty hash is the default view', () => {
@@ -96,6 +96,23 @@ describe('eye height: metres above the ground under the standpoint', () => {
     expect(eyeHeightFromSlider(100)).toBeCloseTo(500, 6);
     expect(eyeHeightFromSlider(50)).toBeCloseTo(Math.sqrt(1.7 * 500), 6);
     for (const t of [0, 13, 50, 87, 100]) expect(sliderFromEyeHeight(eyeHeightFromSlider(t))).toBeCloseTo(t, 6);
+  });
+});
+
+describe('contour lines: how strongly the ridges are drawn', () => {
+  const store = (v: string | null) => ({ getItem: () => v, setItem: () => {} }) as unknown as Storage;
+
+  test('0.7 by default, 0 to 1, remembered to a hundredth', () => {
+    expect(OUTLINE).toEqual({ min: 0, max: 1, initial: 0.7 });
+    expect(readOutline(store(null))).toBe(0.7);
+    expect(readOutline(store('0.456'))).toBe(0.46);
+    expect(readOutline(store('7'))).toBe(1);
+    expect(readOutline(store('-1'))).toBe(0);
+    expect(readOutline(store('x'))).toBe(0.7);
+    const m = new Map<string, string>();
+    const s = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); } } as unknown as Storage;
+    writeOutline(0.25, s);
+    expect(readOutline(s)).toBe(0.25);
   });
 });
 

@@ -11,11 +11,17 @@
  */
 
 import { bearing, curvatureDrop, destination, groundRange, localRadius } from '../core/geodesy';
+
+const DEG = Math.PI / 180;
 import { HeightField, Level } from '../core/heightfield';
 import type { Quality } from './gpu/renderer';
 
 export interface RadialParams {
+  /** Bearing of column 0, radians, snapped to the column grid; 0 for the whole circle. */
+  az0: number;
   azStep: number;
+  /** Columns in the wedge (the quality's azimuths). */
+  columns: number;
   r0: number;
   logRatioNear: number;
   jNear: number;
@@ -27,14 +33,34 @@ export interface RadialParams {
   rows: number;
 }
 
-/** The ring layout for a quality and a height field; the renderer's uniforms come from here. */
-export function radialParams(quality: Quality, hf: HeightField): RadialParams {
+/**
+ * The columns of the mesh over the view instead of the whole circle: the
+ * frustum's bearing arc (camera.azimuthArc) shared out over the columns, with
+ * a spare column at each end, so that a column is about a pixel wide at
+ * every field of view (0.09° at 60°, 0.005° at 5°) instead of 0.18° always —
+ * the screen-space-error idea of Cesium and MapLibre on a polar mesh. The
+ * first column sits on a multiple of the step, so panning within a column
+ * moves nothing: the vertices stay on their ground until the step changes.
+ * A view steep enough to sweep every bearing (arc null) takes the circle.
+ */
+export function wedge(azimuths: number, arc: { start: number; span: number } | null): { az0: number; azStep: number } {
+  if (!arc || arc.span >= 360) return { az0: 0, azStep: (2 * Math.PI) / azimuths };
+  const azStep = (arc.span * DEG) / (azimuths - 2);
+  return { az0: Math.floor((arc.start * DEG) / azStep) * azStep, azStep };
+}
+
+/**
+ * The ring layout for a quality and a height field, and the columns for a
+ * view; the renderer's uniforms come from here. Rings: geometric near the
+ * feet (2 m, ×1.15), so the ground there is not one enormous triangle, then
+ * geometric at a constant fraction of the range out to the last level —
+ * 1/190 of the range (high), 1/120 (low), of the order of the clipmap's own
+ * posts (1/318 to 1/159), so a ridge is drawn where the DEM has it and a
+ * summit lands on a ring (§8.y had them 0–60 m too low at 1.1–1.4 %).
+ */
+export function radialParams(quality: Quality, hf: HeightField, arc: { start: number; span: number } | null = null): RadialParams {
   const { azimuths, rows } = quality;
-  const azStep = (2 * Math.PI) / azimuths;
-  // Step through the middle segment at the finest level's post spacing, but
-  // never finer than 12 m: with 6.6 m LiDAR-grade data the rows would all be
-  // spent inside the first two kilometres and the far field would coarsen.
-  // The finest level still feeds the *height* of every vertex it covers.
+  const { az0, azStep } = wedge(azimuths, arc);
   const post = Math.max(12, hf.levels[0]?.res ?? 30);
   const maxRange = Math.max(hf.maxRange, post * 64);
   const r0 = 2;
@@ -42,12 +68,10 @@ export function radialParams(quality: Quality, hf: HeightField): RadialParams {
   const logRatioNear = Math.log(ratioNear);
   const jNear = Math.max(1, Math.ceil(Math.log(post / (ratioNear - 1) / r0) / logRatioNear));
   const rNearEnd = r0 * Math.exp(jNear * logRatioNear);
-  const splitTarget = Math.min(post / azStep, maxRange * 0.6);
-  const jSplit = Math.min(rows - 8, jNear
-    + Math.max(2, Math.round((splitTarget - rNearEnd) / post)));
-  const rSplit = rNearEnd + (jSplit - jNear) * post;
+  // No post-spaced middle segment any more: jSplit = jNear keeps the shader's three-segment form.
+  const jSplit = jNear, rSplit = rNearEnd;
   const logRatioFar = Math.log(Math.max(maxRange, rSplit * 1.5) / rSplit) / (rows - 1 - jSplit);
-  return { azStep, r0, logRatioNear, jNear, rNearEnd, post, jSplit, rSplit, logRatioFar, rows };
+  return { az0, azStep, columns: azimuths, r0, logRatioNear, jNear, rNearEnd, post, jSplit, rSplit, logRatioFar, rows };
 }
 
 /** Ground range of ring `f` (the shader's `radiusAt`). */
@@ -107,12 +131,15 @@ export function meshTopNear(
   const radius = localRadius(hf.lat);
   const range = groundRange(hf.lon, hf.lat, lon, lat, radius);
   const az = (bearing(hf.lon, hf.lat, lon, lat) * Math.PI) / 180;
-  const a0 = Math.floor(az / p.azStep), f0 = Math.floor(rowAt(p, range));
+  // Column index within the wedge; a point the wedge does not reach is not drawn at all.
+  const rel = az - p.az0 - 2 * Math.PI * Math.floor((az - p.az0) / (2 * Math.PI));
+  const a0 = Math.floor(rel / p.azStep), f0 = Math.floor(rowAt(p, range));
+  if (a0 + 1 > p.columns) return { lon, lat, h: hf.height(lon, lat, range) };
   let top: { lon: number; lat: number; h: number } | null = null, topRise = -Infinity;
   for (let f = Math.max(0, f0); f <= Math.min(p.rows - 1, f0 + 1); f++) {
     const r = radiusAt(p, f);
     for (let a = a0; a <= a0 + 1; a++) {
-      const v = destination(hf.lon, hf.lat, (a * p.azStep * 180) / Math.PI, r, radius);
+      const v = destination(hf.lon, hf.lat, ((p.az0 + a * p.azStep) * 180) / Math.PI, r, radius);
       const h = vertexHeight(hf, v.lon, v.lat, r);
       const rise = (h - eyeAlt - curvatureDrop(r, radius)) / r;
       if (rise > topRise) { top = { lon: v.lon, lat: v.lat, h }; topRise = rise; }

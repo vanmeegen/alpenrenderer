@@ -695,6 +695,40 @@ von Achenkirch, 2,5 km, 1100 m tiefer – die Kuppe verdeckt den Gipfel um
 0,4°, die Schulter davor ist weniger steil als die Sichtlinie; mit
 13-m-Posten ist das Gelände, nicht das Raster.
 
+**C3 (erledigt):** Rang eines Labels = scheinbare Prominenz
+atan(Schartenhöhe/Entfernung) (Seen: Breite/Entfernung), Bildschirmraster
+aus Zellen von einer Labelbreite × zwei Zeilen statt 22 Plätzen nach
+Entfernung; Hineinzoomen gibt mehr Zellen frei. Die Schartenhöhe kommt aus
+`tools/build_prominence.mjs` (Mapterhorn z9 und z10, Katalog-Höhen in die
+Zellen gebrannt, 81 312 von 86 794 Gipfeln). Der DEM-Marsch bleibt der
+Sichtbarkeitstest; die Messungen an drei Achensee-Standpunkten zeigten ihn
+konsistent. Tests: `labels.test.ts` „orders by apparent prominence…“, „one
+label per screen cell…“; `prominence.test.ts`.
+
+**C4a (in Arbeit):** Das Polarnetz wird ein Keil über den Blickkegel
+(`wedge` in mesh.ts: Spalten über `camera.azimuthArc`, erste Spalte auf das
+Spaltenraster gerastet, Uniform `uAz0`), die Ringe laufen ab dem Nahfeld mit
+konstantem Faktor 1/190 (hoch, 1024 × 1600) bzw. 1/120 (niedrig, 640 × 900)
+bis zur letzten Ebene – in der Größenordnung der DEM-Posten (1/318–1/159),
+statt 1,1–1,4 %. Damit ist eine Spalte bei jedem Bildwinkel etwa ein Pixel
+breit und ein Grat liegt dort, wo das DEM ihn hat. Die Label-Nadel wird neu
+auf das Netz gesetzt, wenn sich Keil oder Schritt ändern (`drawnKey`).
+Sektor-Culling entfällt, alle Vertizes sind im Bild. Tests: `mesh.test.ts`
+„beyond the near field the rings are a constant fraction…“, „the wedge…“;
+`labels.test.ts` „a new wedge … asked again, once“.
+
+**C4c (in Arbeit):** Das Licht steht 45° hoch über der linken Schulter des
+Betrachters (Azimut = yaw − 135°, `SUN.behind` in shading.ts, Uniform
+`uSun` je Frame aus `camera.yaw`): Imhofs Regel „Licht von oben links“,
+mit dem Blick gedreht, damit das Relief in jeder Richtung gleich lesbar ist
+– die feste Sonne bei 160° beleuchtete nach Südosten flach und nach
+Nordwesten gar nicht. Die echte Sonne nach Uhrzeit bleibt eine spätere
+Option. Konturen (Kantenlinien aus dem Entfernungspuffer) sind jetzt ein
+Regler „Konturen“ 0–100 % (Default 70 %, vorher fest 35 %), die Linie ist
+einen CSS-Pixel breit statt eines Gerätepixels. Tests: `shading.test.ts`
+„the light stands behind the viewer's left shoulder…“, `state.test.ts`
+„contour lines…“, `app.spec.ts` „ridge lines … a slider sets how strongly“.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

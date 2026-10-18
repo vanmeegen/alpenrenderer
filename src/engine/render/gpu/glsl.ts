@@ -113,6 +113,7 @@ precision highp sampler2D;
 // x = azimuth index, y = radial row index. Everything else is derived.
 attribute vec3 position;
 
+uniform float uAz0;         // bearing of column 0 (the wedge over the view)
 uniform float uAzStep;
 uniform vec4  uRadial;      // jNear, logRatioNear, jSplit, logRatioFar
 uniform vec4  uRadialB;     // r0, rNearEnd, stepMid, rSplit
@@ -157,7 +158,7 @@ float radiusAt(float f) {
 ${CLIPMAP_SAMPLER}
 
 void main(void) {
-  float alpha = position.x * uAzStep;
+  float alpha = uAz0 + position.x * uAzStep;
   float r = radiusAt(position.y);
   float sinA = sin(alpha);
   float cosA = cos(alpha);

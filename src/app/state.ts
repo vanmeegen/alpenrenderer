@@ -180,6 +180,28 @@ export function writeEyeHeight(m: number, storage = defaultStorage()) {
   try { storage?.setItem(EYE_HEIGHT_KEY, String(clampEyeHeight(m))); } catch { /* private mode: not remembered */ }
 }
 
+/** How strongly the ridge lines are drawn over the shaded view, 0..1 (renderer.outline). */
+export const OUTLINE = { min: 0, max: 1, initial: 0.7 };
+const OUTLINE_KEY = 'alp.outline';
+
+export function clampOutline(v: number): number {
+  if (!Number.isFinite(v)) return OUTLINE.initial;
+  return Math.round(Math.max(OUTLINE.min, Math.min(OUTLINE.max, v)) * 100) / 100;
+}
+
+export function readOutline(storage = defaultStorage()): number {
+  try {
+    const v = storage?.getItem(OUTLINE_KEY);
+    return v == null ? OUTLINE.initial : clampOutline(parseFloat(v));
+  } catch {
+    return OUTLINE.initial;
+  }
+}
+
+export function writeOutline(v: number, storage = defaultStorage()) {
+  try { storage?.setItem(OUTLINE_KEY, String(clampOutline(v))); } catch { /* private mode: not remembered */ }
+}
+
 /**
  * The slider runs 0..100 and is logarithmic: the first metres matter (1.7 m
  * standing, 3 m on a rock, 10 m up a tower) and the last hundred hardly do.

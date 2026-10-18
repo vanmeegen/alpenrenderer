@@ -79,7 +79,7 @@ test.describe('lakes', () => {
       const b = (LAKE.bearing * Math.PI) / 180, dz = hit.h - EYE;
       const len = Math.hypot(hit.range, dz);
       const view: [number, number, number] = [(Math.sin(b) * hit.range) / len, (Math.cos(b) * hit.range) / len, dz / len];
-      return luminance(terrainColor(hit.h, [0, 0, 1], hit.range, true, view));
+      return luminance(terrainColor(hit.h, [0, 0, 1], hit.range, true, view, LAKE.bearing));
     };
     // Rows well inside the lake: near shore (steeper view) and far shore (flatter view).
     const rows: number[] = [];

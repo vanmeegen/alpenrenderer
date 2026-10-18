@@ -10,8 +10,16 @@
  * keep their shape, and aerial perspective toward the horizon colour.
  */
 
-/** Sun direction, degrees: bearing it stands at, and height above the horizon. */
-export const SUN = { azimuth: 160, elevation: 45 };
+/**
+ * The light, degrees: 45° up and `behind` degrees from the view direction,
+ * over the viewer's left shoulder (yaw − 135°). Imhof's rule for relief
+ * shading, light from the upper left, turned with the view: the slopes you
+ * look at are lit, those facing right are in shadow, whichever way you turn,
+ * so the relief reads the same everywhere. A sun fixed in the south-east lit
+ * the view one way and left it flat the other; the real sun by the clock
+ * stays an option.
+ */
+export const SUN = { elevation: 45, behind: 135 };
 /** Metres: full snow above, none 350 m below. */
 export const SNOW_LINE = 2900;
 /** Metres to 1/e of the terrain colour. */
@@ -30,9 +38,14 @@ export const WATER_SHINE = { f0: 0.02, sky: 0.6, glint: 0.35, sharpness: 60 };
 
 const DEG = Math.PI / 180;
 
-/** Unit vector toward the sun, east-north-up. */
-export function sunVector(): [number, number, number] {
-  const az = SUN.azimuth * DEG, el = SUN.elevation * DEG;
+/** Bearing of the light for a view direction `yaw`, degrees 0..360. */
+export function sunAzimuth(yaw: number): number {
+  return ((yaw - SUN.behind) % 360 + 360) % 360;
+}
+
+/** Unit vector toward the light, east-north-up, for a view direction `yaw` (degrees). */
+export function sunVector(yaw = 0): [number, number, number] {
+  const az = sunAzimuth(yaw) * DEG, el = SUN.elevation * DEG;
   return [Math.sin(az) * Math.cos(el), Math.cos(az) * Math.cos(el), Math.sin(el)];
 }
 
@@ -52,11 +65,11 @@ const mix = (a: [number, number, number], b: [number, number, number], t: number
  * Sky reflection and sun glint on lit water, `view` the unit vector from the
  * eye to the point (east, north, up). The water is taken as flat: lakes are.
  */
-export function waterShine(col: [number, number, number], view: [number, number, number]): [number, number, number] {
+export function waterShine(col: [number, number, number], view: [number, number, number], yaw = 0): [number, number, number] {
   const cosI = Math.max(0, -view[2]);
   const fresnel = WATER_SHINE.f0 + (1 - WATER_SHINE.f0) * (1 - cosI) ** 5;
   let out = mix(col, HORIZON_COLOR, fresnel * WATER_SHINE.sky);
-  const s = sunVector();
+  const s = sunVector(yaw);
   const mirrored = view[0] * s[0] + view[1] * s[1] - view[2] * s[2];
   const glint = WATER_SHINE.glint * Math.max(0, mirrored) ** WATER_SHINE.sharpness;
   out = [Math.min(1, out[0] + glint), Math.min(1, out[1] + glint), Math.min(1, out[2] + glint)];
@@ -67,10 +80,10 @@ export function waterShine(col: [number, number, number], view: [number, number,
  * Linear RGB of a terrain pixel at altitude `h` metres, with the surface
  * normal `n` (east, north, up; unit) and ground range `range` metres;
  * `water` where the lake mask marks the post, and with `view` (unit, eye to
- * point) the water shines.
+ * point) the water shines; `yaw` is the view direction the light turns with.
  */
 export function terrainColor(
-  h: number, n: [number, number, number], range: number, water = false, view?: [number, number, number],
+  h: number, n: [number, number, number], range: number, water = false, view?: [number, number, number], yaw = 0,
 ): [number, number, number] {
   const slope = 1 - n[2];
   const valley: [number, number, number] = [0.47, 0.60, 0.33];
@@ -85,11 +98,11 @@ export function terrainColor(
   const snowy = smoothstep(SNOW_LINE - 350, SNOW_LINE + 50, h) * (1 - smoothstep(0.45, 0.7, slope));
   col = mix(col, snow, snowy);
   if (water) col = [...WATER_COLOR];
-  const s = sunVector();
+  const s = sunVector(yaw);
   const diff = n[0] * s[0] + n[1] * s[1] + n[2] * s[2];
   const shade = shadeFactor(diff);
   col = [col[0] * shade, col[1] * shade, col[2] * shade];
-  if (water && view) col = waterShine(col, view);
+  if (water && view) col = waterShine(col, view, yaw);
   const fog = 1 - Math.exp(-range / FOG_RANGE);
   return mix(col, HORIZON_COLOR, fog * 0.88);
 }

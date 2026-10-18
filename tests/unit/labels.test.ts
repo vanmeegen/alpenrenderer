@@ -162,6 +162,11 @@ describe('buildTargets', () => {
     // Asked once, remembered: a second frame asks nothing.
     layoutLabels(t, camera(0), opt());
     expect(asked.length).toBe(1);
+    // A new wedge (the mesh follows the view) draws the summit elsewhere: asked again, once.
+    layoutLabels(t, camera(0), { ...opt(), drawnKey: 'wedge-2' });
+    expect(asked.length).toBe(2);
+    layoutLabels(t, camera(0), { ...opt(), drawnKey: 'wedge-2' });
+    expect(asked.length).toBe(2);
   });
 
   test('without any prominence known, the nearest summit comes first', () => {

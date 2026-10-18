@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { destination, groundRange, latToMercY, localRadius, lonToMercX } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
 import { QUALITY_HIGH, QUALITY_LOW } from '../../src/engine/render/gpu/renderer';
-import { meshTopNear, radialParams, radiusAt, rowAt } from '../../src/engine/render/mesh';
+import { meshTopNear, radialParams, radiusAt, rowAt, wedge } from '../../src/engine/render/mesh';
 
 const LON = 10.0, LAT = 47.0, PLAIN = 1500, SPIKE = 500, EYE = PLAIN + 1.7;
 
@@ -29,14 +29,65 @@ function field(spikes: { range: number; bearing: number }[]) {
 }
 
 describe('ring spacing', () => {
-  test('rowAt inverts radiusAt in all three segments', () => {
+  test('rowAt inverts radiusAt in every segment', () => {
     const { hf } = field([]);
     for (const q of [QUALITY_HIGH, QUALITY_LOW]) {
       const p = radialParams(q, hf);
-      for (const f of [0.5, p.jNear - 0.5, p.jNear + 3.25, p.jSplit - 1, p.jSplit + 10.5, q.rows - 2]) {
+      for (const f of [0.5, p.jNear - 0.5, p.jNear + 3.25, p.jSplit + 10.5, q.rows - 2]) {
         expect(rowAt(p, radiusAt(p, f))).toBeCloseTo(f, 6);
       }
     }
+  });
+
+  test('beyond the near field the rings are a constant fraction of the range, as fine as the clipmap posts: 1/190 (high), 1/120 (low), out to the last level', () => {
+    // A level's posts are 1/318 to 1/159 of the range they serve; a ring
+    // spacing of that order draws a ridge where the DEM has it, instead of
+    // 0–60 m lower (§8.y), and keeps every summit on a ring.
+    const { hf } = field([]);
+    for (const [q, worst] of [[QUALITY_HIGH, 1 / 190], [QUALITY_LOW, 1 / 120]] as const) {
+      const p = radialParams(q, hf);
+      for (let f = p.jNear; f < q.rows - 1; f++) {
+        const r = radiusAt(p, f);
+        expect((radiusAt(p, f + 1) - r) / r).toBeLessThanOrEqual(worst * 1.001);
+      }
+      expect(radiusAt(p, q.rows - 1)).toBeCloseTo(Math.max(hf.maxRange, p.rNearEnd * 1.5), 3);
+    }
+    // Within a vertex budget a 200-euro phone carries: all of it is drawn now, nothing is culled.
+    expect(QUALITY_HIGH.azimuths * QUALITY_HIGH.rows).toBeLessThanOrEqual(1.7e6);
+    expect(QUALITY_LOW.azimuths * QUALITY_LOW.rows).toBeLessThanOrEqual(0.65e6);
+  });
+});
+
+describe('the wedge: columns over the view, not the whole circle', () => {
+  test('the columns cover the frustum\'s arc with a spare column at each end, and the first sits on the column grid', () => {
+    const { az0, azStep } = wedge(1024, { start: 50, span: 100 });
+    const DEG = Math.PI / 180;
+    expect(azStep).toBeCloseTo((100 * DEG) / 1022, 12);
+    expect(az0).toBeLessThanOrEqual(50 * DEG);
+    expect(az0).toBeGreaterThan(50 * DEG - azStep);
+    expect(az0 / azStep).toBeCloseTo(Math.round(az0 / azStep), 9);
+    expect(az0 + 1024 * azStep).toBeGreaterThanOrEqual(150 * DEG);
+  });
+
+  test('panning within a column leaves the columns where they are; a steep view takes the whole circle', () => {
+    const a = wedge(1024, { start: 50.02, span: 100 }), b = wedge(1024, { start: 50.06, span: 100 });
+    expect(b.az0).toBe(a.az0);
+    expect(b.azStep).toBe(a.azStep);
+    expect(wedge(1024, null)).toEqual({ az0: 0, azStep: (2 * Math.PI) / 1024 });
+    expect(wedge(1024, { start: 10, span: 360 })).toEqual({ az0: 0, azStep: (2 * Math.PI) / 1024 });
+  });
+
+  test('zoomed in, a column is a fraction of a degree, and meshTopNear finds the summit in the wedge, not outside it', () => {
+    const { hf, at } = field([{ range: 900, bearing: 90 }, { range: 900, bearing: 270 }]);
+    const p = radialParams(QUALITY_LOW, hf, { start: 85, span: 10 });
+    expect((p.azStep * 180) / Math.PI).toBeLessThan(0.02);
+    const east = meshTopNear(hf, p, at[0].lon, at[0].lat, EYE);
+    expect(east.h).toBeGreaterThan(PLAIN + SPIKE * 0.4);
+    expect(groundRange(east.lon, east.lat, at[0].lon, at[0].lat)).toBeLessThan(10);
+    // The west spike is not drawn: the point itself, at the DEM's height.
+    const west = meshTopNear(hf, p, at[1].lon, at[1].lat, EYE);
+    expect(west.lon).toBe(at[1].lon);
+    expect(west.h).toBe(hf.height(at[1].lon, at[1].lat, 900));
   });
 });
 
@@ -130,7 +181,7 @@ describe('meshTopNear: the summit as the mesh draws it, where and how high', () 
     const at = destination(LON, LAT, 90, 5040, localRadius(LAT));
     const top = meshTopNear(hf, p, at.lon, at.lat, EYE);
     const f = Math.floor(rowAt(p, 5040));
-    expect(radiusAt(p, f + 1) - radiusAt(p, f)).toBeGreaterThan(50);          // a cell deep enough to matter
+    expect(radiusAt(p, f + 1) - radiusAt(p, f)).toBeGreaterThan(20);          // a cell deep enough to matter (1/120 of 5 km = 42 m)
     expect(groundRange(LON, LAT, top.lon, top.lat)).toBeLessThan(5040);      // the near corner
   });
 

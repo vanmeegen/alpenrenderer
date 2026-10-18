@@ -27,7 +27,7 @@ import { LookControls } from './controls';
 import { ExifInfo, fovFromExif, readExif } from './exif';
 import { LabelPainter } from './labelPainter';
 import { SensorLook } from './sensorLook';
-import { AppOptions, ViewState, clampEyeHeight, readEyeHeight, writeEyeHeight } from './state';
+import { AppOptions, ViewState, clampEyeHeight, clampOutline, readEyeHeight, readOutline, writeEyeHeight, writeOutline } from './state';
 
 /** Milliseconds of sightline work per frame; the rest of the frame stays for drawing and touch. */
 const VISIBILITY_BUDGET_MS = 4;
@@ -157,6 +157,7 @@ export class Viewer {
     quality: 'high' | 'low', clipmap: ClipmapConfig, overlay: HTMLCanvasElement | null,
   ) {
     this.renderer = renderer;
+    renderer.outline = readOutline();
     this.camera = renderer.camera;
     this.quality = quality;
     this.view = view;
@@ -434,10 +435,13 @@ export class Viewer {
     if (!named.length || !hf.levels.length) { this.targets = []; this.visibleCount = 0; return; }
     const eye = this.renderer.eyeAltitude;
     const obs = { lon: this.view.lon, lat: this.view.lat, ground: eye, eye: 0 };
-    // Label pins go onto the summits as the mesh draws them, not the DEM's sharper ones.
-    const mesh = this.renderer.meshParams();
+    // Label pins go onto the summits as the mesh draws them, not the DEM's
+    // sharper ones; the mesh follows the view, so its layout is read when asked.
     this.targets = buildTargets(named, obs, hf, Math.min(LABEL_RANGE_KM * 1000, hf.maxRange),
-      mesh ? (lon, lat) => meshTopNear(hf, mesh, lon, lat, eye) : undefined);
+      (lon, lat) => {
+        const mesh = this.renderer.meshParams();
+        return mesh ? meshTopNear(hf, mesh, lon, lat, eye) : { lon, lat, h: hf.height(lon, lat) };
+      });
     // Sightlines over frames, not in one go: see VisibilityJob.
     this.visibility = new VisibilityJob(this.targets, hf, eye);
     this.visibleCount = 0;
@@ -459,9 +463,11 @@ export class Viewer {
     const cssW = painter.canvas.clientWidth || 1, cssH = painter.canvas.clientHeight || 1;
     painter.resize(cssW, cssH);
     if (!this.showLabels || !this.targets.length) { this.placed = []; return; }
+    const mesh = this.renderer.meshParams();
     this.placed = layoutLabels(this.targets, this.camera, {
       width: cssW, height: cssH, measure: painter.measure,
       lineHeight: painter.style.nameSize + 3, maxLabels: 60, detailed: 6, gap: 5,
+      drawnKey: mesh ? `${mesh.az0.toFixed(9)}:${mesh.azStep.toFixed(12)}` : undefined,
     });
     if (this.selected) {
       const id = this.selected.target.peak.id;
@@ -510,6 +516,14 @@ export class Viewer {
     writeEyeHeight(this.eyeHeight);
     this.applyAltitude();
     this.scheduleRebuildTargets();
+  }
+
+  /** How strongly the ridge lines are drawn, 0..1 ("Konturen"); kept on the device. */
+  get outline(): number { return this.renderer.outline; }
+
+  setOutline(v: number) {
+    this.renderer.outline = clampOutline(v);
+    writeOutline(this.renderer.outline);
   }
 
   private applyAltitude() {

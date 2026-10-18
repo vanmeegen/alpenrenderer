@@ -39,7 +39,7 @@ const SHARP = WATER_SHINE.sharpness.toFixed(1);
  */
 
 export const TERRAIN_UNIFORMS = [
-  'uAzStep', 'uRadial', 'uRadialB', 'uSinLat0', 'uCosLat0', 'uEyeAlt',
+  'uAz0', 'uAzStep', 'uRadial', 'uRadialB', 'uSinLat0', 'uCosLat0', 'uEyeAlt',
   'uRadius', 'uRefRadius', 'uDropScale', 'uLevelCount', 'uTexSize',
   'uLevelPx', 'uViewProj', 'uFar', 'uLvlA', 'uLvlB',
 ] as const;
@@ -134,6 +134,7 @@ export const TERRAIN_VERTEX = /* wgsl */ `
 // x = azimuth index, y = radial row index. Everything else is derived.
 attribute position : vec3<f32>;
 
+uniform uAz0       : f32;         // bearing of column 0 (the wedge over the view)
 uniform uAzStep    : f32;
 uniform uRadial    : vec4<f32>;   // jNear, logRatioNear, jSplit, logRatioFar
 uniform uRadialB   : vec4<f32>;   // r0, rNearEnd, stepMid, rSplit
@@ -180,7 +181,7 @@ ${CLIPMAP_SAMPLER}
 
 @vertex
 fn main(input : VertexInputs) -> FragmentInputs {
-  let alpha = vertexInputs.position.x * uniforms.uAzStep;
+  let alpha = uniforms.uAz0 + vertexInputs.position.x * uniforms.uAzStep;
   let r = radiusAt(vertexInputs.position.y);
   let sinA = sin(alpha);
   let cosA = cos(alpha);

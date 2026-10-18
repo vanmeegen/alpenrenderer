@@ -39,10 +39,12 @@ export interface LabelTarget {
   spot: number;
   /**
    * Moves the anchor onto the drawn top, asked the first time the label
-   * lands on screen and then dropped (see buildTargets' `drawn`); null once
-   * settled.
+   * lands on screen and again whenever the drawn surface changes (see
+   * buildTargets' `drawn` and LayoutOptions.drawnKey).
    */
   settle: (() => Pick<LabelTarget, 'east' | 'north' | 'up' | 'range' | 'bearing' | 'elevation' | 'anchorAlt'>) | null;
+  /** The drawnKey the anchor was last settled for. */
+  settledFor?: string;
 }
 
 export interface PlacedLabel {
@@ -69,6 +71,12 @@ export interface LayoutOptions {
   detailed: number;
   /** Minimum gap between boxes, px. */
   gap: number;
+  /**
+   * Names the drawn surface (the mesh's wedge and rings). The mesh follows
+   * the view, so a summit is drawn by another vertex after a zoom; a label
+   * settled for one key settles again for the next.
+   */
+  drawnKey?: string;
 }
 
 const NEAR_ANCHOR_M = 140;
@@ -194,10 +202,10 @@ export function layoutLabels(
     let ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
     if (ax < -40 || ax > opt.width + 40 || ay < -40 || ay > opt.height + 40) continue;
     if (taken.has(cellOf(ax, ay))) continue;
-    if (t.settle) {
-      // On screen for the first time: onto the summit as the mesh draws it.
+    if (t.settle && t.settledFor !== (opt.drawnKey ?? '')) {
+      // On screen for the first time, or drawn anew: onto the summit as the mesh draws it.
       Object.assign(t, t.settle());
-      t.settle = null;
+      t.settledFor = opt.drawnKey ?? '';
       w = cam.project(t.east, t.north, t.up, ndc);
       if (w <= 0) continue;
       ax = (ndc[0] * 0.5 + 0.5) * opt.width;

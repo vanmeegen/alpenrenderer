@@ -55,7 +55,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { Camera } from '../../core/camera';
 import { DEG, MERC_PX, REFRACTION_K, effectiveRadiusAt, localRadius } from '../../core/geodesy';
 import { HeightField, Observer } from '../../core/heightfield';
-import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, SUN, WATER_COLOR } from '../shading';
+import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, WATER_COLOR, sunVector } from '../shading';
 import { RadialParams, radialParams } from '../mesh';
 import {
   COMPOSITE_FRAGMENT_GL, COMPOSITE_VERTEX_GL, TERRAIN_FRAGMENT_GL,
@@ -91,8 +91,11 @@ export interface Quality {
   sectors: number;
 }
 
-export const QUALITY_HIGH: Quality = { azimuths: 2048, rows: 720, sectors: 32 };
-export const QUALITY_LOW: Quality = { azimuths: 1024, rows: 480, sectors: 32 };
+// The mesh is a wedge over the view (mesh.ts `wedge`), all of it drawn: the
+// columns are shared out over the field of view, the rows over the range at a
+// constant fraction (1/190 high, 1/120 low). 1.6 M and 0.58 M vertices.
+export const QUALITY_HIGH: Quality = { azimuths: 1024, rows: 1600, sectors: 32 };
+export const QUALITY_LOW: Quality = { azimuths: 640, rows: 900, sectors: 32 };
 
 export interface RendererDiagnostics {
   webgpu: boolean;
@@ -146,11 +149,8 @@ export class GpuRenderer {
    * The range pass runs either way; the shade pass only when shaded.
    */
   shaded = true;
-  /** Strength of the ridge lines drawn over the shaded view, 0..1. */
-  outline = 0.35;
-  /** Where the sun is, degrees: bearing clockwise from north, elevation up. */
-  sunAzimuth = SUN.azimuth;
-  sunElevation = SUN.elevation;
+  /** Strength of the ridge lines drawn over the shaded view, 0..1 (the app's "Konturen"). */
+  outline = 0.7;
   /** Metres; snow above, rock and meadow below, blended over ~350 m. */
   snowLine = SNOW_LINE;
   /** Metres to 1/e of terrain colour in the aerial perspective. */
@@ -164,6 +164,7 @@ export class GpuRenderer {
   desaturate = 0.55;
   edgeLow = 0.030;
   edgeHigh = 0.320;
+  /** Ridge-line width in CSS pixels: the same line on a phone and a desktop. */
   edgeWidth = 1.0;
   lineDark = 0.04;
   refractionK = REFRACTION_K;
@@ -642,13 +643,14 @@ export class GpuRenderer {
 
   // ----------------------------------------------------------------- render
 
+  /** The ring and column layout for the current view: the wedge follows the camera. */
   private radialParams(hf: HeightField) {
-    return radialParams(this.quality, hf);
+    return radialParams(this.quality, hf, this.camera.azimuthArc(4));
   }
 
   /** The ring layout the mesh uses now; see render/mesh.ts. */
   meshParams(): RadialParams | null {
-    return this.heightField ? radialParams(this.quality, this.heightField) : null;
+    return this.heightField ? this.radialParams(this.heightField) : null;
   }
 
   resize(): { w: number; h: number } {
@@ -700,6 +702,7 @@ export class GpuRenderer {
     const latR = hf.lat * DEG;
 
     for (const m of [this.terrainMat, this.shadeMat]) {
+      m.setFloat('uAz0', p.az0);
       m.setFloat('uAzStep', p.azStep);
       m.setVector4('uRadial', new Vector4(p.jNear, p.logRatioNear, p.jSplit, p.logRatioFar));
       m.setVector4('uRadialB', new Vector4(p.r0, p.rNearEnd, p.post, p.rSplit));
@@ -718,8 +721,8 @@ export class GpuRenderer {
       m.setArray4('uLvlB', Array.from(this.lvlB));
     }
     const sm = this.shadeMat;
-    const az = this.sunAzimuth * DEG, el = this.sunElevation * DEG;
-    sm.setVector3('uSun', new Vector3(Math.sin(az) * Math.cos(el), Math.cos(az) * Math.cos(el), Math.sin(el)));
+    // The light turns with the view: over the viewer's left shoulder (shading.ts SUN).
+    sm.setVector3('uSun', Vector3.FromArray(sunVector(this.camera.yaw)));
     sm.setFloat('uSnowLine', this.snowLine);
     sm.setFloat('uFogRange', this.fogRange);
     sm.setVector3('uHorizonColor', Vector3.FromArray(this.horizonColor));
@@ -727,22 +730,9 @@ export class GpuRenderer {
     // The shade pass is only worth its vertex cost when it will be seen.
     this.colorRtt.renderList = this.shaded ? this.sectors : [];
 
-    // Wedge culling: enable only the sectors the frustum can reach.
-    const arc = this.camera.azimuthArc(4);
-    const { azimuths, sectors } = this.quality;
-    const cols = Math.ceil(azimuths / sectors);
-    let on = 0;
-    for (let s = 0; s < this.sectors.length; s++) {
-      let enabled = true;
-      if (arc) {
-        const a0 = ((s * cols) / azimuths) * 360;
-        const a1 = (((s + 1) * cols) / azimuths) * 360;
-        enabled = arcsOverlap(arc.start, arc.span, a0, a1 - a0);
-      }
-      this.sectors[s].setEnabled(enabled);
-      if (enabled) on++;
-    }
-    this.diagnostics.sectorsDrawn = on;
+    // The wedge is the view: every sector is drawn.
+    for (const sector of this.sectors) sector.setEnabled(true);
+    this.diagnostics.sectorsDrawn = this.sectors.length;
   }
 
   private updateCompositeUniforms(w: number, h: number) {
@@ -750,7 +740,7 @@ export class GpuRenderer {
     m.setVector2('uTexel', new Vector2(1 / w, 1 / h));
     m.setFloat('uEdgeLow', this.edgeLow);
     m.setFloat('uEdgeHigh', this.edgeHigh);
-    m.setFloat('uEdgeWidth', this.edgeWidth);
+    m.setFloat('uEdgeWidth', this.edgeWidth / this.engine.getHardwareScalingLevel());
     m.setFloat('uWhiten', this.whiten);
     m.setFloat('uDesat', this.desaturate);
     m.setFloat('uLineDark', this.lineDark);
@@ -832,8 +822,3 @@ export class GpuRenderer {
   }
 }
 
-/** Do two circular arcs, given as (start, span) in degrees, overlap? */
-function arcsOverlap(s1: number, span1: number, s2: number, span2: number): boolean {
-  const rel = ((s2 - s1) % 360 + 360) % 360;
-  return rel < span1 || rel + span2 > 360;
-}

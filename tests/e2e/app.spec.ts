@@ -199,13 +199,17 @@ test.describe('geometry on screen', () => {
     expect(Math.abs(got - skylineRow(270, W / 2, s.eyeAltitude, 60, W, H))).toBeLessThan(H * 0.01);
   });
 
-  test('ridge lines always darken the silhouette; there is no switch for them any more', async ({ page }) => {
-    // The switch did nothing anyone could see on a phone (and nothing at all
-    // over the camera or a photo), so the lines are simply on, at 0.35.
+  test('ridge lines always darken the silhouette; a slider sets how strongly, 70 % by default', async ({ page }) => {
+    // PeakFinder's readability is its line drawing: ridges and silhouettes
+    // from the range buffer's jumps, over the shading. The old switch did
+    // nothing anyone could see, and 0.35 was too faint on a phone.
     await page.goto(url());
     const s = await ready(page);
     await expect(page.getByRole('button', { name: /Umrisse/ })).toHaveCount(0);
-    expect(await page.evaluate(() => (window as any).alp.renderer.outline)).toBe(0.35);
+    expect(await page.evaluate(() => (window as any).alp.renderer.outline)).toBe(0.7);
+    await page.getByRole('button', { name: 'Einstellungen' }).click();
+    await expect(page.getByRole('slider', { name: 'Konturen' })).toHaveValue('70');
+    await page.getByRole('button', { name: 'Einstellungen' }).click();
     const apex = summitScreenY(s.eyeAltitude, 60) * H;
     const on = await luminance(page, W / 2 - 60, Math.round(apex) - 4, 120, 40);
     // Taken out from the console, the silhouette gets lighter: the lines are really drawn.
@@ -334,18 +338,19 @@ test.describe('panels', () => {
 });
 
 test.describe('appearance', () => {
-  test('the two flanks of the Testhorn are lit as the shading formula says: Lambert from the south-south-east over rock', async ({ page }) => {
-    // The cone rises 1 m per metre all round. Seen from the west, the flank
-    // right of the summit faces south-west, towards the sun, the one left of
-    // it north-west, away from it. Their brightness ratio is set by the light
-    // formula alone; fog and colour are the same at the same range and altitude.
+  test('the two flanks of the Testhorn are lit as the shading formula says: Lambert from over the viewer\'s left shoulder, over rock', async ({ page }) => {
+    // The cone rises 1 m per metre all round. Looking east, the light stands
+    // north-west (yaw − 135°): the flank left of the summit faces north-west,
+    // into the light, the one right of it south-west, half away from it.
+    // Their brightness ratio is set by the light formula alone; fog and
+    // colour are the same at the same range and altitude.
     await page.goto(url());
     const s = await ready(page);
     const ys = summitScreenY(s.eyeAltitude, 60) * H;
     const probe = async (x: number, y: number) => {
       const hit = terrainHit(90, x, y, s.eyeAltitude, 60, W, H)!;
       expect(hit.range).toBeGreaterThan(2500);            // on the cone, not the plain
-      const expected = lumOf(terrainColor(hit.h, hit.normal, hit.range));
+      const expected = lumOf(terrainColor(hit.h, hit.normal, hit.range, false, undefined, 90));
       const measured = (await luminance(page, x - 6, y - 6, 12, 12)) / 255;
       return { expected, measured };
     };
@@ -353,7 +358,7 @@ test.describe('appearance', () => {
     const yp = Math.round(ys + 200);
     const left = await probe(W / 2 - 100, yp);
     const right = await probe(W / 2 + 100, yp);
-    expect(right.expected / left.expected).toBeGreaterThan(1.3);   // the formula itself separates the flanks
+    expect(left.expected / right.expected).toBeGreaterThan(1.3);   // the formula itself separates the flanks
     // The old light (a sky term over a 0.66 Lambert) read 0.028 too bright on
     // the shadow flank and 0.020 on the lit one; the tolerance sits below that.
     expect(Math.abs(left.measured - left.expected)).toBeLessThan(0.015);

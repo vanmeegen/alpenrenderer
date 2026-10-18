@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
-import { EYE_HEIGHT, eyeHeightFromSlider, formatHash, PLACES, readHash, readOptions, sliderFromEyeHeight, startView, ViewState, writeLastView } from './state';
+import { EYE_HEIGHT, OUTLINE, eyeHeightFromSlider, formatHash, PLACES, readHash, readOptions, sliderFromEyeHeight, startView, ViewState, writeLastView } from './state';
 import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
@@ -41,6 +41,7 @@ export function App() {
   const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'settings' | 'map'>('none');
   const [menuOpen, setMenuOpen] = useState(true);
   const [eyeHeight, setEyeHeight] = useState(EYE_HEIGHT.initial);
+  const [outline, setOutline] = useState(OUTLINE.initial);
   const [locating, setLocating] = useState(false);
   const [locNote, setLocNote] = useState<{ message: string; help: LocationHelp } | null>(null);
   const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place' | 'photo'>('url');
@@ -81,6 +82,7 @@ export function App() {
         }, 300);
       };
       setEyeHeight(v.eyeHeight);
+      setOutline(v.outline);
       v.start();
       if (start.locate) void locateHere(true);
       // Debug handle for the console and for headless checks.
@@ -218,6 +220,10 @@ export function App() {
     setEyeHeight(m);
     viewerRef.current?.setEyeHeight(m);
   };
+  const outlineTo = (v: number) => {
+    setOutline(v);
+    viewerRef.current?.setOutline(v);
+  };
   const toggle = (p: typeof panel) => setPanel(panel === p ? 'none' : p);
 
   const loading = status && status.levelsReady < status.levels;
@@ -350,6 +356,14 @@ export function App() {
             </label>
             <div className="mt-0.5 text-neutral-500">
               Über dem Boden am Standpunkt: 1,7 m = stehend; mehr, um über Wald und nahe Kuppen zu schauen.
+            </div>
+            <label className="mt-2 flex items-center gap-2">
+              <span className="shrink-0 whitespace-nowrap tabular-nums">Konturen {Math.round(outline * 100)} %</span>
+              <input type="range" min={0} max={100} step={1} value={Math.round(outline * 100)} aria-label="Konturen"
+                onChange={(e) => outlineTo(Number(e.target.value) / 100)} className="min-w-0 flex-1" />
+            </label>
+            <div className="mt-0.5 text-neutral-500">
+              Wie kräftig Grate und Silhouetten nachgezogen werden; 0 = nur Schattierung.
             </div>
           </div>
         )}
