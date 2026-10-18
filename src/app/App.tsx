@@ -82,7 +82,7 @@ export function App() {
       };
       setEyeHeight(v.eyeHeight);
       v.start();
-      if (start.locate) void locateHere();
+      if (start.locate) void locateHere(true);
       // Debug handle for the console and for headless checks.
       (window as unknown as Record<string, unknown>).alp = v;
     }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
@@ -118,14 +118,21 @@ export function App() {
     setPanel('none');
   };
 
-  /** "Mein Standort" from the Standpunkt menu: checked first, explained when it fails. */
-  const locateHere = async () => {
+  /**
+   * "Mein Standort" from the Standpunkt menu: checked first, explained when it
+   * fails. At start-up the menu is closed, so a failure opens it: the
+   * explanation and the places to choose from are there.
+   */
+  const locateHere = async (openOnFail = false) => {
     setLocating(true);
     setLocNote(null);
     try {
       const r = await locateChecked({ secure: window.isSecureContext, permission: sitePermission });
       if (r.ok) pick(r.position);
-      else setLocNote({ message: r.message, help: r.help });
+      else {
+        setLocNote({ message: r.message, help: r.help });
+        if (openOnFail) setPanel('places');
+      }
     } finally {
       setLocating(false);
     }
