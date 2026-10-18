@@ -103,32 +103,50 @@ export function readOptions(search = location.search): AppOptions {
 }
 
 /**
- * The eye stands 1.7 m above the highest ground within this many metres of
- * the standpoint. A DEM post every few metres rounds a slope into steps, so
- * an eye over its own post sits inside the hill next to it; a wider area
- * lifts it clear of the nearby ridge as well. Chosen per device on a slider.
+ * How far above the ground under the standpoint the eye stands, metres.
+ * 1.7 m is a person standing there, which is what every panorama service
+ * does by default (HeyWhatsThat six feet, udeuschle 10 m, PeakFinder the DEM
+ * plus an offset); more lifts the view over the woods or the knoll in front,
+ * up to a drone's height. The highest ground within a kilometre, the old
+ * default, put the eye hundreds of metres up the slopes at a lakeshore and
+ * turned the view into one from above.
  */
-export const EYE_RADIUS = { min: 10, max: 2000, initial: 1000 };
-const EYE_RADIUS_KEY = 'alp.eyeRadius';
+export const EYE_HEIGHT = { min: 1.7, max: 500, initial: 1.7 };
+const EYE_HEIGHT_KEY = 'alp.eyeHeight';
 
 const defaultStorage = (): Storage | undefined => {
   try { return typeof localStorage !== 'undefined' ? localStorage : undefined; } catch { return undefined; }
 };
 
-export function clampEyeRadius(m: number): number {
-  if (!Number.isFinite(m)) return EYE_RADIUS.initial;
-  return Math.max(EYE_RADIUS.min, Math.min(EYE_RADIUS.max, Math.round(m)));
+/** Clamped to the slider, to a tenth of a metre. */
+export function clampEyeHeight(m: number): number {
+  if (!Number.isFinite(m)) return EYE_HEIGHT.initial;
+  return Math.round(Math.max(EYE_HEIGHT.min, Math.min(EYE_HEIGHT.max, m)) * 10) / 10;
 }
 
-export function readEyeRadius(storage = defaultStorage()): number {
+export function readEyeHeight(storage = defaultStorage()): number {
   try {
-    const v = storage?.getItem(EYE_RADIUS_KEY);
-    return v == null ? EYE_RADIUS.initial : clampEyeRadius(parseFloat(v));
+    const v = storage?.getItem(EYE_HEIGHT_KEY);
+    return v == null ? EYE_HEIGHT.initial : clampEyeHeight(parseFloat(v));
   } catch {
-    return EYE_RADIUS.initial;
+    return EYE_HEIGHT.initial;
   }
 }
 
-export function writeEyeRadius(m: number, storage = defaultStorage()) {
-  try { storage?.setItem(EYE_RADIUS_KEY, String(clampEyeRadius(m))); } catch { /* private mode: not remembered */ }
+export function writeEyeHeight(m: number, storage = defaultStorage()) {
+  try { storage?.setItem(EYE_HEIGHT_KEY, String(clampEyeHeight(m))); } catch { /* private mode: not remembered */ }
+}
+
+/**
+ * The slider runs 0..100 and is logarithmic: the first metres matter (1.7 m
+ * standing, 3 m on a rock, 10 m up a tower) and the last hundred hardly do.
+ */
+export function eyeHeightFromSlider(t: number): number {
+  const f = Math.min(1, Math.max(0, t / 100));
+  return EYE_HEIGHT.min * (EYE_HEIGHT.max / EYE_HEIGHT.min) ** f;
+}
+
+export function sliderFromEyeHeight(m: number): number {
+  const h = Math.min(EYE_HEIGHT.max, Math.max(EYE_HEIGHT.min, m));
+  return (100 * Math.log(h / EYE_HEIGHT.min)) / Math.log(EYE_HEIGHT.max / EYE_HEIGHT.min);
 }

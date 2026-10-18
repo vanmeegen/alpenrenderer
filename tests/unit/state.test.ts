@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_VIEW, EYE_RADIUS, PLACES, formatHash, readEyeRadius, readHash, readOptions, writeEyeRadius } from '../../src/app/state';
+import { DEFAULT_VIEW, EYE_HEIGHT, PLACES, eyeHeightFromSlider, formatHash, readEyeHeight, readHash, readOptions, sliderFromEyeHeight, writeEyeHeight } from '../../src/app/state';
 
 describe('readHash', () => {
   test('empty hash is the default view', () => {
@@ -62,32 +62,40 @@ describe('readOptions', () => {
   });
 });
 
-describe('eye radius: the area the eye height is taken from', () => {
+describe('eye height: metres above the ground under the standpoint', () => {
   const store = (v: string | null) => ({ getItem: () => v, setItem: () => {} }) as unknown as Storage;
 
-  test('1 km by default, 10 m to 2 km', () => {
-    expect(EYE_RADIUS).toEqual({ min: 10, max: 2000, initial: 1000 });
-    expect(readEyeRadius(store(null))).toBe(1000);
+  test('1.7 m by default, 1.7 m to 500 m', () => {
+    expect(EYE_HEIGHT).toEqual({ min: 1.7, max: 500, initial: 1.7 });
+    expect(readEyeHeight(store(null))).toBe(1.7);
   });
 
-  test('a stored value is used, clamped to the slider', () => {
-    expect(readEyeRadius(store('250'))).toBe(250);
-    expect(readEyeRadius(store('5'))).toBe(10);
-    expect(readEyeRadius(store('99999'))).toBe(2000);
-    expect(readEyeRadius(store('kaputt'))).toBe(1000);
+  test('a stored value is used, clamped to the slider, to a tenth of a metre', () => {
+    expect(readEyeHeight(store('25'))).toBe(25);
+    expect(readEyeHeight(store('29.149'))).toBe(29.1);
+    expect(readEyeHeight(store('0.5'))).toBe(1.7);
+    expect(readEyeHeight(store('99999'))).toBe(500);
+    expect(readEyeHeight(store('kaputt'))).toBe(1.7);
   });
 
   test('storage that throws (private mode) falls back to the default', () => {
     const broken = { getItem: () => { throw new Error('denied'); } } as unknown as Storage;
-    expect(readEyeRadius(broken)).toBe(1000);
-    expect(() => writeEyeRadius(300, broken)).not.toThrow();
+    expect(readEyeHeight(broken)).toBe(1.7);
+    expect(() => writeEyeHeight(30, broken)).not.toThrow();
   });
 
   test('what is written is read back', () => {
     const m = new Map<string, string>();
     const s = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); } } as unknown as Storage;
-    writeEyeRadius(420, s);
-    expect(readEyeRadius(s)).toBe(420);
+    writeEyeHeight(42.5, s);
+    expect(readEyeHeight(s)).toBe(42.5);
+  });
+
+  test('the slider is logarithmic: 0 is standing height, 100 is the top, 50 is the geometric middle', () => {
+    expect(eyeHeightFromSlider(0)).toBeCloseTo(1.7, 6);
+    expect(eyeHeightFromSlider(100)).toBeCloseTo(500, 6);
+    expect(eyeHeightFromSlider(50)).toBeCloseTo(Math.sqrt(1.7 * 500), 6);
+    for (const t of [0, 13, 50, 87, 100]) expect(sliderFromEyeHeight(eyeHeightFromSlider(t))).toBeCloseTo(t, 6);
   });
 });
 

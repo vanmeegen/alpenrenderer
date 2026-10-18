@@ -634,6 +634,37 @@ Bildschirmmaß und damit bei jedem Zoom und jeder Entfernung gleich – anders
 als das frühere zufällige Schweben über dem DEM-Gipfel, das beim Zoomen auf
 Dutzende Pixel wuchs.
 
+### 8.z Achensee-Befund: Auge, Start, Labels, Relief (2026-10-18)
+
+Am Achensee war die App in fünf Punkten nicht brauchbar: markante Spitzen
+ohne Label, Perspektive passt nicht zum Standpunkt, Relief zu grob, Start
+nicht am Standort, Auge fliegt über dem Boden. Vor den Änderungen eine
+Recherche, wie andere es machen (Kurzfassung; Details im Sitzungsplan):
+
+| Frage | Andere | Wir vorher |
+|---|---|---|
+| Augenhöhe | HeyWhatsThat 1,8 m, udeuschle 10 m, PeakFinder DEM + Offset; „höchster Punkt im Umkreis“ überall nur Option (30–200 m) | 1,7 m über dem höchsten Punkt in **1 km** (Schynige Platte +128 m, Seeufer Hunderte Meter) |
+| Welche Gipfel | Prominenz als Rang (PeakVisor, Raposo 2013), Isolation + Zoom-Radius (OpenTopoMap), Label-Grid (Mapbox), Zoom = mehr Labels (PeakFinder) | Entfernung, 22 Plätze; OSM-Prominenz im Katalog ungenutzt |
+| Sichtbarkeit | Tiefenpuffer des gezeichneten Geländes (Mapbox `text-occlusion-opacity`, MapLibre, PeakLens, MassifMaps PR 375); Anker auf der gezeichneten Höhe (MassifMaps PR 372, wie §8.y) | DEM-Strahl zum DEM-Punkt, Nadel erst danach auf das Netz |
+| Gelände | Quadtree + Bildschirmfehler ≤ 2 px (Cesium, MapLibre, Google Earth, wohl PeakVisor mit 30 m); GPU-Raycasting pixelgenau, aber 2009-Desktop-GPU für 30 fps (Dick et al.) | Polarnetz, feste 0,18°/0,35° pro Spalte, Ringe 1,1–1,4 % der Entfernung: 2–4× gröber als die Daten, beim Zoomen 14–29 px pro Spalte |
+
+Maßnahmen in dieser Reihenfolge: C1 Auge auf den Boden, C2 Start am
+Standort, C3 Labels (Test am gezeichneten Punkt, Prominenz offline aus
+Mapterhorn z9, Rang = Prominenz/Entfernung, Bildschirmraster statt 22),
+C4 Relief (Polarnetz als Keil über den Blickkegel, Fernrohr-Fenster beim
+Zoomen, blickrelatives Licht, Konturen), C5 Kamera (Roll, FOV nach
+Orientierung).
+
+**C1 (erledigt):** Auge = DEM-Boden am Standpunkt + Augenhöhe, Default
+1,7 m, Regler logarithmisch 1,7–500 m (`EYE_HEIGHT`, `eyeHeightFromSlider`
+in `state.ts`). Der Umkreis-Regler „Höhenbereich“ ist weg: der Boden ist
+bilinear abgetastet wie das Netz, das Auge steckt also nie im Gelände, und
+ein Hang, der 1,7 m bergauf auf Augenhöhe steigt, ist physikalisch richtig.
+Tests: `state.test.ts` „1.7 m by default…“, „the slider is logarithmic…“;
+`app.spec.ts` „the eye stands 1.7 m above the ground under it“, „on the
+Testhorn's flank the eye stands 1.7 m over the slope“, „the eye height is a
+logarithmic slider“ (rot gegen den alten Stand: Auge +9 m bzw. +1000 m).
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

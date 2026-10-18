@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
-import { EYE_RADIUS, formatHash, PLACES, readHash, readOptions, ViewState } from './state';
+import { EYE_HEIGHT, eyeHeightFromSlider, formatHash, PLACES, readHash, readOptions, sliderFromEyeHeight, ViewState } from './state';
 import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
@@ -38,7 +38,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'settings' | 'map'>('none');
   const [menuOpen, setMenuOpen] = useState(true);
-  const [eyeRadius, setEyeRadius] = useState(EYE_RADIUS.initial);
+  const [eyeHeight, setEyeHeight] = useState(EYE_HEIGHT.initial);
   const [locating, setLocating] = useState(false);
   const [locNote, setLocNote] = useState<{ message: string; help: LocationHelp } | null>(null);
   const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place' | 'photo'>('url');
@@ -77,7 +77,7 @@ export function App() {
           history.replaceState(null, '', formatHash(nv));
         }, 300);
       };
-      setEyeRadius(v.eyeRadius);
+      setEyeHeight(v.eyeHeight);
       v.start();
       // Debug handle for the console and for headless checks.
       (window as unknown as Record<string, unknown>).alp = v;
@@ -203,9 +203,9 @@ export function App() {
     if (r === 'failed') setNote('Foto konnte nicht gespeichert werden.');
   };
 
-  const radius = (m: number) => {
-    setEyeRadius(m);
-    viewerRef.current?.setEyeRadius(m);
+  const eyeTo = (m: number) => {
+    setEyeHeight(m);
+    viewerRef.current?.setEyeHeight(m);
   };
   const toggle = (p: typeof panel) => setPanel(panel === p ? 'none' : p);
 
@@ -332,12 +332,13 @@ export function App() {
           <div className={PANEL} role="region" aria-label="Einstellungen">
             <div className="mb-1 font-semibold">Einstellungen</div>
             <label className="flex items-center gap-2">
-              <span className="shrink-0 whitespace-nowrap tabular-nums">Höhenbereich {eyeRadius} m</span>
-              <input type="range" min={EYE_RADIUS.min} max={EYE_RADIUS.max} step={5} value={eyeRadius} aria-label="Höhenbereich"
-                onChange={(e) => radius(Number(e.target.value))} className="min-w-0 flex-1" />
+              <span className="shrink-0 whitespace-nowrap tabular-nums">Augenhöhe {aboveGround(eyeHeight)}</span>
+              <input type="range" min={0} max={100} step={1} value={Math.round(sliderFromEyeHeight(eyeHeight))} aria-label="Augenhöhe"
+                aria-valuetext={aboveGround(eyeHeight)}
+                onChange={(e) => eyeTo(eyeHeightFromSlider(Number(e.target.value)))} className="min-w-0 flex-1" />
             </label>
             <div className="mt-0.5 text-neutral-500">
-              Auge 1,7 m über dem höchsten Gelände in diesem Umkreis: klein = am Standpunkt, groß = frei über nahe Kuppen.
+              Über dem Boden am Standpunkt: 1,7 m = stehend; mehr, um über Wald und nahe Kuppen zu schauen.
             </div>
           </div>
         )}
@@ -375,7 +376,7 @@ export function App() {
             <div>Fehler: {d.frameErrors} Frames · Device lost {d.deviceLost}</div>
             {d.limits && <div>Limits: {d.limits} · GL-Fehler {d.glError}</div>}
             {status?.decoder && <div>Tile-Dekoder: {status.decoder}</div>}
-            {status && <div>Boden {status.ground.toFixed(0)} m · Auge {status.eyeAltitude.toFixed(1)} m · Höhenbereich {eyeRadius} m</div>}
+            {status && <div>Boden {status.ground.toFixed(0)} m · Auge {status.eyeAltitude.toFixed(1)} m · Augenhöhe {aboveGround(eyeHeight)}</div>}
             {d.shaderErrors.length > 0 && (
               <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-red-700">{d.shaderErrors.join('\n')}</pre>
             )}
