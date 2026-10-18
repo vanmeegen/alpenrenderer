@@ -705,7 +705,7 @@ Sichtbarkeitstest; die Messungen an drei Achensee-Standpunkten zeigten ihn
 konsistent. Tests: `labels.test.ts` „orders by apparent prominence…“, „one
 label per screen cell…“; `prominence.test.ts`.
 
-**C4a (in Arbeit):** Das Polarnetz wird ein Keil über den Blickkegel
+**C4a (erledigt):** Das Polarnetz wird ein Keil über den Blickkegel
 (`wedge` in mesh.ts: Spalten über `camera.azimuthArc`, erste Spalte auf das
 Spaltenraster gerastet, Uniform `uAz0`), die Ringe laufen ab dem Nahfeld mit
 konstantem Faktor 1/190 (hoch, 1024 × 1600) bzw. 1/120 (niedrig, 640 × 900)
@@ -717,7 +717,7 @@ Sektor-Culling entfällt, alle Vertizes sind im Bild. Tests: `mesh.test.ts`
 „beyond the near field the rings are a constant fraction…“, „the wedge…“;
 `labels.test.ts` „a new wedge … asked again, once“.
 
-**C4c (in Arbeit):** Das Licht steht 45° hoch über der linken Schulter des
+**C4c (erledigt):** Das Licht steht 45° hoch über der linken Schulter des
 Betrachters (Azimut = yaw − 135°, `SUN.behind` in shading.ts, Uniform
 `uSun` je Frame aus `camera.yaw`): Imhofs Regel „Licht von oben links“,
 mit dem Blick gedreht, damit das Relief in jeder Richtung gleich lesbar ist
@@ -729,7 +729,7 @@ einen CSS-Pixel breit statt eines Gerätepixels. Tests: `shading.test.ts`
 „the light stands behind the viewer's left shoulder…“, `state.test.ts`
 „contour lines…“, `app.spec.ts` „ridge lines … a slider sets how strongly“.
 
-**C5 (in Arbeit):** Der Roll der Sensoren geht in die Kamera (bisher
+**C5 (erledigt):** Der Roll der Sensoren geht in die Kamera (bisher
 bewusst weggelassen): kippt das Handy um die Blickachse, kippt der
 gezeichnete Horizont mit dem im Kamerabild; ohne Sensoren steht die Ansicht
 wieder waagerecht. Der Objektiv-Bildwinkel bezieht sich auf die lange
@@ -744,7 +744,7 @@ view…“, `camera.test.ts` „the lens angle is the long side's…“, „the
 panorama's default field of view is the long side's too“, `state.test.ts`
 „without a field of view anywhere…“.
 
-**C4b (in Arbeit) – das Fernrohr.** Unter 30° Bildwinkel (1) wird das
+**C4b (erledigt) – das Fernrohr.** Unter 30° Bildwinkel (1) wird das
 lineare Mittelsegment der Ringe zu einem Band im Postabstand um die
 Entfernung, in der der Mittelstrahl den Boden trifft (`lookRange`,
 `bandFor` in mesh.ts; Entfernung in ×1,25-Stufen quantisiert, damit
@@ -761,6 +761,19 @@ Entfernung. Tests: `mesh.test.ts` „the telescope…“, `clipmap.test.ts`
 „look levels…“, `heightfield.test.ts` „a look level … never read on the
 CPU“, `labels.spec.ts` „zoomed in, the telescope cuts its fine windows
 around the Testhorn…“.
+
+**Stand nach C4/C5 (2026-10-18):** Vertexzahl des Keils 1,6 M (hoch,
+1024 × 1600) bzw. 0,58 M (niedrig, 640 × 900) – vorher 1,47 M (2048 × 720)
+bzw. 0,49 M (1024 × 480) über den ganzen Kreis, davon nach dem
+Sektor-Culling je nach Bildwinkel ein Viertel bis die Hälfte gezeichnet.
+Die E2E-Suite läuft seit C4a mit `q=low`: der Software-Rasterizer
+(SwiftShader) braucht für das hohe Netz 4–5 s pro Frame, Sichtbarkeit und
+Nadeln kommen dann nie zur Ruhe. Der hohe Pfad ist damit nur über die
+Unit-Tests (Netz, Shader-Preprocessing) und von Hand geprüft; FPS auf dem
+200-€-Handy mit `q=high` und `q=low` stehen noch aus (HUD-Diagnose).
+Offen aus der Recherche: Normale bilinear statt pro Zelle, Himmelssicht/AO
+je Ebene, Skyline-Kalibrierung des Live-Bilds wie PeakLens, echte Sonne
+nach Uhrzeit.
 
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
