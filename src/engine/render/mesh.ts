@@ -162,7 +162,11 @@ const smoothstep = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-/** The height a vertex at ground range `r` gets: the shader's level choice and cross-fade. */
+/**
+ * The height a vertex at ground range `r` gets: the shader's level choice
+ * and cross-fade over the observer's levels, and inside the telescope's
+ * window the window's finer posts, blended out at its edge (HeightField.lookAt).
+ */
 export function vertexHeight(hf: HeightField, lon: number, lat: number, r: number): number {
   const levels = hf.levels;
   let i = levels.length - 1;
@@ -179,6 +183,11 @@ export function vertexHeight(hf: HeightField, lon: number, lat: number, r: numbe
     const outer = levels[i].maxRange;
     const fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0) h += (at(levels[i + 1]) - h) * fade;
+  }
+  const look = hf.lookAt(lon, lat);
+  if (look) {
+    const hl = hf.heightIn(look.level, lon, lat);
+    if (!Number.isNaN(hl)) h = hl + (h - hl) * look.fade;
   }
   return h;
 }

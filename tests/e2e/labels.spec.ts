@@ -113,25 +113,28 @@ test.describe('summit labels', () => {
   });
 
   test('zoomed in, the telescope cuts its fine windows around the Testhorn and draws the apex where the formula puts it', async ({ page }) => {
-    // Below 30° the two look levels (z14, z13) are cut around the point the
-    // centre of the view meets, and a dense band of rings sits there: the
-    // apex is drawn from 6.6 m posts a post apart, instead of from 26 m
-    // posts on rings 26 m apart.
+    // Below 30° the two look levels (z14 and z13; z13 and z12 at the low
+    // quality the tests run at) are cut around the point the centre of the
+    // view meets, and a dense band of rings sits there: the apex is drawn
+    // from 13 m posts on rings 9 m apart, instead of from 26 m posts on
+    // rings 42 m apart (1/120 of 5 km).
     await page.goto(url({ pitch: 26, fov: 5 }));
     const s = await ready(page);
     const looks = () => page.evaluate(() => (window as any).alp.streamer.heightField.levels
       .filter((l: any) => l.role === 'look' && l.filled).map((l: any) => ({ z: l.z, px0: l.px0, py0: l.py0, w: l.w })));
     await expect.poll(async () => (await looks()).length, { timeout: 60_000 }).toBe(2);
-    const fine = (await looks()).find((l: any) => l.z === 14)!;
+    const fine = (await looks()).sort((a: any, b: any) => b.z - a.z)[0];
+    expect(fine.z).toBe(13);
     // Cut around the Testhorn, not around the standpoint: its centre within a quarter window of the summit.
     const merc = (lon: number, z: number) => ((lon + 180) / 360) * 256 * 2 ** z;
-    expect(Math.abs(fine.px0 + fine.w / 2 - merc(TESTHORN.lon, 14))).toBeLessThan(fine.w / 4);
-    expect(Math.abs(fine.px0 + fine.w / 2 - merc(STAND.lon, 14))).toBeGreaterThan(fine.w / 2);
+    expect(Math.abs(fine.px0 + fine.w / 2 - merc(TESTHORN.lon, fine.z))).toBeLessThan(fine.w / 4);
+    expect(Math.abs(fine.px0 + fine.w / 2 - merc(STAND.lon, fine.z))).toBeGreaterThan(fine.w / 2);
     // The apex on screen, from the formula: elevation of the summit, less the pitch, in a 5° frame.
     const elev = Math.atan2(TESTHORN.summit - s.eyeAltitude, TESTHORN_RANGE);
     const expectedY = H / 2 - (H / 2) * Math.tan(elev - (26 * Math.PI) / 180) / Math.tan((2.5 * Math.PI) / 180);
-    // 6.6 m posts round the cone's apex by up to 5 m: 0.06° here, 7 px of 600.
-    await expect.poll(async () => Math.abs((await drawnApex(page)).y - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.015);
+    // 13 m posts round the cone's apex by up to 9 m: 0.1° here, 13 px of 600.
+    // Without the telescope the apex comes 30–40 m low: 0.4°, 48 px.
+    await expect.poll(async () => Math.abs((await drawnApex(page)).y - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.025);
   });
 
   test('a summit catalogued on its flank gets its pin on the drawn top, not in the air beside it or in the slope', async ({ page }) => {

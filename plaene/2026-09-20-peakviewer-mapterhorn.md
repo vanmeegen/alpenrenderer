@@ -754,8 +754,11 @@ Schwenken die Ringe nicht verschiebt; höchstens 45 % der Reihen), und
 Betrachter (`setLook`, Hysterese eine Viertel-Fensterbreite, `clearLook`
 beim Herauszoomen). Der Shader nimmt sie nach Lage statt nach Entfernung
 (Kennung `uLvlA.w < 0`, `lookLevel`/`lookFade`, Blende am Fensterrand,
-zehn Ebenen-Slots, Atlas 640 × 6400); die CPU liest sie nie (`role:
-'look'`, `eyeLevels()`). Der angepeilte Gipfel wird so aus 6,6-m-Posten
+zehn Ebenen-Slots, Atlas 640 × 6400); die CPU liest sie nur für die
+Label-Nadel, die auf der gezeichneten Fläche sitzen muss (`vertexHeight`
+über `HeightField.lookAt`, dieselbe Blende wie der Shader); Sichtlinien,
+Boden und Gipfel bleiben auf den Betrachter-Ebenen (`role: 'look'`,
+`eyeLevels()`). Der angepeilte Gipfel wird so aus 6,6-m-Posten
 im Postabstand gezeichnet statt aus 26–53 m auf Ringen von 1/190 der
 Entfernung. Tests: `mesh.test.ts` „the telescope…“, `clipmap.test.ts`
 „look levels…“, `heightfield.test.ts` „a look level … never read on the

@@ -9,14 +9,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CAMERA_BOTTOM_Y, CAMERA_FRAME, CAMERA_TOP_Y, STAND, skylineRow } from './fixtures/terrain';
 import { CHROMIUM_ARGS, EXECUTABLE } from './playwright.config';
-import { renderLensFov } from '../../src/app/cameraFeed';
+import { DEFAULT_LENS_FOV, renderLensFov } from '../../src/app/cameraFeed';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const TILES = '/tests/e2e/fixtures/tiles/';
 const W = 1000, H = 600;
 /** The renderer's wash: the camera image is desaturated and mixed towards white. */
 const WHITEN = 0.62;
-const DEFAULT_LENS_FOV = 51;
 
 test.use({
   launchOptions: {

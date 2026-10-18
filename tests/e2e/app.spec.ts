@@ -79,13 +79,16 @@ test.describe('loading', () => {
   test('renders the fixture terrain with every pipeline compiled and no errors', async ({ page }) => {
     await page.goto(url());
     const s = await ready(page);
-    expect(s.levels).toBe(8);
+    // The low quality the E2E tests run at (see url): six levels around the
+    // eye, the telescope's two windows not counted. The high quality's eight
+    // are characterised in tests/unit/clipmap.test.ts.
+    expect(s.levels).toBe(6);
     expect(s.tilesTotal).toBeGreaterThan(0);
     expect(s.tilesDone).toBe(s.tilesTotal);
     expect(s.failed).toBe(0);
     expect(s.diagnostics).toMatchObject({ terrainReady: true, shadeReady: true, compositeReady: true, frameErrors: 0 });
     expect(s.diagnostics.shaderErrors).toEqual([]);
-    await expect(page.getByText('8 Level')).toBeVisible();
+    await expect(page.getByText('6 Level')).toBeVisible();
   });
 
   test('the eye stands 1.7 m above the ground under it, ripple or not', async ({ page }) => {

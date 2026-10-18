@@ -23,8 +23,10 @@ export interface LevelSpec {
   /**
    * 'look': a telescope window cut around the point looked at rather than
    * around the observer (sources/clipmap.ts setLook). Drawn by the GPU where
-   * it covers the ground, never read on the CPU: labels, sightlines and the
-   * eye's height stay on the observer-centred levels, whatever is looked at.
+   * it covers the ground (lookAt); on the CPU read only for the surface as
+   * drawn (render/mesh.ts vertexHeight, where the label pins go). Sightlines,
+   * the ground and the summits stay on the observer-centred levels, whatever
+   * is looked at.
    */
   role?: 'look';
 }
@@ -99,6 +101,25 @@ export class HeightField {
   /** The observer-centred levels, in order of reach: what the CPU reads. */
   eyeLevels(): Level[] {
     return this.levels.filter((l) => l.role !== 'look');
+  }
+
+  /**
+   * The telescope's window a point is drawn from, finest first, with the
+   * blend back into the observer's levels: 0 well inside, 1 from 95 % of the
+   * half width out, smoothstep from 80 %. The shader's lookLevel/lookFade
+   * (gpu/glsl.ts, gpu/wgsl.ts) in one: a window counts where it is filled and
+   * has room for the bilinear taps. Null when no window holds the point.
+   */
+  lookAt(lon: number, lat: number): { level: Level; fade: number } | null {
+    for (const l of this.levels) {
+      if (l.role !== 'look' || !l.filled) continue;
+      const { u, v } = this.project(l, lon, lat);
+      if (!(u > 1.5 && u < l.w - 2.5 && v > 1.5 && v < l.h - 2.5)) continue;
+      const d = Math.max(Math.abs(u - 0.5 * l.w) / (0.5 * l.w), Math.abs(v - 0.5 * l.h) / (0.5 * l.h));
+      const t = Math.min(1, Math.max(0, (d - 0.8) / 0.15));
+      return { level: l, fade: t * t * (3 - 2 * t) };
+    }
+    return null;
   }
 
   /** `filled` is false for a level that is allocated now and streamed later. */

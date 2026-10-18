@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { destination, groundRange, latToMercY, localRadius, lonToMercX } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
 import { QUALITY_HIGH, QUALITY_LOW } from '../../src/engine/render/gpu/renderer';
-import { bandFor, lookRange, meshTopNear, radialParams, radiusAt, rowAt, wedge } from '../../src/engine/render/mesh';
+import { bandFor, lookRange, meshTopNear, radialParams, radiusAt, rowAt, vertexHeight, wedge } from '../../src/engine/render/mesh';
 
 const LON = 10.0, LAT = 47.0, PLAIN = 1500, SPIKE = 500, EYE = PLAIN + 1.7;
 
@@ -248,5 +248,51 @@ describe('the telescope: a dense band of rings around the distance looked at', (
     }
     // Without a band, nothing changes.
     expect(radialParams(QUALITY_HIGH, hf, null, null)).toEqual(radialParams(QUALITY_HIGH, hf));
+  });
+});
+
+describe('inside the telescope\'s window the mesh is sampled from the look level, as the shader draws it', () => {
+  // The shader (glsl.ts lookLevel/lookFade) takes a filled look level by
+  // position: inside its window with room for the bilinear taps, blended
+  // back into the observer's levels from 80 % to 95 % of the half width. A
+  // label pin anchored on the observer's level alone sits a few metres, at
+  // 5° of view a few pixels, off the drawn apex.
+  const LOOK = PLAIN + 200;
+  function withWindow(filled = true) {
+    const { hf } = field([]);
+    const z = 14, w = 640, h = 640;
+    const centre = destination(LON, LAT, 90, 5000, localRadius(LAT));
+    const px0 = Math.round(lonToMercX(centre.lon, z)) - w / 2, py0 = Math.round(latToMercY(centre.lat, z)) - h / 2;
+    hf.addLevel({ z, px0, py0, w, h, quant: 1, bias: -1000, role: 'look' }, new Uint16Array(w * h).fill(LOOK + 1000), filled);
+    // Longitude of a crop column: mercator x is linear in longitude.
+    const perDeg = lonToMercX(LON + 1, z) - lonToMercX(LON, z);
+    const lonAt = (u: number) => LON + (px0 + u - lonToMercX(LON, z)) / perDeg;
+    const probe = (u: number) => {
+      const lon = lonAt(u);
+      return vertexHeight(hf, lon, centre.lat, groundRange(LON, LAT, lon, centre.lat));
+    };
+    return { hf, centre, probe };
+  }
+
+  test('well inside the window the height is the look level\'s, outside it the eye level\'s', () => {
+    const { probe } = withWindow();
+    expect(probe(320)).toBeCloseTo(LOOK, 6);              // the centre
+    expect(probe(320 + 0.7 * 320)).toBeCloseTo(LOOK, 6);  // 70 % out: still fully the window
+    expect(probe(639)).toBeCloseTo(PLAIN, 6);             // no room for the taps: not in the window
+    expect(probe(700)).toBeCloseTo(PLAIN, 6);             // outside
+  });
+
+  test('from 80 % to 95 % of the half width the window blends back into the eye level, smoothstep', () => {
+    const { probe } = withWindow();
+    expect(probe(320 + 0.875 * 320)).toBeCloseTo(PLAIN + 100, 4);   // smoothstep(0.80, 0.95, 0.875) = 0.5
+    expect(probe(320 + 0.96 * 320)).toBeCloseTo(PLAIN, 4);
+  });
+
+  test('an empty window is not read, and the pin follows the window: meshTopNear at its centre is on the look level', () => {
+    const empty = withWindow(false);
+    expect(empty.probe(320)).toBeCloseTo(PLAIN, 6);
+    const { hf, centre } = withWindow();
+    const top = meshTopNear(hf, radialParams(QUALITY_LOW, hf), centre.lon, centre.lat, EYE);
+    expect(top.h).toBeCloseTo(LOOK, 3);
   });
 });
