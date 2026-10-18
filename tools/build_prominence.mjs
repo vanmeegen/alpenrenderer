@@ -83,7 +83,9 @@ try {
     for (let tx = tx0; tx <= tx1; tx++) {
       if (!existsSync(tilePath(tx, ty))) continue;
       // Terrarium: h = R·256 + G + B/256 − 32768, read byte-exact from a canvas.
-      const buf = await page.evaluate(async ([url, size]) => {
+      // Handed over as base64 of the Int16 buffer: a JSON array of 262 144
+      // numbers took seconds per tile, this takes milliseconds.
+      const b64 = await page.evaluate(async ([url, size]) => {
         const res = await fetch(url);
         if (!res.ok) return null;
         const bmp = await createImageBitmap(await res.blob(), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
@@ -93,11 +95,16 @@ try {
         const px = ctx.getImageData(0, 0, size, size).data;
         const h = new Int16Array(size * size);
         for (let i = 0; i < size * size; i++) h[i] = Math.round(px[i * 4] * 256 + px[i * 4 + 1] + px[i * 4 + 2] / 256 - 32768);
-        return Array.from(h);
+        const bytes = new Uint8Array(h.buffer);
+        let s = '';
+        for (let i = 0; i < bytes.length; i += 8192) s += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        return btoa(s);
       }, [`http://localhost:${port}/tile-cache/${TZ}/${tx}/${ty}.webp`, TILE]);
-      if (!buf) { console.error(`undecodable ${TZ}/${tx}/${ty}`); continue; }
+      if (!b64) { console.error(`undecodable ${TZ}/${tx}/${ty}`); continue; }
+      const raw = Buffer.from(b64, 'base64');
+      const buf = new Int16Array(raw.buffer, raw.byteOffset, TILE * TILE);
       const ox = (tx - tx0) * TILE, oy = (ty - ty0) * TILE;
-      for (let y = 0; y < TILE; y++) heights.set(buf.slice(y * TILE, (y + 1) * TILE), (oy + y) * gw + ox);
+      for (let y = 0; y < TILE; y++) heights.set(buf.subarray(y * TILE, (y + 1) * TILE), (oy + y) * gw + ox);
     }
   }
   await browser.close();

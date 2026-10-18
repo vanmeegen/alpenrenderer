@@ -686,6 +686,14 @@ ist geometrisch plausibel; was das Bild davon abweichend zeigt, liegt am
 Netz (Rücken 0–60 m zu tief gezeichnet, §8.y) und ist C4a, nicht C3a. Von
 den 12 platzierten Labels nach Osten sind alle sichtbaren im Bild gesetzt;
 die Auswahl nach Entfernung (22 Plätze) ist der verbleibende Hebel → C3c.
+Zweiter Standpunkt am Rofan-Fuß (11,745° O, 47,43° N, 974 m): dasselbe
+Bild – alles nach Osten steht hinter dem unmittelbaren Hang (Marsch-Maximum
+25–30° in 0,9–1,8 km), nach Westen sind Bärenkopf, Dristenkopf,
+Seebergspitze, Falzthurnjoch, Bettlerkarspitze sichtbar und gesetzt. Einziger
+Fall „eigener Berg“ (Marsch-Maximum bei 95 % der Entfernung): Hinterunnütz
+von Achenkirch, 2,5 km, 1100 m tiefer – die Kuppe verdeckt den Gipfel um
+0,4°, die Schulter davor ist weniger steil als die Sichtlinie; mit
+13-m-Posten ist das Gelände, nicht das Raster.
 
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 

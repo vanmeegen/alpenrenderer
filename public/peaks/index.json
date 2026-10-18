@@ -83,5 +83,21 @@
   "16_48": 802
  },
  "missing": [],
- "total": 86794
+ "total": 86794,
+ "prominence": [
+  {
+   "generated": "2026-10-18T17:30:29.577Z",
+   "source": "Mapterhorn pixel zoom 9, key-col union-find (tools/prominence.mjs)",
+   "set": 75476,
+   "kept": 0,
+   "none": 11318
+  },
+  {
+   "generated": "2026-10-18T17:31:50.712Z",
+   "source": "Mapterhorn pixel zoom 10, key-col union-find (tools/prominence.mjs)",
+   "set": 5836,
+   "kept": 75476,
+   "none": 5482
+  }
+ ]
 }
