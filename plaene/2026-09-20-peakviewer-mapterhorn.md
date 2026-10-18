@@ -744,6 +744,24 @@ view…“, `camera.test.ts` „the lens angle is the long side's…“, „the
 panorama's default field of view is the long side's too“, `state.test.ts`
 „without a field of view anywhere…“.
 
+**C4b (in Arbeit) – das Fernrohr.** Unter 30° Bildwinkel (1) wird das
+lineare Mittelsegment der Ringe zu einem Band im Postabstand um die
+Entfernung, in der der Mittelstrahl den Boden trifft (`lookRange`,
+`bandFor` in mesh.ts; Entfernung in ×1,25-Stufen quantisiert, damit
+Schwenken die Ringe nicht verschiebt; höchstens 45 % der Reihen), und
+(2) zwei zusätzliche Clipmap-Ebenen (hoch z14/z13, niedrig z13/z12,
+`look` in clipmap.ts) werden um diesen Punkt geschnitten statt um den
+Betrachter (`setLook`, Hysterese eine Viertel-Fensterbreite, `clearLook`
+beim Herauszoomen). Der Shader nimmt sie nach Lage statt nach Entfernung
+(Kennung `uLvlA.w < 0`, `lookLevel`/`lookFade`, Blende am Fensterrand,
+zehn Ebenen-Slots, Atlas 640 × 6400); die CPU liest sie nie (`role:
+'look'`, `eyeLevels()`). Der angepeilte Gipfel wird so aus 6,6-m-Posten
+im Postabstand gezeichnet statt aus 26–53 m auf Ringen von 1/190 der
+Entfernung. Tests: `mesh.test.ts` „the telescope…“, `clipmap.test.ts`
+„look levels…“, `heightfield.test.ts` „a look level … never read on the
+CPU“, `labels.spec.ts` „zoomed in, the telescope cuts its fine windows
+around the Testhorn…“.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

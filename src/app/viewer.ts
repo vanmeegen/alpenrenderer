@@ -190,6 +190,7 @@ export class Viewer {
   start() {
     this.renderer.setHeightField(this.streamer.heightField);
     void this.relocate(this.view);
+    this.watchOrientation();
     const loop = () => {
       if (this.disposed) return;
       this.controls.update();
@@ -393,20 +394,34 @@ export class Viewer {
 
   private looking: Promise<void> | null = null;
 
+  /** Set by the browser's orientation change; the next frame whose aspect has flipped converts the field of view. */
+  private flipPending = false;
+
   /**
    * A phone turned over keeps the angle along its long side: 60° across the
    * sideways screen becomes 60° up the upright one, the same magnification
-   * either way. Only when the screen flips between landscape and portrait;
-   * the camera's own lens angle is handled by applyLensFov.
+   * either way. Only on the browser's orientation change, once the canvas
+   * has followed it: the canvas passes through odd sizes while the page lays
+   * itself out, and those are not rotations (a 1000×600 view read 38° for a
+   * moment of 1×600). The camera's own lens angle is applyLensFov's.
    */
   private keepLongFov() {
     const a = this.camera.aspect;
     if (!a) return;
-    if (this.lastAspect && (a > 1) !== (this.lastAspect > 1) && !this.feed.status.active && !this.photo) {
-      this.camera.set({ fov: fovForAspect(longFovOf(this.camera.fov, this.lastAspect), a) });
-      this.viewChanged();
+    if (this.flipPending && this.lastAspect && (a > 1) !== (this.lastAspect > 1)) {
+      this.flipPending = false;
+      if (!this.feed.status.active && !this.photo) {
+        this.camera.set({ fov: fovForAspect(longFovOf(this.camera.fov, this.lastAspect), a) });
+        this.viewChanged();
+      }
     }
-    this.lastAspect = a;
+    if (!this.flipPending) this.lastAspect = a;
+  }
+
+  private watchOrientation() {
+    try {
+      window.matchMedia?.('(orientation: portrait)')?.addEventListener?.('change', () => { this.flipPending = true; });
+    } catch { /* no media queries here */ }
   }
 
   /** A PNG of the view with its labels, saved through the share sheet or as a download. */
