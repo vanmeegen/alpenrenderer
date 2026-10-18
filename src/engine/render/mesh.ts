@@ -58,12 +58,34 @@ export function wedge(azimuths: number, arc: { start: number; span: number } | n
  * posts (1/318 to 1/159), so a ridge is drawn where the DEM has it and a
  * summit lands on a ring (§8.y had them 0–60 m too low at 1.1–1.4 %).
  */
-export function radialParams(quality: Quality, hf: HeightField, arc: { start: number; span: number } | null = null): RadialParams {
+export function radialParams(
+  quality: Quality, hf: HeightField, arc: { start: number; span: number } | null = null, band: Band | null = null,
+): RadialParams {
   const { azimuths, rows } = quality;
   const { az0, azStep } = wedge(azimuths, arc);
   const post = Math.max(12, hf.levels[0]?.res ?? 30);
   const maxRange = Math.max(hf.maxRange, post * 64);
   const r0 = 2;
+  if (band) {
+    // The telescope: the shader's linear middle segment becomes a dense band
+    // of rings a post apart around the distance looked at, and the two
+    // geometric segments share the remaining rows by the span they cover.
+    // Zoomed in, the ground between the feet and the band is a thin strip
+    // at the bottom of the frame; the band is what the view is about.
+    const { r1, r2 } = band;
+    const res = hf.levels[0]?.res ?? 30;
+    const bandRows = Math.min(Math.floor(0.45 * rows), Math.max(2, Math.ceil((r2 - r1) / res)));
+    const step = (r2 - r1) / bandRows;
+    const maxR = Math.max(maxRange, r2 * 1.5);
+    const spanA = Math.log(r1 / r0), spanB = Math.log(maxR / r2);
+    const rest = rows - 1 - bandRows;
+    const rowsA = Math.max(1, Math.min(rest - 1, Math.round((rest * spanA) / (spanA + spanB))));
+    const jNear = rowsA, jSplit = rowsA + bandRows;
+    return {
+      az0, azStep, columns: azimuths, r0, logRatioNear: spanA / rowsA, jNear, rNearEnd: r1, post: step,
+      jSplit, rSplit: r2, logRatioFar: spanB / (rows - 1 - jSplit), rows,
+    };
+  }
   const ratioNear = 1.15;
   const logRatioNear = Math.log(ratioNear);
   const jNear = Math.max(1, Math.ceil(Math.log(post / (ratioNear - 1) / r0) / logRatioNear));
@@ -72,6 +94,53 @@ export function radialParams(quality: Quality, hf: HeightField, arc: { start: nu
   const jSplit = jNear, rSplit = rNearEnd;
   const logRatioFar = Math.log(Math.max(maxRange, rSplit * 1.5) / rSplit) / (rows - 1 - jSplit);
   return { az0, azStep, columns: azimuths, r0, logRatioNear, jNear, rNearEnd, post, jSplit, rSplit, logRatioFar, rows };
+}
+
+/** Ground ranges a dense band of rings covers (the telescope). */
+export interface Band { r1: number; r2: number }
+
+/**
+ * The band for a distance looked at: the distance quantised in steps of
+ * ×1.25 (so panning across a slope leaves the rings where they are) with
+ * room on both sides, 0.8× to 1.5625× of the quantised value. Nothing within
+ * a kilometre: the near rings are dense already. Null for the sky.
+ */
+export function bandFor(lookRange: number | null): Band | null {
+  if (lookRange === null || !(lookRange >= 1000)) return null;
+  const q = 1000 * 1.25 ** Math.floor(Math.log(lookRange / 1000) / Math.log(1.25));
+  return { r1: 0.8 * q, r2: 1.5625 * q };
+}
+
+/**
+ * Where the ray through the centre of the view meets the ground: the ground
+ * range in metres, or null when it points at the sky. A march along the
+ * bearing in steps of 0.2 % of the range (a 13 m post 10 km out is still
+ * hit), with curvature and refraction as the renderer draws them.
+ */
+export function lookRange(hf: HeightField, eyeAlt: number, yaw: number, pitch: number): number | null {
+  const radius = localRadius(hf.lat);
+  const tanP = Math.tan(pitch * DEG);
+  const maxR = hf.maxRange;
+  if (maxR <= 0) return null;
+  let prev = 2, prevAbove = true;
+  for (let r = 2; r <= maxR; r *= 1.002) {
+    const p = destination(hf.lon, hf.lat, yaw, r, radius);
+    const ray = eyeAlt + r * tanP - curvatureDrop(r, radius);
+    const above = hf.height(p.lon, p.lat, r) < ray;
+    if (!above) {
+      // Bisect between the last sample above ground and this one below.
+      let lo = prev, hi = r;
+      for (let i = 0; i < 12; i++) {
+        const m = (lo + hi) / 2;
+        const q = destination(hf.lon, hf.lat, yaw, m, radius);
+        if (hf.height(q.lon, q.lat, m) < eyeAlt + m * tanP - curvatureDrop(m, radius)) lo = m; else hi = m;
+      }
+      return prevAbove ? (lo + hi) / 2 : r;
+    }
+    prev = r;
+    prevAbove = above;
+  }
+  return null;
 }
 
 /** Ground range of ring `f` (the shader's `radiusAt`). */

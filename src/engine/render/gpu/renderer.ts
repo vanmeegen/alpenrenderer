@@ -56,7 +56,7 @@ import { Camera } from '../../core/camera';
 import { DEG, MERC_PX, REFRACTION_K, effectiveRadiusAt, localRadius } from '../../core/geodesy';
 import { HeightField, Observer } from '../../core/heightfield';
 import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, WATER_COLOR, sunVector } from '../shading';
-import { RadialParams, radialParams } from '../mesh';
+import { Band, RadialParams, radialParams } from '../mesh';
 import {
   COMPOSITE_FRAGMENT_GL, COMPOSITE_VERTEX_GL, TERRAIN_FRAGMENT_GL,
   TERRAIN_SHADE_FRAGMENT_GL, TERRAIN_VERTEX_GL,
@@ -643,9 +643,12 @@ export class GpuRenderer {
 
   // ----------------------------------------------------------------- render
 
-  /** The ring and column layout for the current view: the wedge follows the camera. */
+  /** The telescope's dense band of rings, set by the viewer when zoomed in; null otherwise. */
+  band: Band | null = null;
+
+  /** The ring and column layout for the current view: the wedge follows the camera, the band the zoom. */
   private radialParams(hf: HeightField) {
-    return radialParams(this.quality, hf, this.camera.azimuthArc(4));
+    return radialParams(this.quality, hf, this.camera.azimuthArc(4), this.band);
   }
 
   /** The ring layout the mesh uses now; see render/mesh.ts. */

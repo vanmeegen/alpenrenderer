@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { destination, groundRange, latToMercY, localRadius, lonToMercX } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
 import { QUALITY_HIGH, QUALITY_LOW } from '../../src/engine/render/gpu/renderer';
-import { meshTopNear, radialParams, radiusAt, rowAt, wedge } from '../../src/engine/render/mesh';
+import { bandFor, lookRange, meshTopNear, radialParams, radiusAt, rowAt, wedge } from '../../src/engine/render/mesh';
 
 const LON = 10.0, LAT = 47.0, PLAIN = 1500, SPIKE = 500, EYE = PLAIN + 1.7;
 
@@ -191,5 +191,62 @@ describe('meshTopNear: the summit as the mesh draws it, where and how high', () 
       const p = radialParams(q, hf);
       for (const a of at) expect(meshTopNear(hf, p, a.lon, a.lat, EYE).h).toBeLessThanOrEqual(PLAIN + SPIKE);
     }
+  });
+});
+
+describe('the telescope: a dense band of rings around the distance looked at', () => {
+  test('lookRange: where the centre ray meets the ground, or null for sky', () => {
+    const { hf, at } = field([]);
+    // Above the horizon: sky.
+    expect(lookRange(hf, EYE, 90, 2)).toBeNull();
+    // Level, 1.7 m above a plain: the ray meets the curved ground at the horizon, sqrt(2 R' h) ≈ 5.0 km.
+    expect(Math.abs(lookRange(hf, EYE, 90, 0)! - Math.sqrt(2 * (6371008.8 / 0.87) * 1.7))).toBeLessThan(200);
+    // Looking 1° down from 1.7 m above a plain: the ground 97 m out.
+    expect(lookRange(hf, EYE, 90, -1)).toBeCloseTo(1.7 / Math.tan(Math.PI / 180), -1);
+    // A 400 m wall from 4.94 km on, looked at 2° up: the ray meets its front, about 4.94 km out.
+    const walled = new HeightField(LON, LAT);
+    const z = 13, w = 2048, hh = 2048;
+    const px0 = Math.round(lonToMercX(LON, z)) - w / 2, py0 = Math.round(latToMercY(LAT, z)) - hh / 2;
+    const raw = new Uint16Array(w * hh).fill(PLAIN + 1000);
+    const front = destination(LON, LAT, 90, 4940, localRadius(LAT));
+    const xf = Math.floor(lonToMercX(front.lon, z) - px0), yc = Math.floor(latToMercY(LAT, z) - py0);
+    for (let y = yc - 20; y <= yc + 20; y++) for (let x = xf; x < xf + 40; x++) raw[y * w + x] = 1900 + 1000;
+    walled.addLevel({ z, px0, py0, w, h: hh, quant: 1, bias: -1000 }, raw, true);
+    const r = lookRange(walled, EYE, 90, 2);
+    expect(r).not.toBeNull();
+    expect(r!).toBeGreaterThan(4900);
+    expect(r!).toBeLessThan(4960);
+    void at;
+  });
+
+  test('bandFor quantises the distance in steps of 1.25, so panning across a slope does not move the rings', () => {
+    expect(bandFor(10000)).toEqual(bandFor(10800));
+    expect(bandFor(10000)).not.toEqual(bandFor(13000));
+    const b = bandFor(10000)!;
+    expect(b.r1).toBeLessThan(10000 * 0.8);
+    expect(b.r2).toBeGreaterThan(10000 * 1.2);
+    expect(bandFor(null)).toBeNull();
+  });
+
+  test('with a band the rings there are a post apart or finer, and rowAt still inverts radiusAt everywhere', () => {
+    const { hf } = field([]);
+    const band = { r1: 7000, r2: 13000 };
+    for (const q of [QUALITY_HIGH, QUALITY_LOW]) {
+      const p = radialParams(q, hf, null, band);
+      expect(radiusAt(p, p.jNear)).toBeCloseTo(7000, 3);
+      expect(radiusAt(p, p.jSplit)).toBeCloseTo(13000, 3);
+      // Inside the band the step is constant and no coarser than the level's post there (13.3 m here) times two.
+      const step = radiusAt(p, p.jNear + 1) - radiusAt(p, p.jNear);
+      expect(step).toBeCloseTo(radiusAt(p, p.jSplit) - radiusAt(p, p.jSplit - 1), 6);
+      expect(step).toBeLessThanOrEqual(2 * hf.levels[0].res);
+      // The band takes at most 45 % of the rows; the rest still reaches the last level.
+      expect(p.jSplit - p.jNear).toBeLessThanOrEqual(0.45 * q.rows);
+      expect(radiusAt(p, q.rows - 1)).toBeCloseTo(Math.max(hf.maxRange, 13000 * 1.5), 3);
+      for (const f of [0.5, p.jNear - 0.5, p.jNear + 3.25, p.jSplit - 1, p.jSplit + 10.5, q.rows - 2]) {
+        expect(rowAt(p, radiusAt(p, f))).toBeCloseTo(f, 6);
+      }
+    }
+    // Without a band, nothing changes.
+    expect(radialParams(QUALITY_HIGH, hf, null, null)).toEqual(radialParams(QUALITY_HIGH, hf));
   });
 });

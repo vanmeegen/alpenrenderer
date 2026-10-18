@@ -15,7 +15,7 @@ import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
 import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
 import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
-import { meshTopNear } from '../engine/render/mesh';
+import { bandFor, lookRange, meshTopNear } from '../engine/render/mesh';
 import { ClipmapStreamer, ClipmapConfig, DEFAULT_CLIPMAP, LOW_CLIPMAP } from '../engine/sources/clipmap';
 import { TerrariumSource } from '../engine/sources/terrarium';
 import { TileStore } from '../engine/sources/tilestore';
@@ -194,6 +194,7 @@ export class Viewer {
       this.controls.update();
       if (this.sensors.tick(performance.now())) this.viewChanged();
       this.keepLongFov();
+      this.aimTelescope();
       if (this.feed.status.active) this.applyLensFov();
       if (this.visibility && !this.visibility.done) {
         this.visibility.step(VISIBILITY_BUDGET_MS);
@@ -362,6 +363,24 @@ export class Viewer {
 
   private lastAspect = 0;
 
+  /** Zoomed in below this field of view, the rings crowd around the distance looked at (mesh.ts bandFor). */
+  static readonly TELESCOPE_FOV = 30;
+
+  /**
+   * The telescope: zoomed in, a dense band of rings around where the centre
+   * of the view meets the ground, so the summit looked at is drawn with
+   * rings a post apart instead of 1/190 of its range. Quantised in bandFor,
+   * so panning across a slope leaves the rings where they are.
+   */
+  private aimTelescope() {
+    const hf = this.streamer.heightField;
+    const band = this.camera.fov < Viewer.TELESCOPE_FOV && hf.levels.length
+      ? bandFor(lookRange(hf, this.renderer.eyeAltitude, this.camera.yaw, this.camera.pitch))
+      : null;
+    const cur = this.renderer.band;
+    if ((band?.r1 ?? -1) !== (cur?.r1 ?? -1) || (band?.r2 ?? -1) !== (cur?.r2 ?? -1)) this.renderer.band = band;
+  }
+
   /**
    * A phone turned over keeps the angle along its long side: 60° across the
    * sideways screen becomes 60° up the upright one, the same magnification
@@ -486,7 +505,7 @@ export class Viewer {
     this.placed = layoutLabels(this.targets, this.camera, {
       width: cssW, height: cssH, measure: painter.measure,
       lineHeight: painter.style.nameSize + 3, maxLabels: 60, detailed: 6, gap: 5,
-      drawnKey: mesh ? `${mesh.az0.toFixed(9)}:${mesh.azStep.toFixed(12)}` : undefined,
+      drawnKey: mesh ? `${mesh.az0.toFixed(9)}:${mesh.azStep.toFixed(12)}:${mesh.rNearEnd.toFixed(3)}:${mesh.rSplit.toFixed(3)}` : undefined,
     });
     if (this.selected) {
       const id = this.selected.target.peak.id;
