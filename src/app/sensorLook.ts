@@ -98,12 +98,13 @@ export class SensorLook {
     this.active = true;
   }
 
-  /** The view stays where the sensors left it. */
+  /** The view stays where the sensors left it, levelled: a tilt belongs to the device, not to the panorama. */
   stop() {
     this.detach?.();
     this.detach = null;
     this.active = false;
     this.pose.resetFusion();
+    this.camera.set({ roll: 0 });
   }
 
   /** Once per frame; returns whether the camera changed. */
@@ -115,9 +116,10 @@ export class SensorLook {
 
   private apply(): boolean {
     const o = this.pose.orientation;
-    const yaw = o.yaw, pitch = o.pitch + this.offsetPitch;
-    if (yaw === this.camera.yaw && pitch === this.camera.pitch) return false;
-    this.camera.set({ yaw, pitch });
+    const yaw = o.yaw, pitch = o.pitch + this.offsetPitch, roll = o.roll;
+    if (yaw === this.camera.yaw && pitch === this.camera.pitch && roll === this.camera.roll) return false;
+    // Roll too: the camera image's horizon tilts with the phone, so the drawn one must.
+    this.camera.set({ yaw, pitch, roll });
     return true;
   }
 

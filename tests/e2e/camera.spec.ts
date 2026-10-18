@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CAMERA_BOTTOM_Y, CAMERA_FRAME, CAMERA_TOP_Y, STAND, skylineRow } from './fixtures/terrain';
 import { CHROMIUM_ARGS, EXECUTABLE } from './playwright.config';
-import { coverFovY } from '../../src/app/cameraFeed';
+import { renderLensFov } from '../../src/app/cameraFeed';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const TILES = '/tests/e2e/fixtures/tiles/';
@@ -84,7 +84,7 @@ test.describe('camera mode', () => {
     await page.getByRole('button', { name: 'Kamera', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Kamera aus' })).toBeVisible({ timeout: 30_000 });
     // The field of view is the lens angle, cover-cropped into the canvas.
-    const fov = coverFovY(DEFAULT_LENS_FOV, CAMERA_FRAME.width, CAMERA_FRAME.height, W, H);
+    const fov = renderLensFov(DEFAULT_LENS_FOV, CAMERA_FRAME.width, CAMERA_FRAME.height, W, H);
     await expect.poll(() => hashNum(page, 'fov'), { timeout: 30_000 }).toBeCloseTo(fov, 0);
     await expect(page.getByText(/Kamera/).first()).toBeVisible();
 
@@ -115,7 +115,7 @@ test.describe('camera mode', () => {
     const slider = page.getByLabel('Objektiv');
     await expect(slider).toBeVisible({ timeout: 30_000 });
     await slider.fill('70');
-    const fov = coverFovY(70, CAMERA_FRAME.width, CAMERA_FRAME.height, W, H);
+    const fov = renderLensFov(70, CAMERA_FRAME.width, CAMERA_FRAME.height, W, H);
     await expect.poll(() => hashNum(page, 'fov'), { timeout: 30_000 }).toBeCloseTo(fov, 0);
   });
 

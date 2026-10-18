@@ -6,6 +6,8 @@
  * absolute eye altitude in metres; leave it out to stand on the ground.
  */
 
+import { fovForAspect } from '../engine/core/camera';
+
 export interface ViewState {
   lon: number;
   lat: number;
@@ -107,9 +109,11 @@ export function writeLastView(v: ViewState, storage = defaultStorage()) {
  * the caller asks for it; until it arrives, and when it is refused, the view
  * last shown here stands, or the default place.
  */
-export function startView(hash: string, storage = defaultStorage()): { view: ViewState; locate: boolean } {
-  if (hasStandpoint(hash)) return { view: readHash(hash), locate: false };
-  return { view: readHash(hash, readLastView(storage) ?? DEFAULT_VIEW), locate: true };
+export function startView(hash: string, storage = defaultStorage(), aspect = 1): { view: ViewState; locate: boolean } {
+  // No field of view anywhere: 60° along the screen's long side (camera.ts fovForAspect).
+  const fallback = { ...DEFAULT_VIEW, fov: fovForAspect(DEFAULT_VIEW.fov, aspect) };
+  if (hasStandpoint(hash)) return { view: readHash(hash, fallback), locate: false };
+  return { view: readHash(hash, readLastView(storage) ?? fallback), locate: true };
 }
 
 export function formatHash(v: ViewState): string {

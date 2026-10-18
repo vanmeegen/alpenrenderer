@@ -11,15 +11,19 @@
 
 import type { CaptureResult } from '../engine/render/gpu/renderer';
 
-/** Typical rear-camera vertical FOV in a 4:3 frame. A starting point, not a fact. */
-export const DEFAULT_LENS_FOV = 51;
+/**
+ * Typical rear-camera field of view along the long side of its frame (a
+ * 26 mm-equivalent lens: 66° across the 4:3 sensor, and a 16:9 stream keeps
+ * that side). A starting point, not a fact; the "Objektiv" slider corrects it.
+ */
+export const DEFAULT_LENS_FOV = 66;
 
 export interface FeedStatus {
   active: boolean;
   label: string | null;
   width: number;
   height: number;
-  /** Vertical field of view of the lens in degrees, estimated or set by hand. */
+  /** Field of view of the lens along the long side of its frame, degrees, estimated or set by hand. */
   fovY: number;
   fovSource: 'default' | 'reported' | 'manual';
 }
@@ -36,6 +40,21 @@ export function coverFovY(fovY: number, videoW: number, videoH: number, elemW: n
   if (elemAspect <= videoAspect) return fovY;
   const tanY = Math.tan((fovY * Math.PI) / 360);
   return (2 * Math.atan(tanY * (videoAspect / elemAspect)) * 180) / Math.PI;
+}
+
+/**
+ * The frame's vertical angle for a lens angle `longFov` along its long side:
+ * held sideways the long side is the width and the vertical angle follows
+ * the aspect; upright it is the height and the lens angle itself.
+ */
+export function lensFovY(longFov: number, videoW: number, videoH: number): number {
+  if (!videoW || !videoH || videoW <= videoH) return longFov;
+  return (2 * Math.atan(Math.tan((longFov * Math.PI) / 360) * (videoH / videoW)) * 180) / Math.PI;
+}
+
+/** What the panorama renders at: the lens's vertical angle, cover-cropped into the canvas. */
+export function renderLensFov(longFov: number, videoW: number, videoH: number, elemW: number, elemH: number): number {
+  return coverFovY(lensFovY(longFov, videoW, videoH), videoW, videoH, elemW, elemH);
 }
 
 export function captureFilename(lon: number, lat: number, bearing: number, at = new Date()): string {
@@ -88,8 +107,8 @@ export class CameraFeed {
     this.status.width = st.width ?? this.video.videoWidth;
     this.status.height = st.height ?? this.video.videoHeight;
     if (st.focalLength && this.status.fovSource === 'default') {
-      // A few Android builds report the optics. Assume a 1/2.55" sensor, ~4.7 mm tall.
-      this.status.fovY = 2 * Math.atan(4.7 / 2 / st.focalLength) * (180 / Math.PI);
+      // A few Android builds report the optics. Assume a 1/2.55" sensor, 6.3 mm along its long side.
+      this.status.fovY = 2 * Math.atan(6.3 / 2 / st.focalLength) * (180 / Math.PI);
       this.status.fovSource = 'reported';
     }
   }
@@ -99,10 +118,14 @@ export class CameraFeed {
     this.status.fovSource = 'manual';
   }
 
-  /** Vertical FOV to render at for a canvas of this size. */
+  /**
+   * Vertical FOV to render at for a canvas of this size. The frame's current
+   * dimensions, not the ones at start: a phone turned over delivers the
+   * frame the other way round.
+   */
   renderFovY(elemW: number, elemH: number): number {
-    return coverFovY(this.status.fovY, this.status.width || this.video.videoWidth,
-      this.status.height || this.video.videoHeight, elemW, elemH);
+    const w = this.video.videoWidth || this.status.width, h = this.video.videoHeight || this.status.height;
+    return renderLensFov(this.status.fovY, w, h, elemW, elemH);
   }
 
   stop() {

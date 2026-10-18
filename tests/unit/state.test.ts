@@ -151,6 +151,13 @@ describe('where the app starts', () => {
     // A view-only hash keeps its angles on the remembered standpoint, and still asks.
     expect(startView('#yaw=10&fov=30', s)).toEqual({ view: { ...last, yaw: 10, fov: 30 }, locate: true });
   });
+
+  test('without a field of view anywhere, the screen\'s long side gets 60°: a sideways phone 60° across, an upright one 60° high', () => {
+    expect(startView('', mem(), 0.5).view.fov).toBe(60);
+    expect(startView('', mem(), 2).view.fov).toBeCloseTo(2 * Math.atan(Math.tan(Math.PI / 6) / 2) * 180 / Math.PI, 9);
+    expect(startView('#lon=10&lat=47', mem(), 2).view.fov).toBeCloseTo(32.2, 1);
+    expect(startView('#lon=10&lat=47&fov=60', mem(), 2).view.fov).toBe(60);
+  });
 });
 
 describe('places', () => {

@@ -729,6 +729,21 @@ einen CSS-Pixel breit statt eines Gerätepixels. Tests: `shading.test.ts`
 „the light stands behind the viewer's left shoulder…“, `state.test.ts`
 „contour lines…“, `app.spec.ts` „ridge lines … a slider sets how strongly“.
 
+**C5 (in Arbeit):** Der Roll der Sensoren geht in die Kamera (bisher
+bewusst weggelassen): kippt das Handy um die Blickachse, kippt der
+gezeichnete Horizont mit dem im Kamerabild; ohne Sensoren steht die Ansicht
+wieder waagerecht. Der Objektiv-Bildwinkel bezieht sich auf die lange
+Bildseite (Default 66°, ein 26-mm-Äquivalent), der vertikale Winkel folgt
+dem Seitenverhältnis des aktuellen Frames (`lensFovY`, `renderLensFov` in
+cameraFeed.ts) – vorher fest 51° vertikal für ein 4:3-Bild bei einem
+16:9-Stream, und bei gedrehtem Gerät falsch. Der Default-Bildwinkel des
+Panoramas ist ebenfalls der der langen Bildseite (60°, `fovForAspect`):
+quer 60° breit, hochkant 60° hoch, und beim Drehen bleibt die Vergrößerung
+(`keepLongFov`). Tests: `sensorLook.test.ts` „the device's roll tilts the
+view…“, `camera.test.ts` „the lens angle is the long side's…“, „the
+panorama's default field of view is the long side's too“, `state.test.ts`
+„without a field of view anywhere…“.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

@@ -7,7 +7,7 @@
  */
 
 import { AlignResult, DEFAULT_PROFILE, PHOTO_SKYLINE, alignPhoto, extractSkyline, horizonProfile } from '../engine/core/align';
-import { Camera } from '../engine/core/camera';
+import { Camera, fovForAspect, longFovOf } from '../engine/core/camera';
 import { VisibilityJob } from '../engine/core/horizon';
 import { LabelTarget, PlacedLabel, buildTargets, layoutLabels, pickLabel } from '../engine/core/labels';
 import { Peak } from '../engine/core/peaks';
@@ -193,6 +193,7 @@ export class Viewer {
       if (this.disposed) return;
       this.controls.update();
       if (this.sensors.tick(performance.now())) this.viewChanged();
+      this.keepLongFov();
       if (this.feed.status.active) this.applyLensFov();
       if (this.visibility && !this.visibility.done) {
         this.visibility.step(VISIBILITY_BUDGET_MS);
@@ -357,6 +358,24 @@ export class Viewer {
     if (Math.abs(fov - this.camera.fov) < 0.01) return;
     this.camera.set({ fov });
     this.viewChanged();
+  }
+
+  private lastAspect = 0;
+
+  /**
+   * A phone turned over keeps the angle along its long side: 60° across the
+   * sideways screen becomes 60° up the upright one, the same magnification
+   * either way. Only when the screen flips between landscape and portrait;
+   * the camera's own lens angle is handled by applyLensFov.
+   */
+  private keepLongFov() {
+    const a = this.camera.aspect;
+    if (!a) return;
+    if (this.lastAspect && (a > 1) !== (this.lastAspect > 1) && !this.feed.status.active && !this.photo) {
+      this.camera.set({ fov: fovForAspect(longFovOf(this.camera.fov, this.lastAspect), a) });
+      this.viewChanged();
+    }
+    this.lastAspect = a;
   }
 
   /** A PNG of the view with its labels, saved through the share sheet or as a download. */

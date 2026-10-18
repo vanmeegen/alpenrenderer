@@ -35,7 +35,7 @@ export function App() {
   const viewerRef = useRef<Viewer | null>(null);
   const [status, setStatus] = useState<ViewerStatus | null>(null);
   // A standpoint in the URL stands; without one, the last view shows while the device is asked.
-  const [start] = useState(() => startView(location.hash));
+  const [start] = useState(() => startView(location.hash, undefined, window.innerWidth / Math.max(1, window.innerHeight)));
   const [view, setView] = useState<ViewState>(start.view);
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'settings' | 'map'>('none');

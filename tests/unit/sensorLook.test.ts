@@ -38,6 +38,28 @@ function settle(s: SensorLook, reading: { alpha: number; beta: number; gamma: nu
 }
 
 describe('SensorLook', () => {
+  test('the device\'s roll tilts the view, and the view is level again once the sensors are off', async () => {
+    // A phone upright and turned 15° about the view axis: the horizon in the
+    // camera image is tilted, so the drawn one must be too, or the skyline
+    // leaves the ridge it belongs to. Deliberately not applied before (plan
+    // §4 2026-09): from here on it is.
+    const { cam, s } = setup();
+    await s.start();
+    settle(s, upright(0));
+    expect(Math.abs(cam.roll)).toBeLessThan(0.5);
+    // Upright, facing magnetic north, rolled 15° about the view axis. In the
+    // W3C's Z-X'-Y'' angles that is alpha 90, beta 90 − 15, gamma −90 (the
+    // device's X now points up-east, its Y up-west; worked out from the
+    // rotation matrix, not guessed).
+    settle(s, { alpha: 90, beta: 75, gamma: -90, absolute: true }, 3, 3000);
+    expect(Math.abs(angleDelta(cam.yaw, declinationAt(10.0, 47.0)))).toBeLessThan(1);
+    expect(Math.abs(cam.pitch)).toBeLessThan(1);
+    expect(Math.abs(Math.abs(cam.roll) - 15)).toBeLessThan(1.5);
+    s.stop();
+    expect(cam.roll).toBe(0);
+  });
+
+
   test('inactive, the sensors leave the camera alone', () => {
     const { cam, s } = setup();
     expect(settle(s, upright(90))).toBe(false);

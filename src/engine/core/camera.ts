@@ -134,6 +134,24 @@ export class Camera {
   }
 }
 
+/**
+ * The vertical field of view that gives `longFov` degrees along the longer
+ * side of a screen of this aspect (width/height): the horizontal on a
+ * landscape screen, the vertical on a portrait one. udeuschle's default is
+ * 60° across; a phone held upright or sideways should show the same
+ * magnification, not 32° across one way and 98° the other.
+ */
+export function fovForAspect(longFov: number, aspect: number): number {
+  if (aspect <= 1) return longFov;
+  return (2 * Math.atan(Math.tan((longFov * DEG) / 2) / aspect)) / DEG;
+}
+
+/** The long side's angle for a vertical `fov` on a screen of this aspect: the inverse of fovForAspect. */
+export function longFovOf(fov: number, aspect: number): number {
+  if (aspect <= 1) return fov;
+  return (2 * Math.atan(Math.tan((fov * DEG) / 2) * aspect)) / DEG;
+}
+
 function mul4(out: Float32Array, a: Float32Array, b: Float32Array) {
   for (let c = 0; c < 4; c++) {
     for (let r = 0; r < 4; r++) {
