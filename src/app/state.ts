@@ -50,10 +50,17 @@ const num = (v: string | null, d: number): number => {
   return Number.isFinite(n) ? n : d;
 };
 
-export function readHash(hash = location.hash): ViewState {
+/** Whether the hash says where to stand: a standpoint, or a named place. */
+export function hasStandpoint(hash: string): boolean {
+  const q = new URLSearchParams(hash.replace(/^#/, ''));
+  return (q.has('lon') && q.has('lat')) || PLACES.some((p) => p.id === q.get('p'));
+}
+
+/** The view the hash describes; what it leaves out comes from `fallback`. */
+export function readHash(hash = location.hash, fallback = DEFAULT_VIEW): ViewState {
   const q = new URLSearchParams(hash.replace(/^#/, ''));
   const place = PLACES.find((p) => p.id === q.get('p'));
-  const base = place ? { ...DEFAULT_VIEW, lon: place.lon, lat: place.lat, yaw: place.yaw } : DEFAULT_VIEW;
+  const base = place ? { ...fallback, lon: place.lon, lat: place.lat, yaw: place.yaw } : fallback;
   const alt = q.get('alt');
   return {
     lon: num(q.get('lon'), base.lon),
@@ -63,6 +70,46 @@ export function readHash(hash = location.hash): ViewState {
     pitch: Math.max(-89, Math.min(89, num(q.get('pitch'), base.pitch))),
     fov: Math.max(5, Math.min(110, num(q.get('fov'), base.fov))),
   };
+}
+
+const defaultStorage = (): Storage | undefined => {
+  try { return typeof localStorage !== 'undefined' ? localStorage : undefined; } catch { return undefined; }
+};
+
+const LAST_VIEW_KEY = 'alp.lastView';
+
+/** The view last shown on this device, or null. */
+export function readLastView(storage = defaultStorage()): ViewState | null {
+  try {
+    const raw = storage?.getItem(LAST_VIEW_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<ViewState>;
+    const keys = ['lon', 'lat', 'yaw', 'pitch', 'fov'] as const;
+    if (!keys.every((k) => Number.isFinite(v[k]))) return null;
+    const out: ViewState = { lon: v.lon!, lat: v.lat!, yaw: v.yaw!, pitch: v.pitch!, fov: v.fov! };
+    if (Number.isFinite(v.alt)) out.alt = v.alt;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+export function writeLastView(v: ViewState, storage = defaultStorage()) {
+  const out: Partial<ViewState> = { lon: v.lon, lat: v.lat, yaw: v.yaw, pitch: v.pitch, fov: v.fov };
+  if (v.alt !== undefined) out.alt = v.alt;
+  try { storage?.setItem(LAST_VIEW_KEY, JSON.stringify(out)); } catch { /* private mode: not remembered */ }
+}
+
+/**
+ * Where the app opens. A standpoint in the URL is the standpoint, as before
+ * (a shared link, a reload). Without one, the device's position is what a
+ * person on a mountain wants (PeakFinder and PeakVisor open on the GPS), so
+ * the caller asks for it; until it arrives, and when it is refused, the view
+ * last shown here stands, or the default place.
+ */
+export function startView(hash: string, storage = defaultStorage()): { view: ViewState; locate: boolean } {
+  if (hasStandpoint(hash)) return { view: readHash(hash), locate: false };
+  return { view: readHash(hash, readLastView(storage) ?? DEFAULT_VIEW), locate: true };
 }
 
 export function formatHash(v: ViewState): string {
@@ -113,10 +160,6 @@ export function readOptions(search = location.search): AppOptions {
  */
 export const EYE_HEIGHT = { min: 1.7, max: 500, initial: 1.7 };
 const EYE_HEIGHT_KEY = 'alp.eyeHeight';
-
-const defaultStorage = (): Storage | undefined => {
-  try { return typeof localStorage !== 'undefined' ? localStorage : undefined; } catch { return undefined; }
-};
 
 /** Clamped to the slider, to a tenth of a metre. */
 export function clampEyeHeight(m: number): number {

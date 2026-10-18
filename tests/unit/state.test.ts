@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_VIEW, EYE_HEIGHT, PLACES, eyeHeightFromSlider, formatHash, readEyeHeight, readHash, readOptions, sliderFromEyeHeight, writeEyeHeight } from '../../src/app/state';
+import { DEFAULT_VIEW, EYE_HEIGHT, PLACES, eyeHeightFromSlider, formatHash, hasStandpoint, readEyeHeight, readHash, readLastView, readOptions, sliderFromEyeHeight, startView, writeEyeHeight, writeLastView } from '../../src/app/state';
 
 describe('readHash', () => {
   test('empty hash is the default view', () => {
@@ -96,6 +96,43 @@ describe('eye height: metres above the ground under the standpoint', () => {
     expect(eyeHeightFromSlider(100)).toBeCloseTo(500, 6);
     expect(eyeHeightFromSlider(50)).toBeCloseTo(Math.sqrt(1.7 * 500), 6);
     for (const t of [0, 13, 50, 87, 100]) expect(sliderFromEyeHeight(eyeHeightFromSlider(t))).toBeCloseTo(t, 6);
+  });
+});
+
+describe('where the app starts', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); } } as unknown as Storage;
+  };
+
+  test('a hash with a standpoint, or a place, counts as one; an empty or view-only hash does not', () => {
+    expect(hasStandpoint('#lon=10&lat=47')).toBe(true);
+    expect(hasStandpoint('#p=sonnenspitz')).toBe(true);
+    expect(hasStandpoint('')).toBe(false);
+    expect(hasStandpoint('#yaw=90&fov=30')).toBe(false);
+    expect(hasStandpoint('#lon=10')).toBe(false);
+  });
+
+  test('the last view is remembered and read back; nothing stored gives null', () => {
+    const s = mem();
+    expect(readLastView(s)).toBeNull();
+    const v = { lon: 11.7, lat: 47.44, yaw: 200, pitch: 5, fov: 45 };
+    writeLastView(v, s);
+    expect(readLastView(s)).toEqual(v);
+    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(readLastView(broken)).toBeNull();
+    expect(() => writeLastView(v, broken)).not.toThrow();
+  });
+
+  test('the hash wins, then the last view, then the default; without a standpoint the device is to be asked', () => {
+    const s = mem();
+    const last = { lon: 11.7, lat: 47.44, yaw: 200, pitch: 5, fov: 45 };
+    writeLastView(last, s);
+    expect(startView('#lon=10&lat=47&yaw=90', s)).toMatchObject({ view: { lon: 10, lat: 47, yaw: 90 }, locate: false });
+    expect(startView('', s)).toEqual({ view: last, locate: true });
+    expect(startView('', mem())).toEqual({ view: DEFAULT_VIEW, locate: true });
+    // A view-only hash keeps its angles on the remembered standpoint, and still asks.
+    expect(startView('#yaw=10&fov=30', s)).toEqual({ view: { ...last, yaw: 10, fov: 30 }, locate: true });
   });
 });
 

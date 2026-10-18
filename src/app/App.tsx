@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
-import { EYE_HEIGHT, eyeHeightFromSlider, formatHash, PLACES, readHash, readOptions, sliderFromEyeHeight, ViewState } from './state';
+import { EYE_HEIGHT, eyeHeightFromSlider, formatHash, PLACES, readHash, readOptions, sliderFromEyeHeight, startView, ViewState, writeLastView } from './state';
 import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
@@ -34,7 +34,9 @@ export function App() {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const [status, setStatus] = useState<ViewerStatus | null>(null);
-  const [view, setView] = useState<ViewState>(() => readHash());
+  // A standpoint in the URL stands; without one, the last view shows while the device is asked.
+  const [start] = useState(() => startView(location.hash));
+  const [view, setView] = useState<ViewState>(start.view);
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'settings' | 'map'>('none');
   const [menuOpen, setMenuOpen] = useState(true);
@@ -60,7 +62,7 @@ export function App() {
     let hashTimer = 0;
     const opt = readOptions();
 
-    Viewer.create(canvas, opt, readHash(), overlayRef.current).then((v) => {
+    Viewer.create(canvas, opt, start.view, overlayRef.current).then((v) => {
       if (cancelled) { v.dispose(); return; }
       viewer = v;
       viewerRef.current = v;
@@ -72,6 +74,7 @@ export function App() {
       v.onSelect = (p) => setPeak(p);
       v.onView = (nv) => {
         setView(nv);
+        writeLastView(nv);
         clearTimeout(hashTimer);
         hashTimer = window.setTimeout(() => {
           history.replaceState(null, '', formatHash(nv));
@@ -79,6 +82,7 @@ export function App() {
       };
       setEyeHeight(v.eyeHeight);
       v.start();
+      if (start.locate) void locateHere();
       // Debug handle for the console and for headless checks.
       (window as unknown as Record<string, unknown>).alp = v;
     }).catch((e) => setError(e instanceof Error ? e.message : String(e)));

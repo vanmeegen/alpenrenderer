@@ -665,6 +665,15 @@ Tests: `state.test.ts` „1.7 m by default…“, „the slider is logarithmic�
 Testhorn's flank the eye stands 1.7 m over the slope“, „the eye height is a
 logarithmic slider“ (rot gegen den alten Stand: Auge +9 m bzw. +1000 m).
 
+**C2 (erledigt):** Ohne Standpunkt in der URL startet die App am
+Gerätestandort (`startView` in `state.ts`: Hash gewinnt, sonst letzter
+Standpunkt aus `localStorage`, sonst Gornergrat; dazu `locateChecked` mit
+den bestehenden Prüfungen und der Hilfebox). Jede Ansicht wird als letzter
+Standpunkt gemerkt (`writeLastView`). Tests: `state.test.ts` „where the app
+starts“; `map.spec.ts` „the app starts at the device position when the URL
+names none“, „a standpoint in the URL is kept and the device is not asked“,
+„refused, the last standpoint stands and the help shows“.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

@@ -116,6 +116,49 @@ test.describe('GPS', () => {
   });
 });
 
+test.describe('start without a standpoint', () => {
+  test.use({
+    geolocation: { longitude: STAND.lon + 0.002, latitude: STAND.lat + 0.001 },
+    permissions: ['geolocation'],
+  });
+  const noHash = `/dist/?${new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', q: 'high' })}`;
+
+  test('the app starts at the device position when the URL names none', async ({ page }) => {
+    // PeakFinder and PeakVisor open on the GPS; a default place is for the desktop.
+    await page.goto(noHash);
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 60_000 }).toBeCloseTo(STAND.lon + 0.002, 4);
+    await expect.poll(() => hashNum(page, 'lat'), { timeout: 60_000 }).toBeCloseTo(STAND.lat + 0.001, 4);
+    await ready(page);
+    await expect(page.getByText(/GPS/)).toBeVisible();
+  });
+
+  test('a standpoint in the URL is kept and the device is not asked', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as any).__asked = 0;
+      const real = navigator.geolocation.getCurrentPosition.bind(navigator.geolocation);
+      navigator.geolocation.getCurrentPosition = (ok, fail, o) => { (window as any).__asked++; real(ok, fail, o); };
+    });
+    await page.goto(url());
+    await ready(page);
+    expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon, 4);
+    expect(await page.evaluate(() => (window as any).__asked)).toBe(0);
+  });
+
+  test('refused, the last standpoint stands and the help shows', async ({ page }) => {
+    await page.addInitScript(([lon, lat]) => {
+      localStorage.setItem('alp.lastView', JSON.stringify({ lon, lat, yaw: 90, pitch: 0, fov: 60 }));
+      navigator.geolocation.getCurrentPosition = (_ok, fail) => {
+        fail?.({ code: 1, message: 'denied', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError);
+      };
+    }, [STAND.lon, STAND.lat]);
+    await page.goto(noHash);
+    await ready(page);
+    expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon, 4);
+    await expect(page.getByText('Standort nicht verfügbar: Zugriff verweigert.')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('note', { name: 'Standort-Hilfe' })).toContainText('Berechtigungen → Standort');
+  });
+});
+
 test.describe('GPS blocked for the site', () => {
   test('"Mein Standort" in the Standpunkt menu shows how to unblock it, without a doomed request', async ({ page }) => {
     // The site setting says "blocked": the Permissions API tells before any request.

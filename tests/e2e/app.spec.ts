@@ -124,7 +124,7 @@ test.describe('loading', () => {
     // Half way along is the geometric middle: sqrt(1.7 · 500) = 29.2 m.
     await slider.fill('50');
     const middle = Math.sqrt(1.7 * 500);
-    await expect(page.getByText(`Augenhöhe ${Math.round(middle)} m`)).toBeVisible();
+    await expect(page.getByText(`Augenhöhe ${middle.toFixed(1).replace('.', ',')} m`)).toBeVisible();
     await expect.poll(lifted).toBeGreaterThan(20);
     expect(Math.abs((await lifted()) - middle)).toBeLessThan(0.1);
     await slider.fill('100');
