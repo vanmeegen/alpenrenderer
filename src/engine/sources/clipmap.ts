@@ -163,17 +163,18 @@ export class ClipmapStreamer {
     }
   }
 
-  /** The telescope is put down: its windows are empty again and the GPU skips them. */
+  /** The telescope is put down: its windows are empty again and the GPU skips them. Idle when they already are. */
   clearLook() {
-    this.lookAbort?.abort();
-    this.lookGeneration++;
+    let changed = false;
     this.lookLevels.forEach((lv, i) => {
       if (!lv.filled && !this.lookLoaded[i]) return;
       lv.filled = false;
       lv.version++;
       this.lookLoaded[i] = null;
+      changed = true;
     });
-    if (this.lookLevels.length) this.onUpdate?.(this.levels.length);
+    if (this.lookAbort) { this.lookAbort.abort(); this.lookAbort = null; this.lookGeneration++; changed = true; }
+    if (changed) this.onUpdate?.(this.levels.length);
   }
 
   /** Ground sample distance of each level at the current latitude, metres. */
