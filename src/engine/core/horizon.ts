@@ -16,7 +16,7 @@
 
 import { curvatureDrop, destination, localRadius, REFRACTION_K } from './geodesy';
 import { HeightField } from './heightfield';
-import type { LabelTarget } from './labels';
+import { LabelTarget, pinAt } from './labels';
 
 export interface HorizonOptions {
   /** Samples along each sightline. */
@@ -40,6 +40,21 @@ export interface HorizonOptions {
    */
   endFrac: number;
   endPosts: number;
+  /**
+   * A summit a little behind the visible edge of its own mountain is seen as
+   * that mountain (the Haidachstellwand from the Mauritzalm: the summit point
+   * 24 m higher but 114 m behind the top edge of the wall, 0.4° under the
+   * sightline). The edge counts as the summit's own when the march's maximum
+   * lies in the last `crestFrom` of the way or within `crestNear` metres of
+   * the anchor, the summit is at most `crestDrop` degrees below it, and the
+   * ground between edge and summit never dips more than `crestDip` metres
+   * below the edge: a shoulder, not a separate ridge with a valley behind.
+   * The pin then goes onto the edge, the label keeps the summit's range.
+   */
+  crestFrom: number;
+  crestNear: number;
+  crestDrop: number;
+  crestDip: number;
 }
 
 export const DEFAULT_HORIZON: HorizonOptions = {
@@ -48,6 +63,10 @@ export const DEFAULT_HORIZON: HorizonOptions = {
   k: REFRACTION_K,
   endFrac: 0.015,
   endPosts: 2,
+  crestFrom: 0.8,
+  crestNear: 300,
+  crestDrop: 1.5,
+  crestDip: 15,
 };
 
 /** What the march along a sightline found: the highest apparent elevation on the way and where. */
@@ -57,6 +76,8 @@ export interface March {
   rMax: number;
   /** Its height, metres. */
   hMax: number;
+  /** Ground range of the sample before the highest one, metres. */
+  rPrev: number;
 }
 
 /**
@@ -82,22 +103,67 @@ export function march(t: LabelTarget, hf: HeightField, eyeAlt: number, opt: Hori
   const r0 = Math.min(80, range * 0.02);
   const end = Math.max(r0 * 1.001, range - Math.max(opt.endFrac * range, opt.endPosts * hf.resAt(range)));
   const ratio = Math.log(end / r0) / (opt.steps - 1);
-  const m: March = { maxElev: -90, rMax: 0, hMax: 0 };
+  const m: March = { maxElev: -90, rMax: 0, hMax: 0, rPrev: r0 };
+  let prev = r0;
   for (let i = 0; i < opt.steps; i++) {
     const r = r0 * Math.exp(i * ratio);
     const p = destination(hf.lon, hf.lat, t.bearing, r, radius);
     const h = hf.height(p.lon, p.lat, r);
     const elev = elevationAt(h, r, eyeAlt, radius, opt.k);
-    if (elev > m.maxElev) { m.maxElev = elev; m.rMax = r; m.hMax = h; }
+    if (elev > m.maxElev) { m.maxElev = elev; m.rMax = r; m.hMax = h; m.rPrev = prev; }
+    prev = r;
   }
   return m;
 }
 
-/** Decides one target's sightline; true when the summit stands above everything in front of it. */
-function sightlineClear(t: LabelTarget, hf: HeightField, eyeAlt: number, opt: HorizonOptions, radius: number): boolean {
+/**
+ * The visible edge of a summit's own mountain, when that is what hides the
+ * summit (HorizonOptions.crestFrom..crestDip); null when a separate ridge
+ * does, or the summit is well below its rim. The ground between the march's
+ * highest sample and the anchor is walked again post by post: the march's
+ * samples are up to a spacing apart (1.8 km at 30 km), which both misplaces
+ * the edge and lets a valley slip between two of them.
+ */
+export function ownCrest(
+  t: LabelTarget, m: March, hf: HeightField, eyeAlt: number, opt: HorizonOptions, radius: number,
+): { lon: number; lat: number; h: number } | null {
+  const range = t.range;
+  if (m.rMax < Math.min(opt.crestFrom * range, range - opt.crestNear)) return null;
+  const from = Math.max(1, m.rPrev), to = range;
+  const step = Math.max(hf.resAt(m.rMax), (to - from) / 128);
+  const n = Math.max(1, Math.ceil((to - from) / step));
+  let crest = { r: m.rMax, h: m.hMax, elev: m.maxElev };
+  const walked: { r: number; h: number }[] = [];
+  for (let i = 0; i <= n; i++) {
+    const r = Math.min(to, from + i * step);
+    const p = destination(hf.lon, hf.lat, t.bearing, r, radius);
+    const h = hf.height(p.lon, p.lat, r);
+    walked.push({ r, h });
+    const elev = elevationAt(h, r, eyeAlt, radius, opt.k);
+    if (elev > crest.elev) crest = { r, h, elev };
+  }
+  let lowest = crest.h;
+  for (const w of walked) if (w.r >= crest.r && w.h < lowest) lowest = w.h;
+  if (crest.h - lowest > opt.crestDip) return null;
+  if (crest.elev - t.elevation > opt.crestDrop) return null;
+  const p = destination(hf.lon, hf.lat, t.bearing, crest.r, radius);
+  return { lon: p.lon, lat: p.lat, h: crest.h };
+}
+
+/**
+ * Decides one target: visible when the summit stands above everything in
+ * front of it, or when what stands in front is the visible edge of its own
+ * mountain; then the pin moves onto that edge.
+ */
+function decide(t: LabelTarget, hf: HeightField, eyeAlt: number, opt: HorizonOptions, radius: number): boolean {
   if (t.range < 60) return true;
   const m = march(t, hf, eyeAlt, opt, radius);
-  return t.elevation >= m.maxElev - opt.tolerance;
+  if (t.elevation >= m.maxElev - opt.tolerance) return true;
+  if (t.peak.kind === 'lake') return false;
+  const edge = ownCrest(t, m, hf, eyeAlt, opt, radius);
+  if (!edge) return false;
+  pinAt(t, edge, { lon: hf.lon, lat: hf.lat, alt: eyeAlt });
+  return true;
 }
 
 /**
@@ -132,7 +198,7 @@ export class VisibilityJob {
     const t0 = this.now();
     while (this.i < this.targets.length) {
       const t = this.targets[this.i++];
-      t.visible = sightlineClear(t, this.hf, this.eyeAlt, this.opt, this.radius);
+      t.visible = decide(t, this.hf, this.eyeAlt, this.opt, this.radius);
       t.decided = true;
       if (t.visible && t.spot === 0 && t.peak.kind !== 'lake') this.visible++;
       if (this.now() - t0 >= budgetMs) break;

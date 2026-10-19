@@ -66,3 +66,73 @@ describe('a summit the grid flattens', () => {
     expect(Math.abs(t.north - kTop * res)).toBeLessThan(res / 2);
   });
 });
+
+describe('a summit behind the visible edge of its own mountain', () => {
+  // The Haidachstellwand from the Mauritzalm, 1225 m away: the wall rises
+  // 323 m to its top edge 1111 m out, then a shoulder climbs another 24 m
+  // over 114 m to the summit point. The edge stands 16.2° up, the summit
+  // 15.8°: the summit is behind its own edge, but what you see is the
+  // Haidachstellwand, so its name goes on the edge. A summit behind a
+  // separate ridge, with a valley between, stays hidden; so does one well
+  // below its rim.
+  const RANGE = 1225, EDGE = 1111, EDGE_RISE = 323, TOP_RISE = 347;
+  /** Wall and shoulder along north; `dip` metres of valley behind the edge when asked. */
+  const mountain = (dip: number, topRise = TOP_RISE) => (north: number, east: number) => {
+    const w = Math.max(0, 1 - Math.abs(east) / 1500);
+    if (north < 700 || north > RANGE + 300) return PLAIN;
+    let rise: number;
+    if (north <= EDGE) rise = EDGE_RISE * (north - 700) / (EDGE - 700);
+    else if (north <= RANGE) {
+      rise = EDGE_RISE + (topRise - EDGE_RISE) * (north - EDGE) / (RANGE - EDGE);
+      // A notch right behind the edge, 40 m wide.
+      if (dip > 0 && north > EDGE + 20 && north < EDGE + 60) rise -= dip;
+    } else rise = topRise - (topRise - 100) * (north - RANGE) / 300;
+    return PLAIN + rise * w;
+  };
+  const summit = (hf: HeightField, rowLat: (k: number) => number, res: number, ele: number): Peak =>
+    ({ id: 'wand', name: 'Stellwand', lon: LON, lat: rowLat(Math.round(RANGE / res)), ele, prom: 145 });
+
+  test('a summit a little behind its own edge is visible, the pin on the edge, the range the summit\'s', () => {
+    const { hf, res, rowLat } = field(13, 256, mountain(0));
+    const targets = buildTargets([summit(hf, rowLat, res, PLAIN + TOP_RISE)], obs, hf, hf.maxRange);
+    const t = targets[0];
+    const summitRange = t.range;
+    expect(computeVisibility(targets, hf, EYE)).toBe(1);
+    expect(t.visible).toBe(true);
+    expect(t.atCrest).toBe(true);
+    expect(Math.abs(t.north - EDGE)).toBeLessThan(2 * res);
+    expect(Math.abs(t.anchorAlt - (PLAIN + EDGE_RISE))).toBeLessThan(2 * res);
+    // The edge's angle from the formula, within the grid's rounding of where the edge row lies.
+    const edgeElev = Math.atan2(PLAIN + EDGE_RISE - EYE, EDGE) * (180 / Math.PI);
+    expect(Math.abs(t.elevation - edgeElev)).toBeLessThan(0.15);
+    expect(t.range).toBe(summitRange);
+    expect(t.anchor.lat).toBeLessThan(summit(hf, rowLat, res, 0).lat);   // the anchor moved towards the observer
+  });
+
+  test('a separate ridge with a valley behind it keeps hiding the summit', () => {
+    const { hf, res, rowLat } = field(13, 256, mountain(60));
+    const targets = buildTargets([summit(hf, rowLat, res, PLAIN + TOP_RISE)], obs, hf, hf.maxRange);
+    expect(computeVisibility(targets, hf, EYE)).toBe(0);
+    expect(targets[0].atCrest).toBeFalsy();
+  });
+
+  test('a summit well below its rim stays hidden', () => {
+    // The ground falls away behind the edge for 300 m to a catalogued point
+    // 60 m lower: 5.7° below the edge's sightline, and no top within the
+    // anchor search's reach. What you see is the edge, not that point.
+    const DEEP = EDGE + 300;
+    const deep = (north: number, east: number) => {
+      const w = Math.max(0, 1 - Math.abs(east) / 1500);
+      if (north < 700 || north > DEEP + 300) return PLAIN;
+      const rise = north <= EDGE ? EDGE_RISE * (north - 700) / (EDGE - 700) : EDGE_RISE - 60 * (north - EDGE) / 300;
+      return PLAIN + rise * w;
+    };
+    const { hf, res, rowLat } = field(13, 256, deep);
+    const point: Peak = { id: 'tief', name: 'Tiefpunkt', lon: LON, lat: rowLat(Math.round(DEEP / res)), ele: PLAIN + EDGE_RISE - 60, prom: 50 };
+    const targets = buildTargets([point], obs, hf, hf.maxRange);
+    expect(Math.abs(targets[0].range - DEEP)).toBeLessThan(2 * res);   // the anchor stayed on the point
+    expect(computeVisibility(targets, hf, EYE)).toBe(0);
+    expect(targets[0].atCrest).toBeFalsy();
+  });
+});
+

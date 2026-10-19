@@ -9,7 +9,7 @@ import { Camera } from '../../src/engine/core/camera';
 import { latToMercY, lonToMercX, mercYToLat } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
 import { computeVisibility } from '../../src/engine/core/horizon';
-import { buildTargets, fmtEle, fmtRange, layoutLabels, pickLabel } from '../../src/engine/core/labels';
+import { buildTargets, fmtEle, fmtRange, layoutLabels, pickLabel, pinAt } from '../../src/engine/core/labels';
 import { Peak } from '../../src/engine/core/peaks';
 import { lakeLabel } from '../../src/engine/core/water';
 
@@ -375,3 +375,33 @@ describe('which summits get the room: apparent prominence, one label per screen 
     expect(placed.map((p) => p.target.peak.id)).toEqual(['major']);
   });
 });
+
+describe('a pin moved onto the visible edge of its own mountain', () => {
+  test('settles on the drawn surface there and keeps the summit\'s range', () => {
+    // The horizon march found the Mauerspitze hidden behind its own edge
+    // one DEM row nearer (horizon.ts ownCrest) and pins the label there:
+    // the drawn surface is asked at the edge, the text keeps the summit's range.
+    const edgeLat = mercYToLat(latToMercY(wallLat, 8) + 1, 8);
+    const asked: number[] = [];
+    const drawn = (lon: number, lat: number) => { asked.push(lat); return { lon, lat, h: WALL - 40 }; };
+    const t = buildTargets(peaks, obs, hf, hf.maxRange, drawn);
+    const wall = t.find((x) => x.peak.id === 'wall')!;
+    const summitRange = wall.range, summitBearing = wall.bearing, summitRank = wall.rank;
+    pinAt(wall, { lon: LON, lat: edgeLat, h: WALL - 60 }, { lon: LON, lat: LAT, alt: PLAIN + 1.7 });
+    expect(wall.atCrest).toBe(true);
+    expect(wall.anchor.lat).toBeCloseTo(edgeLat, 9);
+    expect(wall.anchorAlt).toBe(WALL - 60);
+    expect(wall.north).toBeCloseTo((edgeLat - LAT) * M_PER_DEG_LAT, -1);
+    expect(wall.range).toBe(summitRange);
+    expect(wall.bearing).toBe(summitBearing);
+    expect(wall.rank).toBe(summitRank);
+    for (const x of t) x.visible = true;
+    const placed = layoutLabels(t, camera(0), opt());
+    const p = placed.find((x) => x.target.peak.id === 'wall')!;
+    expect(asked).toContain(edgeLat);               // the drawn surface at the edge ...
+    expect(asked).not.toContain(wallLat);           // ... not at the summit (the Hinterhorn, now in its own cell, is asked too)
+    expect(p.target.anchorAlt).toBe(WALL - 40);     // as drawn there
+    expect(p.target.range).toBe(summitRange);       // the text still says how far the summit is
+  });
+});
+

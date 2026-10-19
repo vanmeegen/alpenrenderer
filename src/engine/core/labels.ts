@@ -26,6 +26,10 @@ export interface LabelTarget {
   elevation: number;
   /** Altitude the anchor sits at — the DEM's summit, not the catalogue's. */
   anchorAlt: number;
+  /** Where the pin stands: the summit, or the visible edge of its own mountain (horizon.ts ownCrest). */
+  anchor: { lon: number; lat: number };
+  /** The pin was moved onto the visible edge; `range` and the text stay the summit's. */
+  atCrest?: boolean;
   /**
    * How big the feature looks from here, radians: the angle its own rise
    * takes up, atan(prominence / range) for a summit, atan(width / range) for
@@ -42,7 +46,7 @@ export interface LabelTarget {
    * lands on screen and again whenever the drawn surface changes (see
    * buildTargets' `drawn` and LayoutOptions.drawnKey).
    */
-  settle: (() => Pick<LabelTarget, 'east' | 'north' | 'up' | 'range' | 'bearing' | 'elevation' | 'anchorAlt'>) | null;
+  settle: ((self: LabelTarget) => Pick<LabelTarget, 'east' | 'north' | 'up' | 'range' | 'bearing' | 'elevation' | 'anchorAlt'>) | null;
   /** The drawnKey the anchor was last settled for. */
   settledFor?: string;
 }
@@ -130,6 +134,7 @@ export function buildTargets(
         east: o.east, north: o.north, up: o.up,
         range: o.range, bearing: o.bearing, elevation: o.elevation,
         anchorAlt,
+        anchor: { lon: a.lon, lat: a.lat },
         rank: size ? Math.atan2(size, o.range) : 0,
         visible: false,
         decided: false,
@@ -137,11 +142,13 @@ export function buildTargets(
         // Sixteen mesh samples a summit: cheap for the few on screen, a
         // frozen phone for forty thousand at every rebuild. So later.
         settle: drawn && p.kind !== 'lake'
-          ? () => {
-            const d = drawn(a.lon, a.lat);
+          ? (self) => {
+            const d = drawn(self.anchor.lon, self.anchor.lat);
             const s = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye }, { lon: d.lon, lat: d.lat, alt: d.h });
             return {
-              east: s.east, north: s.north, up: s.up, range: s.range,
+              east: s.east, north: s.north, up: s.up,
+              // A pin on the mountain's edge keeps saying how far the summit is.
+              range: self.atCrest ? self.range : s.range,
               bearing: s.bearing, elevation: s.elevation, anchorAlt: d.h,
             };
           }
@@ -172,6 +179,27 @@ export function buildTargets(
  * finds no free slot is dropped rather than allowed to overlap, and leaves
  * its cell to the next.
  */
+/**
+ * Moves a label's pin onto another point of its mountain: the visible edge
+ * the sightline march found in front of a summit hidden a little behind
+ * it (horizon.ts ownCrest). Geometry and height are the edge's; `range`,
+ * `bearing`, `rank` and the text stay the summit's, and the pin settles
+ * onto the drawn surface at the edge like any other.
+ */
+export function pinAt(
+  t: LabelTarget, point: { lon: number; lat: number; h: number }, obs: { lon: number; lat: number; alt: number },
+) {
+  const s = localOffset(obs, { lon: point.lon, lat: point.lat, alt: point.h });
+  t.east = s.east;
+  t.north = s.north;
+  t.up = s.up;
+  t.elevation = s.elevation;
+  t.anchorAlt = point.h;
+  t.anchor = { lon: point.lon, lat: point.lat };
+  t.atCrest = true;
+  t.settledFor = undefined;
+}
+
 export function layoutLabels(
   targets: LabelTarget[], cam: Camera, opt: LayoutOptions,
 ): PlacedLabel[] {
@@ -204,7 +232,7 @@ export function layoutLabels(
     if (taken.has(cellOf(ax, ay))) continue;
     if (t.settle && t.settledFor !== (opt.drawnKey ?? '')) {
       // On screen for the first time, or drawn anew: onto the summit as the mesh draws it.
-      Object.assign(t, t.settle());
+      Object.assign(t, t.settle(t));
       t.settledFor = opt.drawnKey ?? '';
       w = cam.project(t.east, t.north, t.up, ndc);
       if (w <= 0) continue;
