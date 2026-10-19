@@ -900,7 +900,13 @@ summit a little behind its own edge is visible…“ (mit Gegentests Tal und
 tiefe Kuppe), `labels.test.ts` „a pin moved onto the visible edge…“,
 `labels.spec.ts` „a summit behind its own shoulder is labelled on its
 visible edge…“ auf dem neuen Fixture-Berg „Schulterkopf“ (145°, Kuppe
-1,2° hinter der Kante). Messung nachher: (folgt).
+1,2° hinter der Kante). Messung nachher von der Mauritzalm, beide
+Qualitäten: Gschöllkopf sichtbar und platziert, Nadel auf dem Gipfel (die
+Rand-Regel reicht); Haidachstellwand sichtbar mit der Nadel auf der Kante
+94–100 m vor dem Gipfelpunkt (2172 m, 16,3°) und platziert, sobald sie im
+Bild ist; Hochiss, Streichkopf, Seekarlspitze bleiben verdeckt; keine
+Kanten-Nadel innerhalb 150 m eines anderen sichtbaren Ziels. Volle
+E2E-Suite 61/61 grün.
 
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
