@@ -862,6 +862,46 @@ wo beim 11,6°-Tele Fels steht) und prüft jetzt das Richtige: nach dem
 Schließen beleuchtetes Gelände statt Foto-Grau, nach dem Weiten per URL
 blauer Himmel.
 
+### 8.ab Nahe Gipfel hinter der eigenen Kante (Mauritzalm, 2026-10-19)
+
+Von der Mauritzalm waren Haidachstellwand und Gschöllkopf nicht
+beschriftet, obwohl man sie direkt vor sich hat. Messung mit echten
+Kacheln (Standpunkt 47,44379° N 11,76411° O, Boden 1841 m, Auge 1843 m;
+beide im Katalog mit Schartenhöhe, Anker und Rang in Ordnung):
+
+| Gipfel | Entfernung, Höhe im Bild | Marsch-Maximum | Ursache |
+|---|---|---|---|
+| Gschöllkopf 2039 m | 367 m, 28,01° | 28,27° bei 361 m (99 %) | eigene Zelle: der Marsch endete 1,5 % vor dem Anker (5,5 m, weniger als ein 13-m-Posten); bei 6,6-m-Posten beschriftet |
+| Haidachstellwand 2192 m | 1225 m, 15,82° | 16,23° bei 1111 m (91 %, 2166 m) | eigene Kante: Gipfelpunkt 24 m höher, aber 114 m hinter der Oberkante der Wand, Flanke dahinter 12° flacher als die Sichtlinie 16°; bei beiden Auflösungen gleich |
+| Hochiss 2299 m (Vergleich) | 1633 m, 15,5° | 25,8° bei 383 m (23 %) | Gschöllkopf-Flanke davor: zu Recht verdeckt |
+
+**Zwei Regeln im Sichtlinien-Marsch (`horizon.ts`):** (1) Der Marsch
+endet bei `range − max(1,5 % range, 2 Posten)` der dort gelesenen Ebene
+(`HeightField.resAt`); auch die Zelle vor dem abgeflachten Gipfelposten
+wird bilinear hochgezogen. (2) Eigene Kante (`ownCrest`): liegt das
+Maximum im letzten Fünftel des Weges oder ≤ 300 m vor dem Anker, steht
+der Gipfel höchstens 1,5° darunter (bei 60° Bildwinkel ≤ 14 px; in der
+Ferne begrenzt die Geometrie ohnehin auf ≤ 0,7° bei 30 km) und sinkt das
+Gelände zwischen Kante und Gipfel, Posten für Posten nachgelaufen,
+nirgends mehr als 15 m unter die Kante (Ganzmeter ≤ 1 m, Mikrorelief
+2–5 m, jede benannte Scharte mehr), dann ist der Gipfel sichtbar und die
+Nadel steht auf der Kante (`labels.ts pinAt`, beweglicher `anchor`,
+`settle` folgt ihm); Entfernung, Peilung, Rang und Text bleiben die des
+Gipfels. Fremder Grat mit Tal dahinter und Punkt tief hinter der Kante
+bleiben verdeckt, Seen nie.
+
+Simulation über alle verdeckten Ziele bis 30 km vor der Änderung:
+Mauritzalm 634 verdeckt, 9 kippen (die beiden gewollten und sieben
+Gipfel in 20–28 km, deren Kuppe 0,0–0,1° hinter der eigenen Vorderkante
+liegt, alle ohne Senke); Pertisau 814 verdeckt, 2 kippen (Zwölferkopf,
+Hinterunnütz). Tests rot → grün: `heightfield.test.ts` „resAt…“,
+`horizon.test.ts` „a near summit whose top the grid flattens…“ und „a
+summit a little behind its own edge is visible…“ (mit Gegentests Tal und
+tiefe Kuppe), `labels.test.ts` „a pin moved onto the visible edge…“,
+`labels.spec.ts` „a summit behind its own shoulder is labelled on its
+visible edge…“ auf dem neuen Fixture-Berg „Schulterkopf“ (145°, Kuppe
+1,2° hinter der Kante). Messung nachher: (folgt).
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):
