@@ -84,7 +84,15 @@ test.describe('photo mode', () => {
     await page.getByLabel('Objektiv').fill('14.5');
     await expect.poll(() => hashNum(page, 'fov'), { timeout: 30_000 }).toBeCloseTo(coverFovY(14.5, PHOTO.width, PHOTO.height, W, H), 0);
 
+    // Closed, the lit terrain is back behind the outline instead of the photo's
+    // neutral grey: at this telephoto the whole frame is the Testhorn's rock.
+    // (Until the renderer drew only on change, this read a stale colour buffer
+    // from before the photo and so showed blue sky here by accident.)
     await page.getByRole('button', { name: 'Foto schließen' }).click();
+    await expect.poll(async () => { const t = await rgb(page, 100, 20, 40, 20); return Math.abs(t[2] - t[0]); }, { timeout: 30_000 }).toBeGreaterThan(0.03);
+    // Widened through the URL, the blue sky stands above the summit again.
+    await page.evaluate(() => { location.hash = location.hash.replace(/fov=[^&]*/, 'fov=60'); });
+    await expect.poll(() => hashNum(page, 'fov'), { timeout: 30_000 }).toBe(60);
     await expect.poll(async () => { const t = await rgb(page, 100, 20, 40, 20); return t[2] - t[0]; }, { timeout: 30_000 }).toBeGreaterThan(0.05);
   });
 

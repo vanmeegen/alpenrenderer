@@ -825,14 +825,22 @@ export class GpuRenderer {
    * the screen is empty.
    */
   async readRange(): Promise<CaptureResult | null> {
+    // The buffers are as of the last drawn frame; a change since then is drawn first (the gate decides).
+    this.render();
     const { width, height } = this.rangeRtt.getSize();
     const data = await this.rangeRtt.readPixels();
     if (!data) return null;
     return { width, height, pixels: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) };
   }
 
-  /** Renders the composite once more into a buffer and reads it back. */
+  /**
+   * Renders the composite once more into a buffer and reads it back. The
+   * terrain buffers it composites are brought up to date first: a frame is
+   * drawn only when an input changed since the last one (the gate), and a
+   * caller between two animation frames must not get the previous view.
+   */
   async capture(): Promise<CaptureResult | null> {
+    this.render();
     const { w, h } = this.resize();
     const rtt = new RenderTargetTexture('capture', { width: w, height: h }, this.scene, {
       generateDepthBuffer: false,
