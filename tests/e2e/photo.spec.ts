@@ -16,7 +16,7 @@ const PEAK_CELLS = '/tests/e2e/fixtures/peaks/';
 const W = 1000, H = 600;
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low', ...query });
+  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low', shade: '0', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon + 0.01, lat: STAND.lat, yaw: 90, pitch: 3, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;

@@ -11,9 +11,9 @@ const W = 1000, H = 600;
 const EYE = 2500;
 const R_EFF_M = 6371008.8 / (1 - 0.13);
 
-function url() {
+function url(query: Record<string, string> = {}) {
   const q = new URLSearchParams({
-    tiles: '/tests/e2e/fixtures/tiles/', peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', q: 'low',
+    tiles: '/tests/e2e/fixtures/tiles/', peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', q: 'low', shade: '0', ...query,
   });
   const h = new URLSearchParams({ lon: String(STAND.lon), lat: String(STAND.lat), alt: String(EYE), yaw: String(LAKE.bearing), pitch: '0', fov: '60' });
   return `/dist/?${q}#${h}`;

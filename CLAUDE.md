@@ -33,9 +33,13 @@ CI (`.github/workflows/ci.yml`) führt beides auf jedem Push und PR aus.
   vor dem Lauf als Terrarium-Tiles erzeugt (`tests/e2e/fixtures/gen.mjs`).
   Die Formel ist die Referenz: Erwartungswerte in Tests werden daraus
   berechnet, nicht abgelesen.
-- E2E rendern mit `q=low` (640 × 900 Vertizes): das Keil-Netz der hohen
-  Qualität (1,6 M) macht SwiftShader im Headless-Chromium zu langsam. Die
-  Geometrie-Toleranzen sind dafür ausgelegt; `q=high` prüft der Benutzer.
+- E2E rendern mit `q=low` (640 × 900 Vertizes) und ohne beleuchteten
+  Shade-Pass (`shade=0`): SwiftShader im Headless-Chromium braucht pro Seite
+  ~10 s, um die Shade-Pipeline zu kompilieren, und ~1 s je Frame, sie zu
+  zeichnen (ohne sie 8 s und 17 ms); das hohe Netz (1,6 M Vertizes) stallt
+  50 s. Nur die Farbtests (Golden, Flanken, Konturen, See, Kamera-/Foto-
+  Himmel) setzen `shade=1`. Die Geometrie-Toleranzen sind auf `q=low`
+  ausgelegt; `q=high` prüft der Benutzer.
 - Pixel-Erwartungen prüfen Regionen und Übergänge, keine exakten Farbwerte.
   Screenshot-Goldens nur mit Toleranz und nur für Linux-Chromium aus CI.
 - Live-Daten (Tileserver, Coverage-Index) werden ausschließlich in

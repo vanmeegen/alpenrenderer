@@ -105,9 +105,9 @@ der App per `?tiles=` mitgeben:
     # http://localhost:8765/dist/?tiles=/tile-cache/#lon=7.78472&lat=45.98333&yaw=232
     node tools/shot.mjs "http://localhost:8765/dist/?tiles=/tile-cache/#lon=7.78472&lat=45.98333&yaw=232" shots/gornergrat.png
 
-URL-Parameter: `#lon`, `lat`, `alt` (absolute Augenhöhe, sonst 1,7 m über dem höchsten Boden im Umkreis des Höhenbereichs, Standard 1 km, damit das Auge nicht im Hang oder hinter der nächsten Kuppe steckt),
+URL-Parameter: `#lon`, `lat`, `alt` (absolute Augenhöhe, sonst Boden am Standpunkt plus Augenhöhe, Standard 1,7 m, Regler bis 500 m),
 `yaw`, `pitch`, `fov`, `p=<ort>` für einen der Standpunkte im Menü;
-`?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität,
+`?backend=webgpu` statt WebGL2, `?q=high|low` statt automatischer Qualität, `?shade=0` ohne beleuchteten Shade-Pass (Umriss über Weiß; für Tests und schwache GPUs),
 `?peaks=<verzeichnis>` für einen anderen Gipfelkatalog (Zellen `{x}_{y}.json`),
 `?lakes=<verzeichnis>` ebenso für den Seenkatalog.
 

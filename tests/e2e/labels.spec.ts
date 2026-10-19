@@ -11,8 +11,8 @@ const PEAK_CELLS = '/tests/e2e/fixtures/peaks/';
 const W = 1000, H = 600;
 const R_EFF_M = 6371008.8 / (1 - 0.13);
 
-function url(hash: Record<string, number | string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low' });
+function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
+  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low', shade: '0', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;
@@ -105,8 +105,7 @@ test.describe('summit labels', () => {
     // drawn lower than the DEM holds it. At 60° nobody sees that; zoomed to
     // 5° a label anchored on the DEM summit floats tens of pixels above the
     // drawn one (Schynige Platte, 2026). The anchor follows the mesh.
-    const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low' });
-    await page.goto(`/dist/?${q}#lon=${STAND.lon}&lat=${STAND.lat}&yaw=90&pitch=26&fov=5`);
+    await page.goto(url({ pitch: 26, fov: 5 }));
     await ready(page);
     await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Testhorn']);
     await expect.poll(() => pinOffApex(page), { timeout: 30_000 }).toBeLessThan(1);
@@ -145,8 +144,7 @@ test.describe('summit labels', () => {
       contentType: 'application/json',
       body: JSON.stringify(PEAKS.map((p) => (p.n === 'Testhorn' ? { ...p, a: p.a + 60 / 111320 } : p))),
     }));
-    const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low' });
-    await page.goto(`/dist/?${q}#lon=${STAND.lon}&lat=${STAND.lat}&yaw=90&pitch=26&fov=5`);
+    await page.goto(url({ pitch: 26, fov: 5 }));
     await ready(page);
     await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Testhorn']);
     await expect.poll(() => pinOffApex(page), { timeout: 30_000 }).toBeLessThan(1);
