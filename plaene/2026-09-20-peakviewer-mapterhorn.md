@@ -840,7 +840,12 @@ gezählt: 30 gezeichnet vorher, 0 nachher).
 | Shade-Pass aus außer Farbtests, 1 Worker | 30,6 min | – |
 | dito, 2 Worker / 3 Worker (ohne Gate) | 28,8 min, 2 rot / 25,4 min, 3 rot | – |
 | dito mit Gate, 1 Worker | **12,4 min** | – |
-| dito mit Gate, 3 Worker | (folgt) | (folgt) |
+| dito mit Gate, 3 Worker | **10,4 min**, 60/60 grün | (CI-Lauf folgt) |
+
+Mit drei Workern begrenzt die größte Datei den Lauf (app.spec, 25 Tests
+seriell à ~25 s unter Last); mehr Worker brächten nichts, eine Teilung
+von app.spec in zwei Dateien etwa 3 min. Das Golden hängt am Dateinamen
+(`__screenshots__/app.spec.ts/`), also nur mit Umzug der Datei.
 
 Nebenbefund des Gates: `capture()` und `readRange()` setzten aus den
 Puffern des letzten Frames zusammen; im Headless-Chromium läuft zwischen
