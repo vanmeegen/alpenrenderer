@@ -815,11 +815,32 @@ restores the view as the URL asked“. Dazu `workers: 3`
 (`E2E_WORKERS` überschreibt): jeder Worker hat seinen eigenen
 GPU-Prozess, die JIT-Stalls laufen parallel.
 
-| Lauf (58 Tests) | lokal (4 Kerne) | CI (ubuntu-latest) |
+**Zweiter Befund, Worker:** Mit zwei bzw. drei Workern wurde die Suite
+kaum schneller (28,8 bzw. 25,4 min) und zwei bis drei Farbtests liefen
+in ihre 30-s-Polls, jeder Test dauerte doppelt so lang. Ursache: ohne
+Shade-Pass tickt die Render-Schleife mit 60 fps und belegt je Seite
+einen Kern, sobald irgendetwas Frames anfordert (im Headless-Chromium
+läuft `requestAnimationFrame` nur dann, etwa während `waitForFunction`
+mit raf-Polling, also in jedem `ready()`); zwei bis drei Seiten
+sättigen vier Kerne. Daraus wurde „zeichnen nur bei Änderung“ doch
+Teil der Maßnahme, nicht wegen der Frame-Zahl, sondern wegen der
+Leerlauflast: `render/redraw.ts` (`frameFingerprint`, `RedrawGate`),
+der Renderer zeichnet, wenn sich eine Eingabe geändert hat (Kamera,
+Größe, Auge, Ursprung, Ebenen-Versionen und -Fenster, Regler, Band,
+Textur hinter dem Umriss), in den ersten drei Frames, solange Pipelines
+kompilieren, auf Anforderung (Context-Restore) oder mit Kamerabild. Auf
+dem Handy ist dasselbe der Akku. Tests rot → grün: `redraw.test.ts`,
+`app.spec.ts` „a view nobody moves draws no further frames; a turn
+draws, then quiet again“ (über 30 Animationsframe-Ticks in der Seite
+gezählt: 30 gezeichnet vorher, 0 nachher).
+
+| Lauf (58/59 Tests) | lokal (4 Kerne) | CI (ubuntu-latest) |
 |---|---|---|
 | vorher: Shade-Pass an, 1 Worker | 53,6 min | 34 min |
 | Shade-Pass aus außer Farbtests, 1 Worker | 30,6 min | – |
-| dito, 3 Worker | (folgt) | (folgt) |
+| dito, 2 Worker / 3 Worker (ohne Gate) | 28,8 min, 2 rot / 25,4 min, 3 rot | – |
+| dito mit Gate, 1 Worker | (folgt) | – |
+| dito mit Gate, 3 Worker | (folgt) | (folgt) |
 
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 

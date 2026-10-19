@@ -407,3 +407,27 @@ test.describe('without the shade pass', () => {
   });
 });
 
+test.describe('drawing only what changed', () => {
+  test('a view nobody moves draws no further frames; a turn draws, then quiet again', async ({ page }) => {
+    // The loop ticks every animation frame, but a frame nobody changed is the
+    // last one again: drawn, it costs a phone its battery and a software
+    // rasterizer a whole core per page (render/redraw.ts).
+    await page.goto(url());
+    await ready(page);
+    const drawn = () => page.evaluate(() => (window as any).alp.status().diagnostics.framesDrawn as number);
+    // Frames drawn over 30 animation frames, counted in the page: headless
+    // Chromium only runs requestAnimationFrame while something asks for frames.
+    const quiet = () => page.evaluate(() => new Promise<number>((resolve) => {
+      const a = (window as any).alp.status().diagnostics.framesDrawn as number;
+      let n = 0;
+      const tick = () => { if (++n < 30) requestAnimationFrame(tick); else resolve((window as any).alp.status().diagnostics.framesDrawn - a); };
+      requestAnimationFrame(tick);
+    }));
+    await expect.poll(quiet, { timeout: 30_000 }).toBe(0);
+    const before = await drawn();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(drawn, { timeout: 10_000 }).toBeGreaterThan(before);
+    await expect.poll(quiet, { timeout: 30_000 }).toBe(0);
+  });
+});
+
