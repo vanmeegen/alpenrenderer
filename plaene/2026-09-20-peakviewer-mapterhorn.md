@@ -778,6 +778,49 @@ Offen aus der Recherche: Normale bilinear statt pro Zelle, Himmelssicht/AO
 je Ebene, Skyline-Kalibrierung des Live-Bilds wie PeakLens, echte Sonne
 nach Uhrzeit.
 
+### 8.aa E2E-Laufzeit: Shade-Pass aus, drei Worker (2026-10-19)
+
+Die volle E2E-Suite brauchte lokal 53,6 min (58 Tests, ein Worker), in CI
+34 min. Vor Änderungen eine Messung (SwiftShader, Headless-Chromium,
+`q=low`, 1000 × 600; Phasen per `tools/.scratch/e2e-timing.mjs`,
+CDP-Profiler und Hooks auf `renderer.render`/`setHeightField`/`onLevel`):
+
+| Phase einer Testseite | Dauer | Befund |
+|---|---|---|
+| Start bis `window.alp`, Shader kompiliert, erster Frame | 0,8–1,0 s | billig; eine geteilte Seite je Spec brächte fast nichts |
+| 33 Fixture-Kacheln holen und dekodieren | Median 16 ms je Fetch | kein Engpass |
+| `setHeightField` (Atlas packen, hochladen) | 7 Aufrufe, 10–50 ms, Summe 167 ms | kein Engpass |
+| erster Frame mit gefülltem Gelände | **14–20 s**, eine einzige Frame-Lücke | SwiftShader JITtet die Pipelines beim ersten echten Draw und blockiert dabei den Hauptthread; pro Seite neu (auch zweiter Tab, neuer Context, persistentes Profil mit GPUCache); unabhängig vom Viewport; ohne Shade-Pass 8 s; `q=high` 50 s |
+| Frame danach | ~1,0 s mit Shade-Pass, **17 ms ohne**; `q=high` 2,8 s | der Shade-Fragment-Shader (Gradienten über die Ebenen, Look-Blende, Wasser, Luft) ist der Frame; der Range-Pass mit demselben Netz ist billig |
+| `evaluate`-Roundtrip; Kameraänderung → Hash | 2–3 ms; 0,3 s | ok |
+| `relocate` → wieder bereit | 25–35 s | Frames à 1 s plus Debounce, kein zweiter Stall |
+
+Die Schleife in `viewer.ts` zeichnet jeden Animationsframe, auch ohne
+Änderung; mit 1-s-Frames hing daran alles, worauf die Tests warten
+(Sichtbarkeits-Budget 4 ms je Frame, Rebuild-Debounce, HUD-Drossel,
+Polls). Die zuerst geplante Abhilfe „zeichnen nur bei Änderung“ wäre
+ein Produktthema (Akku), für die Tests nach dem Befund zweitrangig.
+
+**Maßnahme:** URL-Option `?shade=0` (`readOptions`, `AppOptions.shade`)
+lässt den Shade-Pass weg; der Viewer wendet sie beim Bau an, Kamera- und
+Fotomodus stellen danach das Soll wieder her. Alle Specs rendern ohne
+Shade-Pass; genau acht Tests brauchen ihn und setzen `shade=1` (mit
+`shade=0` rot, danach grün): app.spec Konturen, Flanken, Golden;
+lakes.spec Wasserlage, Wasserglanz; camera.spec Waschung/Skyline, „camera
+refused … stays shaded“; photo.spec EXIF-Foto. Tests rot → grün:
+`state.test.ts` „shade=0 switches the lit shade pass off…“, `app.spec.ts`
+„shade=0 leaves the lit pass out…“ (Himmel weiß statt blau, Pipelines
+kompiliert, Testhorn-Zeile wie die Formel), `photo.spec.ts` „…closing it
+restores the view as the URL asked“. Dazu `workers: 3`
+(`E2E_WORKERS` überschreibt): jeder Worker hat seinen eigenen
+GPU-Prozess, die JIT-Stalls laufen parallel.
+
+| Lauf (58 Tests) | lokal (4 Kerne) | CI (ubuntu-latest) |
+|---|---|---|
+| vorher: Shade-Pass an, 1 Worker | 53,6 min | 34 min |
+| Shade-Pass aus außer Farbtests, 1 Worker | 30,6 min | – |
+| dito, 3 Worker | (folgt) | (folgt) |
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

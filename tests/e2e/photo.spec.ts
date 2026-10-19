@@ -51,7 +51,7 @@ const labels = (page: Page) => page.evaluate(() => (window as any).alp.labels() 
 
 test.describe('photo mode', () => {
   test('a photo with EXIF sets the standpoint and the lens; alignment recovers the pose; labels land on the photo', async ({ page }) => {
-    await page.goto(url());
+    await page.goto(url({}, { shade: '1' }));   // a colour test: the lit shade pass is what it measures
     await ready(page);
     expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon + 0.01, 3);
     await page.getByLabel('Fotodatei').setInputFiles(join(here, 'fixtures', 'photo.png'));

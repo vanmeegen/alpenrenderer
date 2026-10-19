@@ -206,7 +206,7 @@ test.describe('geometry on screen', () => {
     // PeakFinder's readability is its line drawing: ridges and silhouettes
     // from the range buffer's jumps, over the shading. The old switch did
     // nothing anyone could see, and 0.35 was too faint on a phone.
-    await page.goto(url());
+    await page.goto(url({}, { shade: '1' }));   // a colour test: the lit shade pass is what it measures
     const s = await ready(page);
     await expect(page.getByRole('button', { name: /Umrisse/ })).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).alp.renderer.outline)).toBe(0.7);
@@ -347,7 +347,7 @@ test.describe('appearance', () => {
     // into the light, the one right of it south-west, half away from it.
     // Their brightness ratio is set by the light formula alone; fog and
     // colour are the same at the same range and altitude.
-    await page.goto(url());
+    await page.goto(url({}, { shade: '1' }));   // a colour test: the lit shade pass is what it measures
     const s = await ready(page);
     const ys = summitScreenY(s.eyeAltitude, 60) * H;
     const probe = async (x: number, y: number) => {
@@ -378,7 +378,7 @@ test.describe('appearance', () => {
     test.slow();
     // The test range's own summits and lake (url() sets them), not the Alpine
     // catalogues: the golden must not change when a catalogue does.
-    await page.goto(url());
+    await page.goto(url({}, { shade: '1' }));   // a colour test: the lit shade pass is what it measures
     await ready(page);
     await expect(page).toHaveScreenshot('testhorn.png', {
       mask: [page.locator('.pointer-events-auto'), page.locator('.alp-compass')],

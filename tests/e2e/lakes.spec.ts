@@ -51,7 +51,7 @@ const blue = (c: [number, number, number]) => c[2] > c[1] + 10 && c[2] > c[0] + 
 
 test.describe('lakes', () => {
   test('the Testsee is water exactly where the formula puts it, ground around it is not', async ({ page }) => {
-    await page.goto(url());
+    await page.goto(url({ shade: '1' }));   // a colour test: the lit shade pass is what it measures
     await ready(page);
     // Down the centre column: which rows land on the lake, by the formula.
     const rows: { y: number; wet: boolean }[] = [];
@@ -71,7 +71,7 @@ test.describe('lakes', () => {
   });
 
   test('the water shines as the formula says: more sky toward its far shore, where the view grazes it', async ({ page }) => {
-    await page.goto(url());
+    await page.goto(url({ shade: '1' }));   // a colour test: the lit shade pass is what it measures
     await ready(page);
     const probe = (y: number) => {
       const hit = terrainHit(LAKE.bearing, W / 2, y, EYE, 60, W, H)!;

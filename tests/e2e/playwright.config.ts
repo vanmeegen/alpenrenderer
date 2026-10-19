@@ -17,8 +17,12 @@ export default defineConfig({
   // slow CI runner needs well over two minutes for that.
   timeout: 240_000,
   expect: { timeout: 30_000, toHaveScreenshot: { maxDiffPixelRatio: 0.02 } },
+  // SwiftShader compiles the terrain pipelines anew for every page (8 s
+  // single-threaded, 18 s with the shade pass); workers overlap those stalls
+  // on the four cores of a runner. Files run in parallel, tests in a file in
+  // order. E2E_WORKERS=1 for a serial run.
   fullyParallel: false,
-  workers: 1,
+  workers: Number(process.env.E2E_WORKERS ?? 3),
   retries: 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never', outputFolder: '../../playwright-report/e2e' }]] : 'list',
   outputDir: '../../test-results/e2e',

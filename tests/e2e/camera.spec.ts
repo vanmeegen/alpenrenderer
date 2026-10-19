@@ -78,7 +78,7 @@ const washed = (y8: number) => y8 / 255 * (1 - WHITEN) + WHITEN;
 
 test.describe('camera mode', () => {
   test('shows the camera frame washed towards white, the skyline drawn over it, and follows the lens', async ({ page }) => {
-    await page.goto(url());
+    await page.goto(url({}, { shade: '1' }));   // a colour test: the lit shade pass is what it measures
     const s = await ready(page);
     await page.getByRole('button', { name: 'Kamera', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Kamera aus' })).toBeVisible({ timeout: 30_000 });
@@ -142,7 +142,7 @@ test.describe('camera refused', () => {
     await page.addInitScript(() => {
       navigator.mediaDevices.getUserMedia = () => Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' }));
     });
-    await page.goto(url());
+    await page.goto(url({}, { shade: '1' }));   // a colour test: the lit shade pass is what it measures
     await ready(page);
     await page.getByRole('button', { name: 'Kamera', exact: true }).click();
     await expect(page.getByText('Kamera nicht verfügbar: Zugriff verweigert.')).toBeVisible({ timeout: 30_000 });
