@@ -845,7 +845,7 @@ gezählt: 30 gezeichnet vorher, 0 nachher).
 | dito, 2 Worker / 3 Worker (ohne Gate) | 28,8 min, 2 rot / 25,4 min, 3 rot | – |
 | dito mit Gate, 1 Worker | **12,4 min** | – |
 | dito mit Gate, 3 Worker | **10,4 min**, 60/60 grün | 11,8 min, **2 rot** (See-Wasserlage, Sensoren: 30-s-Polls unter Last) |
-| dito mit Gate, 1 Worker (Default) | (Lauf folgt) | (Lauf folgt) |
+| dito mit Gate, 1 Worker (Default) | **11,7 min**, 60/60 grün | **7,6 min**, grün |
 
 Mit drei Workern begrenzt die größte Datei den Lauf (app.spec, 25 Tests
 seriell à ~25 s unter Last); mehr Worker brächten nichts, eine Teilung
