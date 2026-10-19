@@ -51,6 +51,42 @@ export const LAKES = [
   { i: 'w1', n: LAKE.name, o: LAKE.lon, a: LAKE.lat, ar: Math.round(Math.PI * LAKE.radius ** 2), g: [LAKE.ring] },
 ];
 
+/**
+ * The Schulterkopf: a mountain at a bearing of 145° whose top sits a little
+ * behind the visible edge of its own wall, as the Haidachstellwand does seen
+ * from the Mauritzalm. Along the bearing from the standpoint: the foot 2400 m
+ * out, a wall climbing 900 m to its edge at 3000 m (56°), a shoulder climbing
+ * another 40 m to the top at 3400 m (5.7°), the back slope down to 4400 m;
+ * across the bearing the rise fades out over 350 m, so the top is a point.
+ * From the standpoint the edge stands 16.66° up and the top 15.43°: the top
+ * is 1.2° behind its own edge, and the label belongs on the edge.
+ */
+export const SHOULDER = (() => {
+  const bearing = 145, foot = 2400, edge = 3000, top = 3400, back = 4400, edgeRise = 900, topRise = 940, halfWidth = 350;
+  const b = (bearing * Math.PI) / 180;
+  return {
+    bearing, foot, edge, top, back, edgeRise, topRise, halfWidth,
+    lon: STAND.lon + (top * Math.sin(b)) / M_PER_DEG_LON,
+    lat: STAND.lat + (top * Math.cos(b)) / M_PER_DEG_LAT,
+    summit: PLAIN_M + topRise,
+  };
+})();
+
+/** The Schulterkopf's rise above the plain at a point, metres. */
+function shoulder(lon: number, lat: number): number {
+  const dx = (lon - STAND.lon) * M_PER_DEG_LON, dy = (lat - STAND.lat) * M_PER_DEG_LAT;
+  const b = (SHOULDER.bearing * Math.PI) / 180;
+  const s = dx * Math.sin(b) + dy * Math.cos(b);          // along the bearing
+  const w = dx * Math.cos(b) - dy * Math.sin(b);          // across it
+  const lateral = Math.max(0, 1 - Math.abs(w) / SHOULDER.halfWidth);
+  if (lateral === 0 || s < SHOULDER.foot || s > SHOULDER.back) return 0;
+  let rise: number;
+  if (s <= SHOULDER.edge) rise = SHOULDER.edgeRise * (s - SHOULDER.foot) / (SHOULDER.edge - SHOULDER.foot);
+  else if (s <= SHOULDER.top) rise = SHOULDER.edgeRise + (SHOULDER.topRise - SHOULDER.edgeRise) * (s - SHOULDER.edge) / (SHOULDER.top - SHOULDER.edge);
+  else rise = SHOULDER.topRise * (SHOULDER.back - s) / (SHOULDER.back - SHOULDER.top);
+  return rise * lateral;
+}
+
 /** Height in metres at a geodetic point. */
 export function heightAt(lon: number, lat: number): number {
   if (inLake(lon, lat)) return LAKE.surface;
@@ -61,7 +97,7 @@ export function heightAt(lon: number, lat: number): number {
   const dyR = Math.abs(lat - RIDGE.lat) * M_PER_DEG_LAT;
   const ridge = Math.max(0, 1 - dyR / RIDGE.halfWidth) * (RIDGE.height - PLAIN_M);
   const ripple = 8 * Math.sin((lon - STAND.lon) * M_PER_DEG_LON / 400) * Math.cos((lat - STAND.lat) * M_PER_DEG_LAT / 400);
-  return PLAIN_M + Math.max(cone, ridge) + ripple;
+  return PLAIN_M + Math.max(cone, ridge, shoulder(lon, lat)) + ripple;
 }
 
 /**
@@ -81,6 +117,7 @@ export const PEAKS = [
   { i: 1, n: 'Testhorn', o: TESTHORN.lon, a: TESTHORN.lat, e: TESTHORN.summit, p: 2500, w: 'Q1', k: 'de:Testhorn' },
   { i: 2, n: 'Gratspitze', o: RIDGE_CREST.lon, a: RIDGE_CREST.lat, e: RIDGE.height },
   { i: 3, n: 'Hinterhorn', o: STAND.lon + 12000 / M_PER_DEG_LON, a: STAND.lat, e: 3500 },
+  { i: 4, n: 'Schulterkopf', o: SHOULDER.lon, a: SHOULDER.lat, e: SHOULDER.summit, p: 940 },
 ];
 export const RIDGE_RANGE = 20000;
 
@@ -124,7 +161,7 @@ export function heightAlong(bearingDeg: number, range: number): number {
  * camera's perspective. This is the reference the rendered range buffer is
  * held against.
  */
-export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, width: number, height: number): number {
+export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, width: number, height: number, pitchDeg = 0): number {
   const tanV = Math.tan((fov * Math.PI) / 360);
   const tanH = tanV * (width / height);
   const ndcX = (x + 0.5) / width * 2 - 1;
@@ -138,7 +175,9 @@ export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, 
     const up = heightAlong(bearing, r) - eye - (r * r) / (2 * R_EFF);
     maxTan = Math.max(maxTan, up / r);
   }
-  return height / 2 - (height / 2) * (maxTan / Math.cos(b)) / tanV;
+  // The column's elevation angle, less the camera's pitch, projected.
+  const elev = Math.atan(maxTan / Math.cos(b)) - (pitchDeg * Math.PI) / 180;
+  return height / 2 - (height / 2) * Math.tan(elev) / tanV;
 }
 
 /**

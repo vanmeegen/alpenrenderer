@@ -4,7 +4,7 @@
  * where a label sits come from the terrain formula, not from a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { PEAKS, RIDGE_CREST, STAND, TESTHORN, TESTHORN_RANGE, heightAt, summitScreenY } from './fixtures/terrain';
+import { PEAKS, RIDGE_CREST, SHOULDER, STAND, TESTHORN, TESTHORN_RANGE, heightAt, skylineRow, summitScreenY } from './fixtures/terrain';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
 const PEAK_CELLS = '/tests/e2e/fixtures/peaks/';
@@ -80,13 +80,40 @@ test.describe('summit labels', () => {
     await page.goto(url());
     const s = await ready(page);
     await expect.poll(() => labels(page).then((l) => l.map((p) => p.name).sort()), { timeout: 30_000 }).toEqual(['Testhorn']);
-    expect((await ready(page)).peaks).toMatchObject({ total: PEAKS.length, visible: 2 });
+    // All but the Hinterhorn: the Schulterkopf counts, seen as its own edge (below).
+    expect((await ready(page)).peaks).toMatchObject({ total: PEAKS.length, visible: PEAKS.length - 1 });
     const [t] = await labels(page);
     expect(Math.abs(t.ax - W / 2)).toBeLessThan(3);
     expect(Math.abs(t.ay - summitScreenY(s.eyeAltitude, 60) * H)).toBeLessThan(H * 0.02);
     expect(t.by + t.bh).toBeLessThan(t.ay);
     expect(await inkIn(page, t)).toBeGreaterThan(50);
-    await expect(page.getByText('Gipfel 2/3')).toBeVisible();
+    await expect(page.getByText(`Gipfel ${PEAKS.length - 1}/${PEAKS.length}`)).toBeVisible();
+  });
+
+  test('a summit behind its own shoulder is labelled on its visible edge, the card says how far the summit is', async ({ page }) => {
+    // The Schulterkopf's top is 1.2° behind the edge of its own wall (fixture
+    // SHOULDER): what you see is that wall, so its name goes on the edge, the
+    // skyline row of the column (horizon.ts ownCrest). The hash fov is the
+    // vertical angle; 30° stays under the telescope.
+    const W = 1000, H = 600, FOV = 30, PITCH = 10;
+    await page.goto(url({ yaw: SHOULDER.bearing, pitch: PITCH, fov: FOV }));
+    const s = await ready(page);
+    await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Schulterkopf']);
+    const [t] = await labels(page);
+    expect(Math.abs(t.ax - W / 2)).toBeLessThan(4);
+    // The pin on the drawn edge: the column's skyline row from the formula.
+    const edgeRow = skylineRow(SHOULDER.bearing, t.ax, s.eyeAltitude, FOV, W, H, PITCH);
+    expect(Math.abs(t.ay - edgeRow)).toBeLessThan(H * 0.015);
+    // And well above where the hidden top would sit.
+    const R_EFF = 6371008.8 / (1 - 0.13);
+    const topElev = Math.atan2(heightAt(SHOULDER.lon, SHOULDER.lat) - s.eyeAltitude - SHOULDER.top ** 2 / (2 * R_EFF), SHOULDER.top);
+    const topRow = H / 2 - (H / 2) * Math.tan(topElev - (PITCH * Math.PI) / 180) / Math.tan((FOV * Math.PI) / 360);
+    expect(t.ay).toBeLessThan(topRow - H * 0.015);
+    await page.mouse.click(t.bx + t.bw / 2, t.by + t.bh / 2);
+    const card = page.locator('.alp-peak-card');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Schulterkopf');
+    await expect(card).toContainText('3.4 km');
   });
 
   test('the leader line stops a little above the summit instead of sticking in it', async ({ page }) => {
