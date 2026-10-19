@@ -15,8 +15,8 @@ const TILES = '/tests/e2e/fixtures/tiles/';
 const PEAK_CELLS = '/tests/e2e/fixtures/peaks/';
 const W = 1000, H = 600;
 
-function url(hash: Record<string, number | string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low' });
+function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
+  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', q: 'low', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon + 0.01, lat: STAND.lat, yaw: 90, pitch: 3, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;
@@ -88,8 +88,9 @@ test.describe('photo mode', () => {
     await expect.poll(async () => { const t = await rgb(page, 100, 20, 40, 20); return t[2] - t[0]; }, { timeout: 30_000 }).toBeGreaterThan(0.05);
   });
 
-  test('a photo without EXIF keeps the standpoint, says so, and fog cannot be aligned', async ({ page }) => {
-    await page.goto(url());
+  test('a photo without EXIF keeps the standpoint, says so, and fog cannot be aligned; closing it restores the view as the URL asked', async ({ page }) => {
+    // Opened without the shade pass (shade=0): the photo switches it off anyway, and closing the photo must not switch it on.
+    await page.goto(url({}, { shade: '0' }));
     await ready(page);
     await page.getByLabel('Fotodatei').setInputFiles(join(here, 'fixtures', 'photo-fog.png'));
     await expect(page.getByText('Foto ohne GPS: Standpunkt per Karte setzen.')).toBeVisible({ timeout: 30_000 });
@@ -98,5 +99,7 @@ test.describe('photo mode', () => {
     await page.getByRole('button', { name: 'Ausrichten' }).click();
     await expect(page.locator('.alp-align')).toContainText(/Nicht ausgerichtet/, { timeout: 60_000 });
     expect(await hashNum(page, 'yaw')).toBe(90);
+    await page.getByRole('button', { name: 'Foto schließen' }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).alp.renderer.shaded)).toBe(false);
   });
 });

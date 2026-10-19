@@ -159,6 +159,10 @@ export class Viewer {
   ) {
     this.renderer = renderer;
     renderer.outline = readOutline();
+    // The lit shade pass as the URL asks (state.ts AppOptions.shade); the
+    // camera and photo modes switch it off while they run and restore this.
+    this.shadeView = opt.shade;
+    renderer.shaded = opt.shade;
     this.camera = renderer.camera;
     this.quality = quality;
     this.view = view;
@@ -251,7 +255,7 @@ export class Viewer {
     this.feed.stop();
     this.feed.video.remove();
     this.renderer.attachVideo(null);
-    this.renderer.shaded = true;
+    this.renderer.shaded = this.shadeView;
   }
 
   /**
@@ -293,7 +297,7 @@ export class Viewer {
     if (!this.photo) return;
     this.photo = null;
     this.renderer.attachVideo(null);
-    this.renderer.shaded = true;
+    this.renderer.shaded = this.shadeView;
     this.camera.set({ roll: 0 });
     this.viewChanged();
   }
@@ -362,6 +366,9 @@ export class Viewer {
     this.camera.set({ fov });
     this.viewChanged();
   }
+
+  /** Whether the view is drawn lit when no camera image or photo is behind it (AppOptions.shade). */
+  private readonly shadeView: boolean;
 
   private lastAspect = 0;
 

@@ -38,8 +38,19 @@ describe('formatHash', () => {
 describe('readOptions', () => {
   test('defaults to WebGL2 and automatic quality', () => {
     expect(readOptions('')).toEqual({
-      backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json', lakes: 'lakes/{x}_{y}.json',
+      backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json', lakes: 'lakes/{x}_{y}.json', shade: true,
     });
+  });
+
+  test('shade=0 switches the lit shade pass off; absent, 1 or garbage leave it on', () => {
+    // Without the shade pass the range pass and the composite still run: the
+    // outline over white that the AR view shows without a camera. The E2E
+    // tests render that way unless they look at colours (SwiftShader spends
+    // 10 s compiling the shade pipeline and 1 s per frame drawing it).
+    expect(readOptions('?shade=0').shade).toBe(false);
+    expect(readOptions('').shade).toBe(true);
+    expect(readOptions('?shade=1').shade).toBe(true);
+    expect(readOptions('?shade=off').shade).toBe(true);
   });
 
   test('tiles base becomes a URL template with a trailing slash', () => {

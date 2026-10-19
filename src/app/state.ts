@@ -137,6 +137,12 @@ export interface AppOptions {
   peaks: string;
   /** Lake catalogue cell template, likewise. */
   lakes: string;
+  /**
+   * Draw the lit shade pass (`shade=0` turns it off): without it the range
+   * pass and the composite still run and the view is the outline over white
+   * that the AR view shows without a camera. For tests and weak GPUs.
+   */
+  shade: boolean;
 }
 
 export function readOptions(search = location.search): AppOptions {
@@ -152,6 +158,7 @@ export function readOptions(search = location.search): AppOptions {
     tiles: tiles ? (tiles.endsWith('/') ? tiles : tiles + '/') + '{z}/{x}/{y}.webp' : undefined,
     peaks: (peaks.endsWith('/') ? peaks : peaks + '/') + '{x}_{y}.json',
     lakes: (lakes.endsWith('/') ? lakes : lakes + '/') + '{x}_{y}.json',
+    shade: q.get('shade') !== '0',
   };
 }
 

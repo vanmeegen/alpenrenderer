@@ -387,3 +387,23 @@ test.describe('appearance', () => {
     });
   });
 });
+
+test.describe('without the shade pass', () => {
+  test('shade=0 leaves the lit pass out: outline over a white sky, every pipeline still compiled, the Testhorn where the formula puts it', async ({ page }) => {
+    // SwiftShader spends ~10 s compiling the shade pipeline and ~1 s per
+    // frame drawing it; the range pass that the geometry, label and HUD
+    // tests read is untouched by it, so every spec renders this way unless
+    // it looks at colours. Without the pass the composite shows its AR
+    // branch: white where there is no camera image, the ink of the outline
+    // over it; the shade program is still compiled (the Check panel polls it).
+    await page.goto(url({}, { shade: '0' }));
+    const s = await ready(page);
+    expect(await page.evaluate(() => (window as any).alp.renderer.shaded)).toBe(false);
+    expect(await luminance(page, 100, 20, 40, 20)).toBeGreaterThan(250);   // blue sky reads ~140
+    expect(s.diagnostics).toMatchObject({ terrainReady: true, shadeReady: true, compositeReady: true, frameErrors: 0 });
+    expect(s.diagnostics.shaderErrors).toEqual([]);
+    const expected = summitScreenY(s.eyeAltitude, 60) * H;
+    expect(Math.abs((await skyRows(page, W / 2)) - expected)).toBeLessThan(H * 0.02);
+  });
+});
+
