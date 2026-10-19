@@ -57,6 +57,7 @@ import { DEG, MERC_PX, REFRACTION_K, effectiveRadiusAt, localRadius } from '../.
 import { HeightField, Observer } from '../../core/heightfield';
 import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, WATER_COLOR, sunVector } from '../shading';
 import { Band, RadialParams, radialParams } from '../mesh';
+import { RedrawGate, frameFingerprint } from '../redraw';
 import {
   COMPOSITE_FRAGMENT_GL, COMPOSITE_VERTEX_GL, TERRAIN_FRAGMENT_GL,
   TERRAIN_SHADE_FRAGMENT_GL, TERRAIN_VERTEX_GL,
@@ -332,6 +333,7 @@ export class GpuRenderer {
       this.atlas = null;
       this.uploaded = this.uploaded.map(() => '');
       if (this.heightField) this.setHeightField(this.heightField);
+      this.gate.request(2);
     });
   }
 
@@ -641,12 +643,50 @@ export class GpuRenderer {
     this.videoEl = null;
     this.stillSize = null;
     this.compositeMat.setTexture('videoTex', this.blank);
+    this.frameVersion++;
   }
 
   // ----------------------------------------------------------------- render
 
   /** The telescope's dense band of rings, set by the viewer when zoomed in; null otherwise. */
   band: Band | null = null;
+
+  /** Draws only what changed (render/redraw.ts): the first frames, then on any new input, request or live source. */
+  private readonly gate = new RedrawGate(3);
+  /** Bumped when the texture behind the outline (video, still, none) is swapped. */
+  private frameVersion = 0;
+
+  /** Draw the next `n` frames whatever the inputs changed. */
+  requestRedraw(n = 1) { this.gate.request(n); }
+
+  /** Everything a frame depends on, for the gate's fingerprint. */
+  private frameInputs() {
+    const hf = this.heightField!;
+    const c = this.camera;
+    return {
+      camera: { yaw: c.yaw, pitch: c.pitch, roll: c.roll, fov: c.fov },
+      size: {
+        w: this.canvas.clientWidth, h: this.canvas.clientHeight,
+        scale: this.engine.getHardwareScalingLevel() * (globalThis.devicePixelRatio ?? 1),
+      },
+      eye: this.eyeAltitude,
+      origin: [hf.lon, hf.lat] as [number, number],
+      levels: hf.levels.map((l) => ({ version: l.version, waterVersion: l.waterVersion, filled: l.filled, px0: l.px0, py0: l.py0 })),
+      knobs: {
+        shaded: this.shaded, outline: this.outline, snowLine: this.snowLine, fogRange: this.fogRange,
+        skyTop: this.skyTop, horizonColor: this.horizonColor, waterColor: this.waterColor,
+        whiten: this.whiten, desaturate: this.desaturate, edgeLow: this.edgeLow, edgeHigh: this.edgeHigh,
+        edgeWidth: this.edgeWidth, lineDark: this.lineDark, refractionK: this.refractionK, curvature: this.curvature,
+        band: this.band ? [this.band.r1, this.band.r2] : null, frame: this.frameVersion,
+      },
+    };
+  }
+
+  /** A source that changes every frame: the camera image, or the pipelines still compiling (pollShaders runs per drawn frame). */
+  private liveSource(): boolean {
+    const d = this.diagnostics;
+    return this.videoEl !== null || !(d.terrainReady && d.shadeReady && d.compositeReady);
+  }
 
   /** The ring and column layout for the current view: the wedge follows the camera, the band the zoom. */
   private radialParams(hf: HeightField) {
@@ -673,8 +713,10 @@ export class GpuRenderer {
     return { w, h };
   }
 
-  render() {
-    if (this.disposed || !this.heightField) return;
+  /** Draws the frame when something changed; returns whether it drew. */
+  render(): boolean {
+    if (this.disposed || !this.heightField) return false;
+    if (!this.gate.need(frameFingerprint(this.frameInputs()), this.liveSource())) return false;
     const t0 = performance.now();
     try {
       const { w, h } = this.resize();
@@ -699,6 +741,7 @@ export class GpuRenderer {
     this.frameTimes.push(dt);
     if (this.frameTimes.length > 30) this.frameTimes.shift();
     this.diagnostics.frameMs = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    return true;
   }
 
   private updateTerrainUniforms() {

@@ -206,9 +206,9 @@ export class Viewer {
         this.visibility.step(VISIBILITY_BUDGET_MS);
         this.visibleCount = this.visibility.visible;
       }
-      this.renderer.render();
+      // Drawn only when something changed (renderer gate); the fps counts drawn frames.
+      if (this.renderer.render()) this.frames++;
       this.drawLabels();
-      this.frames++;
       const now = performance.now();
       if (now - this.fpsAt >= 1000) {
         this.fps = Math.round((this.frames * 1000) / (now - this.fpsAt));
