@@ -813,7 +813,11 @@ refused … stays shaded“; photo.spec EXIF-Foto. Tests rot → grün:
 kompiliert, Testhorn-Zeile wie die Formel), `photo.spec.ts` „…closing it
 restores the view as the URL asked“. Dazu `workers: 3`
 (`E2E_WORKERS` überschreibt): jeder Worker hat seinen eigenen
-GPU-Prozess, die JIT-Stalls laufen parallel.
+GPU-Prozess, die JIT-Stalls laufen parallel. Nachtrag: auf dem CI-Runner
+liefen mit drei Workern zwei Tests in ihre 30-s-Polls (See-Wasserlage,
+Sensoren), lokal waren sie grün; da drei Worker nur zwei Minuten bringen,
+ist der Default jetzt **ein Worker**, `E2E_WORKERS=3` bleibt für schnelle
+lokale Läufe.
 
 **Zweiter Befund, Worker:** Mit zwei bzw. drei Workern wurde die Suite
 kaum schneller (28,8 bzw. 25,4 min) und zwei bis drei Farbtests liefen
@@ -840,7 +844,8 @@ gezählt: 30 gezeichnet vorher, 0 nachher).
 | Shade-Pass aus außer Farbtests, 1 Worker | 30,6 min | – |
 | dito, 2 Worker / 3 Worker (ohne Gate) | 28,8 min, 2 rot / 25,4 min, 3 rot | – |
 | dito mit Gate, 1 Worker | **12,4 min** | – |
-| dito mit Gate, 3 Worker | **10,4 min**, 60/60 grün | (CI-Lauf folgt) |
+| dito mit Gate, 3 Worker | **10,4 min**, 60/60 grün | 11,8 min, **2 rot** (See-Wasserlage, Sensoren: 30-s-Polls unter Last) |
+| dito mit Gate, 1 Worker (Default) | (Lauf folgt) | (Lauf folgt) |
 
 Mit drei Workern begrenzt die größte Datei den Lauf (app.spec, 25 Tests
 seriell à ~25 s unter Last); mehr Worker brächten nichts, eine Teilung

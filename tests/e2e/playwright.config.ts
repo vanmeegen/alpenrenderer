@@ -17,12 +17,13 @@ export default defineConfig({
   // slow CI runner needs well over two minutes for that.
   timeout: 240_000,
   expect: { timeout: 30_000, toHaveScreenshot: { maxDiffPixelRatio: 0.02 } },
-  // SwiftShader compiles the terrain pipelines anew for every page (8 s
-  // single-threaded, 18 s with the shade pass); workers overlap those stalls
-  // on the four cores of a runner. Files run in parallel, tests in a file in
-  // order. E2E_WORKERS=1 for a serial run.
+  // One page at a time: SwiftShader is CPU-bound, and with three workers the
+  // colour tests (shade pass, ~1 s a frame) and the sensor test (the view
+  // follows in the frame loop) ran into their 30 s polls on the CI runner
+  // while three workers gained only two minutes locally (12.4 → 10.4 min).
+  // E2E_WORKERS=3 for a quick local run on a machine with cores to spare.
   fullyParallel: false,
-  workers: Number(process.env.E2E_WORKERS ?? 3),
+  workers: Number(process.env.E2E_WORKERS ?? 1),
   retries: 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never', outputFolder: '../../playwright-report/e2e' }]] : 'list',
   outputDir: '../../test-results/e2e',
