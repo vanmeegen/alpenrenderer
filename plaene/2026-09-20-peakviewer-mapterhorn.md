@@ -839,8 +839,18 @@ gezählt: 30 gezeichnet vorher, 0 nachher).
 | vorher: Shade-Pass an, 1 Worker | 53,6 min | 34 min |
 | Shade-Pass aus außer Farbtests, 1 Worker | 30,6 min | – |
 | dito, 2 Worker / 3 Worker (ohne Gate) | 28,8 min, 2 rot / 25,4 min, 3 rot | – |
-| dito mit Gate, 1 Worker | (folgt) | – |
+| dito mit Gate, 1 Worker | **12,4 min** | – |
 | dito mit Gate, 3 Worker | (folgt) | (folgt) |
+
+Nebenbefund des Gates: `capture()` und `readRange()` setzten aus den
+Puffern des letzten Frames zusammen; im Headless-Chromium läuft zwischen
+einem Klick und dem nächsten `evaluate` nicht zwingend ein
+Animationsframe, also zeichnen beide Ausstehendes jetzt zuerst (durch das
+Gate, kostenlos wenn nichts anlag). Der EXIF-Foto-Test war bis dahin nur
+durch einen veralteten Farb-Puffer grün (blauer Himmel von vor dem Foto,
+wo beim 11,6°-Tele Fels steht) und prüft jetzt das Richtige: nach dem
+Schließen beleuchtetes Gelände statt Foto-Grau, nach dem Weiten per URL
+blauer Himmel.
 
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 

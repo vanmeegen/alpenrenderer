@@ -40,6 +40,11 @@ CI (`.github/workflows/ci.yml`) führt beides auf jedem Push und PR aus.
   50 s. Nur die Farbtests (Golden, Flanken, Konturen, See, Kamera-/Foto-
   Himmel) setzen `shade=1`. Die Geometrie-Toleranzen sind auf `q=low`
   ausgelegt; `q=high` prüft der Benutzer.
+- Der Renderer zeichnet nur bei Änderung (`render/redraw.ts`), und
+  Headless-Chromium lässt `requestAnimationFrame` nur laufen, solange etwas
+  Frames anfordert (`waitForFunction` mit raf-Polling, nicht `waitForTimeout`).
+  Tests lesen Bilder deshalb über `renderer.capture()`/`readRange()`, die
+  Ausstehendes zuerst zeichnen, und zählen Frames über rAF-Ticks in der Seite.
 - Pixel-Erwartungen prüfen Regionen und Übergänge, keine exakten Farbwerte.
   Screenshot-Goldens nur mit Toleranz und nur für Linux-Chromium aus CI.
 - Live-Daten (Tileserver, Coverage-Index) werden ausschließlich in
