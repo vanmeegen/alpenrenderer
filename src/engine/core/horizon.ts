@@ -29,13 +29,35 @@ export interface HorizonOptions {
    */
   tolerance: number;
   k: number;
+  /**
+   * Where the march stops short of the anchor: this fraction of the range,
+   * or `endPosts` posts of the level read there, whichever is longer. The
+   * DEM flattens a summit into a couple of posts; a sample inside the
+   * summit's own cell, or the cell before it that the bilinear surface
+   * pulls up, stands a few tenths of a degree "higher" than the anchor
+   * without hiding anything (the Gschöllkopf from the Mauritzalm, 367 m
+   * away: 28.6° against 28.0° with 13 m posts).
+   */
+  endFrac: number;
+  endPosts: number;
 }
 
 export const DEFAULT_HORIZON: HorizonOptions = {
   steps: 96,
   tolerance: 0.05,
   k: REFRACTION_K,
+  endFrac: 0.015,
+  endPosts: 2,
 };
+
+/** What the march along a sightline found: the highest apparent elevation on the way and where. */
+export interface March {
+  maxElev: number;
+  /** Ground range of the highest sample, metres. */
+  rMax: number;
+  /** Its height, metres. */
+  hMax: number;
+}
 
 /**
  * Sets `visible` on every target. Returns how many are visible.
@@ -43,24 +65,39 @@ export const DEFAULT_HORIZON: HorizonOptions = {
  * Cost is steps × targets DEM lookups — a few tens of thousands, a couple of
  * milliseconds, once per position.
  */
-/** Decides one target's sightline; true when the summit stands above everything in front of it. */
-function sightlineClear(t: LabelTarget, hf: HeightField, eyeAlt: number, opt: HorizonOptions, radius: number): boolean {
+/** Apparent elevation angle, degrees, of a point `h` metres high at ground range `r`. */
+function elevationAt(h: number, r: number, eyeAlt: number, radius: number, k: number): number {
+  return Math.atan2(h - eyeAlt - curvatureDrop(r, radius, k), r) * (180 / Math.PI);
+}
+
+/**
+ * Marches the DEM towards a target and reports the highest apparent
+ * elevation on the way. It stops short of the anchor (HorizonOptions.endFrac,
+ * endPosts) so the summit's own cell never counts.
+ */
+export function march(t: LabelTarget, hf: HeightField, eyeAlt: number, opt: HorizonOptions, radius: number): March {
   const range = t.range;
-  if (range < 60) return true;
   // Geometric spacing: near ground matters far more than the last kilometre,
   // and it keeps the step proportional to the DEM resolution at that range.
   const r0 = Math.min(80, range * 0.02);
-  const ratio = Math.log((range * 0.985) / r0) / (opt.steps - 1);
-  let maxElev = -90;
+  const end = Math.max(r0 * 1.001, range - Math.max(opt.endFrac * range, opt.endPosts * hf.resAt(range)));
+  const ratio = Math.log(end / r0) / (opt.steps - 1);
+  const m: March = { maxElev: -90, rMax: 0, hMax: 0 };
   for (let i = 0; i < opt.steps; i++) {
     const r = r0 * Math.exp(i * ratio);
     const p = destination(hf.lon, hf.lat, t.bearing, r, radius);
     const h = hf.height(p.lon, p.lat, r);
-    const up = h - eyeAlt - curvatureDrop(r, radius, opt.k);
-    const elev = Math.atan2(up, r) * (180 / Math.PI);
-    if (elev > maxElev) maxElev = elev;
+    const elev = elevationAt(h, r, eyeAlt, radius, opt.k);
+    if (elev > m.maxElev) { m.maxElev = elev; m.rMax = r; m.hMax = h; }
   }
-  return t.elevation >= maxElev - opt.tolerance;
+  return m;
+}
+
+/** Decides one target's sightline; true when the summit stands above everything in front of it. */
+function sightlineClear(t: LabelTarget, hf: HeightField, eyeAlt: number, opt: HorizonOptions, radius: number): boolean {
+  if (t.range < 60) return true;
+  const m = march(t, hf, eyeAlt, opt, radius);
+  return t.elevation >= m.maxElev - opt.tolerance;
 }
 
 /**

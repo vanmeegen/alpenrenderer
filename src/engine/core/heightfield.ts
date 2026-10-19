@@ -104,6 +104,23 @@ export class HeightField {
   }
 
   /**
+   * Post spacing, metres, of the level `height()` reads at a ground range:
+   * the finest filled observer level that covers it, else the coarsest
+   * filled one; 0 when nothing is filled yet.
+   */
+  resAt(range: number): number {
+    for (const l of this.levels) {
+      if (l.role === 'look' || !l.filled) continue;
+      if (range <= l.maxRange) return l.res;
+    }
+    for (let i = this.levels.length - 1; i >= 0; i--) {
+      const l = this.levels[i];
+      if (l.role !== 'look' && l.filled) return l.res;
+    }
+    return 0;
+  }
+
+  /**
    * The telescope's window a point is drawn from, finest first, with the
    * blend back into the observer's levels: 0 well inside, 1 from 95 % of the
    * half width out, smoothstep from 80 %. The shader's lookLevel/lookFade

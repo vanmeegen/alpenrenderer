@@ -142,6 +142,19 @@ describe('HeightField', () => {
     void cx; void cy;
   });
 
+  test('resAt names the post spacing of the level height() reads at that range: the finest filled one that covers it, else the coarsest filled', () => {
+    const hf = new HeightField(LON, LAT);
+    const fine = level(hf, 12, () => 2000);
+    const coarse = level(hf, 8, () => 2000);
+    expect(hf.resAt(0)).toBe(fine.res);
+    expect(hf.resAt(fine.maxRange)).toBe(fine.res);
+    expect(hf.resAt(fine.maxRange + 1)).toBe(coarse.res);
+    expect(hf.resAt(1e7)).toBe(coarse.res);           // beyond every reach: the coarsest filled still answers
+    const empty = new HeightField(LON, LAT);
+    level(empty, 12, () => 2000, false);
+    expect(empty.resAt(0)).toBe(0);                    // nothing filled: nothing read
+  });
+
   test('the label anchor follows the telescope\'s window: summitAt searches the look level where it holds the point, as drawn', () => {
     // The GPU draws the window's posts (lookAt); a pin whose summit was
     // searched on the coarser eye level lands a post or two off the drawn
