@@ -395,6 +395,25 @@ test.describe('standpoint', () => {
     expect(hashNum(await hashOf(page), 'lat')).toBeCloseTo(FLANK.lat, 4);
   });
 
+  test('a hash set from outside is read from the event that announces it, not from an address the app has rewritten since', async ({ page }) => {
+    // The app writes the view into the URL a moment after it changed. In a
+    // full suite run that write once landed between a hash set from outside
+    // and the app reading it: the app then read its own hash back and the
+    // new one was lost (photo.spec, the widened field of view). The event
+    // names the URL that was navigated to; that is the one to follow.
+    await page.goto(url());
+    await ready(page);
+    await page.waitForTimeout(600);                             // nothing is waiting to be written
+    await page.evaluate(() => {
+      const asked = location.href.replace(/yaw=[^&]*/, 'yaw=77');
+      const old = location.href;
+      history.replaceState(null, '', location.href.replace(/yaw=[^&]*/, 'yaw=100'));   // the app's own late write
+      window.dispatchEvent(new HashChangeEvent('hashchange', { oldURL: old, newURL: asked }));
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).alp.current.yaw as number), { timeout: 10_000 }).toBe(77);
+    await expect.poll(async () => hashNum(await hashOf(page), 'yaw'), { timeout: 10_000 }).toBe(77);
+  });
+
   test('tiles that do not arrive leave their level out, not a pit; the HUD says so and "Erneut laden" brings them', async ({ page }) => {
     // The second-finest level's tiles (tile zoom 11) fail as on a mountain
     // with one bar of signal. They used to be blitted as nothing: a hole

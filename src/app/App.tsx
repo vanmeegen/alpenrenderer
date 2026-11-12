@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
 import {
-  EYE_HEIGHT, OUTLINE, StandSource, ViewState, coarseFixNote, eyeHeightFromSlider, formatHash, PLACES, readHash,
-  readOptions, sliderFromEyeHeight, startView, trailing, writeLastView, writeStandSource,
+  EYE_HEIGHT, OUTLINE, StandSource, ViewState, coarseFixNote, eyeHeightFromSlider, formatHash, PLACES,
+  readOptions, sliderFromEyeHeight, startView, trailing, viewFromHash, writeLastView, writeStandSource,
 } from './state';
 import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
@@ -109,11 +109,15 @@ export function App() {
       (window as unknown as Record<string, unknown>).alp = v;
     }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
-    // What the hash leaves out stays as it is: "#yaw=180" turns the view, it does not move the standpoint.
-    const onHash = () => {
+    // The hash the event names, not the address bar: the app's own late write
+    // may have landed in between (state.ts viewFromHash for the rest).
+    const onHash = (e: HashChangeEvent) => {
       if (!viewer) return;
+      writeHash.cancel();
       const here = viewer.current;
-      const to = readHash(location.hash, here);
+      let hash = location.hash;
+      try { if (e.newURL) hash = new URL(e.newURL).hash; } catch { /* keep the address bar's */ }
+      const to = viewFromHash(hash, here);
       const moved = to.lon !== here.lon || to.lat !== here.lat;
       if (moved) viewer.fixAccuracy = null;
       void viewer.relocate(to);
@@ -132,6 +136,20 @@ export function App() {
   useEffect(() => {
     const v = viewerRef.current;
     if (v) v.showLabels = labelsOn;
+  });
+
+  // After every render: where the menu, the panels, the compass and the
+  // summit card stand over the picture, so that no label is put under them.
+  useEffect(() => {
+    const v = viewerRef.current, overlay = overlayRef.current;
+    if (!v || !overlay) return;
+    const o = overlay.getBoundingClientRect();
+    const rects: { x: number; y: number; w: number; h: number }[] = [];
+    document.querySelectorAll('[data-over-view]').forEach((e) => {
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) rects.push({ x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height });
+    });
+    v.setBlocked(rects);
   });
 
   const go = (id: string) => {
@@ -289,11 +307,11 @@ export function App() {
           left: 'max(0.5rem, env(safe-area-inset-left))', right: 'max(3.5rem, env(safe-area-inset-right))',
         }}>
         {!menuOpen ? (
-          <div className="pointer-events-auto rounded-lg bg-white/85 shadow backdrop-blur">
+          <div data-over-view className="pointer-events-auto rounded-lg bg-white/85 shadow backdrop-blur">
             <RailButton icon="menu" label="Menü einblenden" onClick={() => setMenuOpen(true)} />
           </div>
         ) : (
-          <nav aria-label="Menü" className="pointer-events-auto grid max-h-full grid-flow-col gap-x-0.5 rounded-lg bg-white/85 p-0.5 shadow backdrop-blur"
+          <nav aria-label="Menü" data-over-view className="pointer-events-auto grid max-h-full grid-flow-col gap-x-0.5 rounded-lg bg-white/85 p-0.5 shadow backdrop-blur"
             style={{ gridTemplateRows: 'repeat(auto-fit, 2rem)' }}>
             <RailButton icon="fold" label="Menü ausblenden" onClick={() => setMenuOpen(false)} />
             <RailButton icon="map" label="Karte" onClick={() => setPanel('map')} />
@@ -313,7 +331,7 @@ export function App() {
           onChange={(e) => { void openPhoto(e.target.files?.[0]); e.target.value = ''; }} />
 
         {menuOpen && (
-        <div className="flex max-h-full min-w-0 max-w-[24rem] flex-col gap-2">
+        <div data-over-view className="flex max-h-full min-w-0 max-w-[24rem] flex-col gap-2">
         <div className="pointer-events-auto shrink-0 rounded-lg bg-white/85 px-2.5 py-1.5 text-[12px] leading-snug text-neutral-800 shadow backdrop-blur">
           <div className="flex flex-wrap items-baseline gap-x-3">
             <span className="tabular-nums font-semibold">{compass(view.yaw)} {view.yaw.toFixed(0)}°</span>
@@ -351,7 +369,8 @@ export function App() {
             )}
             {status && !loading && (
               <span>{status.levelsShown} Level{status.levelsEmpty > 0 ? ` · ${status.levelsEmpty} Ebenen ohne Daten` : ''} · {fmtBytes(status.bytes)} · {status.backend}
-                {status.peaks.total > 0 ? ` · Gipfel ${status.peaks.visible}/${status.peaks.total}` : ''}</span>
+                {status.peaks.total > 0 ? ` · Gipfel ${status.peaks.visible}/${status.peaks.total}` : ''}
+                {status.peaks.unnamed > 0 ? ` · ${status.peaks.unnamed} weitere im Bild` : ''}</span>
             )}
           </div>
         </div>
@@ -476,13 +495,13 @@ export function App() {
           </div>
         </div>
       )}
-      <div className="pointer-events-none absolute right-2"
+      <div data-over-view className="pointer-events-none absolute right-2"
         style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}>
         <CompassRose yaw={view.yaw} offset={offsetYaw} sensors={sensors} />
       </div>
 
       {peak && (
-        <div className="alp-peak-card pointer-events-auto absolute max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur"
+        <div data-over-view className="alp-peak-card pointer-events-auto absolute max-w-md rounded-lg bg-white/90 px-3 py-2 text-[13px] text-neutral-800 shadow backdrop-blur"
           style={{
             bottom: 'max(2rem, calc(env(safe-area-inset-bottom) + 1.5rem))',
             left: menuOpen ? 'calc(max(0.5rem, env(safe-area-inset-left)) + 3rem)' : 'max(0.5rem, env(safe-area-inset-left))',

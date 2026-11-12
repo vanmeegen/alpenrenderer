@@ -115,6 +115,40 @@ test.describe('summit labels', () => {
     }), { timeout: 60_000 }).toBe(true);
   });
 
+  test('labels keep clear of the menu, the status panel and the compass; a summit under a panel is named once the panel is gone', async ({ page }) => {
+    // Turned 20° to the right, the Testhorn's summit lies under the status
+    // panel at the top left. Its name used to be painted there, under the panel.
+    await page.goto(url({ yaw: 110 }));
+    await ready(page);
+    await expect.poll(() => page.evaluate(() => (window as any).alp.status().peaks.settled), { timeout: 30_000 }).toBe(true);
+    const over = async () => page.evaluate(() => {
+      const c = document.querySelector('canvas.labels')!.getBoundingClientRect();
+      return [...document.querySelectorAll('[data-over-view]')].map((e) => {
+        const r = e.getBoundingClientRect();
+        return { x: r.left - c.left, y: r.top - c.top, w: r.width, h: r.height };
+      }).filter((r) => r.w > 0 && r.h > 0);
+    });
+    const panels = await over();
+    expect(panels.length).toBeGreaterThanOrEqual(3);            // rail, status, compass
+    const summit = { x: W / 2 - (Math.tan((20 * Math.PI) / 180) / (Math.tan(Math.PI / 6) * (W / H))) * (W / 2), y: summitScreenY((await ready(page)).eyeAltitude, 60) * H };
+    expect(panels.some((r) => summit.x > r.x && summit.x < r.x + r.w && summit.y > r.y && summit.y < r.y + r.h)).toBe(true);
+    const clear = async () => {
+      const rects = await over();
+      for (const l of await labels(page)) {
+        for (const r of rects) {
+          expect(l.bx < r.x + r.w && l.bx + l.bw > r.x && l.by < r.y + r.h && l.by + l.bh > r.y, `${l.name} under a panel`).toBe(false);
+          expect(l.ax >= r.x && l.ax <= r.x + r.w && l.ay >= r.y && l.ay <= r.y + r.h, `${l.name}'s pin under a panel`).toBe(false);
+        }
+      }
+    };
+    await clear();
+    expect((await labels(page)).map((l) => l.name)).not.toContain('Testhorn');
+    // The menu folded away: the summit is free, and named.
+    await page.getByRole('button', { name: 'Menü ausblenden' }).click();
+    await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toContain('Testhorn');
+    await clear();
+  });
+
   test('a summit behind its own shoulder is labelled on its visible edge, the card says how far the summit is', async ({ page }) => {
     // The Schulterkopf's top is 1.2° behind the edge of its own wall (fixture
     // SHOULDER): what you see is that wall, so its name goes on the edge, the

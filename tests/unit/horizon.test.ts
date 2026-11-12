@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { curvatureDrop, latToMercY, localRadius, lonToMercX, mercResolution, mercYToLat } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
-import { HorizonTable, computeVisibility } from '../../src/engine/core/horizon';
+import { DEFAULT_HORIZON, HorizonTable, VisibilityJob, computeVisibility } from '../../src/engine/core/horizon';
 import { buildTargets } from '../../src/engine/core/labels';
 import { Peak } from '../../src/engine/core/peaks';
 
@@ -241,5 +241,41 @@ describe('the horizon table: every post between the eye and the summit counts', 
     const by = Object.fromEntries(t.map((x) => [x.peak.id, x]));
     expect(by.vor.skyline).toBe(false);
     expect(by.ost.skyline).toBe(true);
+  });
+});
+
+describe('checking the sightlines again', () => {
+  test('what was seen stays seen until it is decided anew: a level arriving does not blank the labels', () => {
+    // Every rebuild of the targets (a level lands, the eye height changes)
+    // began with all of them hidden: the labels went out and came back one by one.
+    const res9 = mercResolution(LAT, 9);
+    const { hf, rowLat } = field(9, 640, (north, east) => {
+      if (Math.abs(north - 10000) <= res9 && Math.abs(east) <= 3 * res9) return 2200;
+      if (Math.abs(north - 20000) <= res9 && Math.abs(east) <= 3 * res9) return 2000;      // behind the first, and lower
+      return PLAIN;
+    });
+    const peaks: Peak[] = [
+      { id: 'vorn', name: 'Vorderkopf', lon: LON, lat: rowLat(Math.round(10000 / res9)), ele: 2200, prom: 600 },
+      { id: 'hinten', name: 'Hinterkopf', lon: LON, lat: rowLat(Math.round(20000 / res9)), ele: 2000, prom: 400 },
+    ];
+    const first = buildTargets(peaks, obs, hf, hf.maxRange);
+    expect(computeVisibility(first, hf, EYE)).toBe(1);
+    const again = buildTargets(peaks, obs, hf, hf.maxRange);
+    const job = new VisibilityJob(again, hf, EYE, DEFAULT_HORIZON, () => 0, first);
+    const by = (id: string) => again.find((t) => t.peak.id === id)!;
+    expect(by('vorn').visible).toBe(true);                        // carried over…
+    expect(by('vorn').decided).toBe(false);                       // …not yet checked
+    expect(by('hinten').visible).toBe(false);
+    expect(job.visible).toBe(1);
+    job.step(Infinity);
+    expect(by('vorn').visible).toBe(true);
+    expect(by('vorn').decided).toBe(true);
+    expect(by('hinten').visible).toBe(false);
+    expect(job.visible).toBe(1);
+    // From higher up the one behind shows too: what is carried over is a guess, the check decides.
+    const high = buildTargets(peaks, { ...obs, ground: EYE + 2000 }, hf, hf.maxRange);
+    const up = new VisibilityJob(high, hf, EYE + 2000, DEFAULT_HORIZON, () => 0, again);
+    up.step(Infinity);
+    expect(up.visible).toBe(2);
   });
 });

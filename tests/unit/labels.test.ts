@@ -9,7 +9,7 @@ import { Camera } from '../../src/engine/core/camera';
 import { latToMercY, lonToMercX, mercYToLat } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
 import { computeVisibility } from '../../src/engine/core/horizon';
-import { buildTargets, fmtEle, fmtRange, layoutLabels, pickLabel, pinAt } from '../../src/engine/core/labels';
+import { RANK, buildTargets, fmtEle, fmtRange, labelCells, layout, layoutLabels, pickLabel, pinAt } from '../../src/engine/core/labels';
 import { Peak } from '../../src/engine/core/peaks';
 import { lakeLabel } from '../../src/engine/core/water';
 
@@ -179,7 +179,7 @@ describe('buildTargets', () => {
     const lake = lakeLabel({ id: 'osm:way/2', name: 'Nordsee', lon: LON + 0.001, lat: north(4), rings: [] });
     const t = buildTargets([...peaks, lake], obs, hf, hf.maxRange, drawn);
     expect(asked.length).toBe(0);                                  // nothing computed up front
-    for (const x of t) x.visible = true;
+    for (const x of t) x.visible = x.peak.id !== 'behind';         // the Hinterhorn is hidden behind the wall
     const placed = layoutLabels(t, camera(0), opt());
     const wall = placed.find((p) => p.target.peak.id === 'wall')!;
     expect(wall.target.anchorAlt).toBe(WALL - 40);
@@ -189,7 +189,7 @@ describe('buildTargets', () => {
     const elev = Math.atan2(WALL - 40 - PLAIN - 1.7 - drop, range);
     expect(wall.ay).toBeCloseTo(300 - 300 * Math.tan(elev) / Math.tan(Math.PI / 6), 0);
     // The lake keeps its water; the Osthügel, off to the east, was never asked
-    // about, nor the Hinterhorn, which shares the wall's screen cell and is skipped before that.
+    // about, nor the Hinterhorn, which is hidden.
     expect(placed.find((p) => p.target.peak.id === 'osm:way/2')!.target.anchorAlt).toBeCloseTo(PLAIN, 0);
     expect(asked.length).toBe(1);
     // Asked once, remembered: a second frame asks nothing.
@@ -349,12 +349,12 @@ describe('pickLabel and formatting', () => {
   });
 });
 
-describe('which summits get the room: apparent prominence, one label per screen cell', () => {
+describe('which summits get the room: how big they look, how well known, whether they stand on the skyline', () => {
   // Rank = the angle a summit's own rise (its prominence) takes up from here,
   // atan(prominence / range): the hill in front beats the famous summit far
   // behind it, the 4000er beats the knoll at the foot of the hill (PeakVisor
-  // ranks by prominence; OpenTopoMap thins by isolation and zoom; the
-  // tessellation is Raposo et al. 2013). Not height, not distance alone.
+  // ranks by prominence; OpenTopoMap thins by isolation and zoom). Not
+  // height, not distance alone.
   const ranked: Peak[] = [
     { id: 'knoll', name: 'Buckel', lon: east(1), lat: LAT, ele: 1530, prom: 30 },
     { id: 'hill', name: 'Hügel', lon: east(7), lat: LAT, ele: 1900, prom: 400 },
@@ -363,12 +363,28 @@ describe('which summits get the room: apparent prominence, one label per screen 
     { id: 'nameless', name: 'Ohne Schartenhöhe', lon: east(3), lat: LAT, ele: 1600 },
   ];
 
-  test('orders by apparent prominence: the 4000er at 25 km, the 400 m hill at 7 km, the 1000 m summit at 20 km, the knoll at 1 km; no prominence comes last', () => {
+  test('orders by apparent prominence; a summit whose prominence nobody recorded counts as a 25 m knoll, not as nothing', () => {
     const t = buildTargets(ranked, obs, hf, hf.maxRange);
     expect(t.map((x) => x.peak.id)).toEqual(['giant', 'hill', 'big', 'knoll', 'nameless']);
     const giant = t.find((x) => x.peak.id === 'giant')!;
     expect(giant.rank).toBeCloseTo(Math.atan2(1700, giant.range), 6);
-    expect(t.find((x) => x.peak.id === 'nameless')!.rank).toBe(0);
+    // Rank 0 put four fifths of the catalogue after every lake and every knoll with a number.
+    const nameless = t.find((x) => x.peak.id === 'nameless')!;
+    expect(nameless.rank).toBeCloseTo(Math.atan2(RANK.defaultProm, nameless.range), 6);
+  });
+
+  test('a summit people have written about counts for more: half again with a Wikipedia article, a fifth with a Wikidata entry', () => {
+    const three: Peak[] = [
+      { id: 'plain', name: 'Namenlos', lon: east(10), lat: north(1), ele: 2000, prom: 300 },
+      { id: 'data', name: 'Erfasst', lon: east(10), lat: north(2), ele: 2000, prom: 300, tags: { wikidata: 'Q1' } },
+      { id: 'wiki', name: 'Bekannt', lon: east(10), lat: north(3), ele: 2000, prom: 300, tags: { wikidata: 'Q2', wikipedia: 'de:Bekannt' } },
+    ];
+    const t = Object.fromEntries(buildTargets(three, obs, hf, hf.maxRange).map((x) => [x.peak.id, x]));
+    expect(t.data.rank / Math.atan2(300, t.data.range)).toBeCloseTo(RANK.wikidata, 6);
+    expect(t.wiki.rank / Math.atan2(300, t.wiki.range)).toBeCloseTo(RANK.wikipedia, 6);
+    expect(t.plain.rank).toBeCloseTo(Math.atan2(300, t.plain.range), 6);
+    expect(RANK.wikipedia).toBe(1.5);
+    expect(RANK.wikidata).toBe(1.2);
   });
 
   test('a lake ranks by the angle its width takes up', () => {
@@ -377,35 +393,171 @@ describe('which summits get the room: apparent prominence, one label per screen 
     expect(t[0].rank).toBeCloseTo(Math.atan2(1000, t[0].range), 6);
   });
 
-  test('one label per screen cell: eight summits 5° apart fill three cells at 60° and six at 30°, twice as many', () => {
-    // Eight equal summits on the plain, 5° apart in bearing, 10 km out.
-    const eight: Peak[] = Array.from({ length: 8 }, (_, i) => {
-      const brg = ((72 + 5 * i) * Math.PI) / 180;
-      return { id: `s${i}`, name: `Spitze ${i}`, lon: LON + (10000 * Math.sin(brg)) / M_PER_DEG_LON, lat: LAT + (10000 * Math.cos(brg)) / M_PER_DEG_LAT, ele: 1500, prom: 100 };
-    });
-    const t = buildTargets(eight, obs, hf, hf.maxRange);
-    for (const x of t) x.visible = true;
-    const wide = layoutLabels(t, camera(90), { ...opt(), maxLabels: 50 });
-    // 1000 px over 87.8° of view: 5° is 57 px, a cell 9 line heights = 144 px wide.
-    expect(wide.length).toBe(3);
-    const cam = new Camera();
-    cam.aspect = 1000 / 600;
-    cam.set({ yaw: 90, pitch: 0, fov: 30 });
-    cam.update();
-    // 1000 px over 48° of view: 5° is 104 px, so pairs still share a cell, but twice as many cells are used.
-    const narrow = layoutLabels(t, cam, { ...opt(), maxLabels: 50 });
-    expect(narrow.length).toBe(6);
-  });
-
-  test('in a cell the best-ranked summit wins, and a label the stack cannot place frees the cell for the next', () => {
+  test('in one patch of sky the summit on the skyline is named before a bigger-looking one in front of a wall', () => {
     const two: Peak[] = [
-      { id: 'minor', name: 'Nebengipfel', lon: east(10), lat: LAT, ele: 1800, prom: 50 },
-      { id: 'major', name: 'Hauptgipfel', lon: east(10.05), lat: LAT, ele: 1900, prom: 600 },
+      { id: 'front', name: 'Vorberg', lon: east(10), lat: LAT, ele: 1900, prom: 400 },
+      { id: 'sky', name: 'Himmelskopf', lon: east(10.2), lat: LAT, ele: 1950, prom: 300 },
     ];
     const t = buildTargets(two, obs, hf, hf.maxRange);
     for (const x of t) x.visible = true;
-    const placed = layoutLabels(t, camera(90), opt());
-    expect(placed.map((p) => p.target.peak.id)).toEqual(['major']);
+    expect(layoutLabels(t, camera(90), opt()).map((p) => p.target.peak.id)).toEqual(['front']);
+    t.find((x) => x.peak.id === 'sky')!.skyline = true;
+    expect(RANK.skyline * 300).toBeGreaterThan(400);
+    expect(layoutLabels(t, camera(90), opt()).map((p) => p.target.peak.id)).toEqual(['sky']);
+  });
+});
+
+describe('where the labels go: one per patch of sky, the same ones while the view pans', () => {
+  /** Summits on the plain at given bearings, 10 km out, each bigger-looking than the next. */
+  const row = (bearings: number[]): Peak[] => bearings.map((deg, i) => {
+    const brg = (deg * Math.PI) / 180;
+    return { id: `s${i}`, name: `Spitze ${i}`, lon: LON + (10000 * Math.sin(brg)) / M_PER_DEG_LON, lat: LAT + (10000 * Math.cos(brg)) / M_PER_DEG_LAT, ele: 1500, prom: 300 - i };
+  });
+  const cam = (yaw: number, fov = 60) => {
+    const c = new Camera();
+    c.aspect = 1000 / 600;
+    c.set({ yaw, pitch: 0, fov });
+    c.update();
+    return c;
+  };
+
+  test('a cell is a patch of sky about one label wide; its size steps by √2 with the field of view', () => {
+    const wide = labelCells(cam(90), opt());
+    // 87.8° across 1000 px, a cell 9 line heights = 144 px: 12.6°, on the √2 ladder 11.3°.
+    expect(wide.bearing).toBeCloseTo(Math.SQRT2 ** 7, 6);
+    expect(labelCells(cam(90, 57), opt()).bearing).toBe(wide.bearing);     // a small zoom keeps the cells
+    expect(labelCells(cam(90, 30), opt()).bearing).toBeCloseTo(Math.SQRT2 ** 6, 6);
+    expect(wide.elevation).toBeCloseTo(Math.SQRT2 ** 5, 6);                // 48 px of 600 over 60°: 4.8°, on the ladder 5.7°
+  });
+
+  test('eight summits 5° apart: one name per cell, more of them when zoomed in', () => {
+    const t = buildTargets(row([72, 77, 82, 87, 92, 97, 102, 107]), obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const cellsOf = (c: Camera) => new Set(t.map((x) => Math.floor(x.bearing / labelCells(c, opt()).bearing))).size;
+    const wide = layoutLabels(t, cam(90), { ...opt(), maxLabels: 50 });
+    expect(wide.length).toBe(cellsOf(cam(90)));
+    expect(wide.length).toBe(4);
+    const narrow = layoutLabels(t, cam(90, 30), { ...opt(), maxLabels: 50 });
+    expect(narrow.length).toBe(cellsOf(cam(90, 30)));
+    expect(narrow.length).toBeGreaterThan(wide.length);
+  });
+
+  test('panning a third of a cell keeps the labels: the cells are fixed in the sky, not on the screen', () => {
+    // On a grid fixed to the screen each summit changed its cell as the view
+    // turned, and with it the winner of the cell: names came and went.
+    const t = buildTargets(row([60, 64, 69, 75, 80, 86, 91, 95, 101, 106, 112, 117]), obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const names = (yaw: number) => layoutLabels(t, cam(yaw), { ...opt(), maxLabels: 50 }).map((p) => p.target.peak.id).sort();
+    const at = names(88);
+    const step = labelCells(cam(88), opt()).bearing / 3;
+    expect(names(88 + step)).toEqual(at);
+    expect(names(88 - step)).toEqual(at);
+    expect(at.length).toBeGreaterThan(3);
+  });
+
+  test('the best summit of a cell that is out of the frame leaves the cell unnamed rather than hand it to the next for a moment', () => {
+    // 80° and 84° share a cell (79.2° to 90.5°). Looking at 130°, the left edge of the frame is at 86°.
+    const t = buildTargets(row([80, 89]), obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    expect(Math.floor(80 / labelCells(cam(130), opt()).bearing)).toBe(Math.floor(89 / labelCells(cam(130), opt()).bearing));
+    expect(layoutLabels(t, cam(130), opt())).toEqual([]);
+    expect(layoutLabels(t, cam(90), opt()).map((p) => p.target.peak.id)).toEqual(['s0']);
+  });
+
+  test('a label the stack cannot place leaves its cell to the next summit in it', () => {
+    // Two summits a degree apart, in one cell.
+    const two: Peak[] = [
+      { id: 'minor', name: 'Nebengipfel', lon: LON + (10000 * Math.sin((89 * Math.PI) / 180)) / M_PER_DEG_LON, lat: LAT + (10000 * Math.cos((89 * Math.PI) / 180)) / M_PER_DEG_LAT, ele: 1800, prom: 50 },
+      { id: 'major', name: 'Hauptgipfel', lon: east(10), lat: LAT, ele: 1900, prom: 600 },
+    ];
+    const t = buildTargets(two, obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    expect(layoutLabels(t, camera(90), opt()).map((p) => p.target.peak.id)).toEqual(['major']);
+    // A panel over the major one's summit: it gets no label, the minor one does.
+    const major = t.find((x) => x.peak.id === 'major')!;
+    const ndc = new Float32Array(3);
+    camera(90).project(major.east, major.north, major.up, ndc);
+    const ax = (ndc[0] * 0.5 + 0.5) * 1000, ay = (1 - (ndc[1] * 0.5 + 0.5)) * 600;
+    const blocked = [{ x: ax - 3, y: ay - 3, w: 6, h: 6 }];
+    const placed = layoutLabels(t, camera(90), { ...opt(), blocked });
+    expect(placed.map((p) => p.target.peak.id)).toEqual(['minor']);
+  });
+
+  test('a summit never loses its cell to a lake, and the lakes share a seventh of the labels at most', () => {
+    const lakes = [0, 1, 2, 3, 4, 5].map((i) => lakeLabel({
+      id: `osm:way/${i}`, name: `See ${i}`, lon: LON + (4000 * Math.sin(((65 + 10 * i) * Math.PI) / 180)) / M_PER_DEG_LON,
+      lat: LAT + (4000 * Math.cos(((65 + 10 * i) * Math.PI) / 180)) / M_PER_DEG_LAT, area: 4e6, rings: [],
+    }));
+    const summit: Peak = { id: 'top', name: 'Seekopf', lon: lakes[2].lon, lat: lakes[2].lat, ele: 1500, prom: 20 };
+    const t = buildTargets([...lakes, summit], obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    // The lake looks 25 times as big as the knoll in the same spot, and used to take the name.
+    const placed = layoutLabels(t, camera(90), { ...opt(), maxLabels: 14 });
+    const ids = placed.map((p) => p.target.peak.id);
+    expect(ids).toContain('top');
+    expect(ids).not.toContain('osm:way/2');
+    expect(placed.filter((p) => p.target.peak.kind === 'lake').length).toBe(2);   // a seventh of 14
+  });
+
+  test('label boxes keep clear of the panels on the screen, and a summit under a panel is not named', () => {
+    const t = buildTargets(row([84, 96]), obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const free = layoutLabels(t, cam(90), opt());
+    expect(free.length).toBe(2);
+    const [a, b] = free;
+    // A panel exactly where a's box went: the box moves clear of it, the pin stays.
+    const overBox = [{ x: a.bx - 2, y: a.by - 2, w: a.bw + 4, h: a.bh + 4 }];
+    const moved = layoutLabels(t, cam(90), { ...opt(), blocked: overBox }).find((p) => p.target === a.target)!;
+    expect(moved.ax).toBe(a.ax);
+    const r = overBox[0];
+    expect(moved.bx < r.x + r.w && moved.bx + moved.bw > r.x && moved.by < r.y + r.h && moved.by + moved.bh > r.y).toBe(false);
+    // A panel over b's summit: b is not named, a still is.
+    const overPin = [{ x: b.ax - 20, y: b.ay - 20, w: 40, h: 40 }];
+    expect(layoutLabels(t, cam(90), { ...opt(), blocked: overPin }).map((p) => p.target.peak.id)).toEqual([a.target.peak.id]);
+  });
+
+  test('next to a tall panel the box moves sideways, clear of it and still over its summit, rather than down below the panel', () => {
+    // The menu rail at the left edge, 38 px wide and 320 px tall, and a summit 30 px to the right of it.
+    const rail = { x: 8, y: 8, w: 38, h: 320 };
+    const t = buildTargets(row([90]), obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    // Looking so far right that the summit is 76 px from the left edge.
+    const free = layoutLabels(t, cam(90), opt())[0];
+    const hfov = 2 * Math.atan(Math.tan(Math.PI / 6) * (1000 / 600));
+    const yaw = 90 + (Math.atan((1 - 76 / 500) * Math.tan(hfov / 2)) * 180) / Math.PI;
+    const p = layoutLabels(t, cam(yaw), { ...opt(), blocked: [rail] })[0];
+    expect(Math.abs(p.ax - 76)).toBeLessThan(1);
+    expect(p.bx).toBeGreaterThanOrEqual(rail.x + rail.w);          // beside the rail
+    expect(p.bx).toBeLessThanOrEqual(p.ax);                         // still over its summit
+    expect(Math.abs(p.by - free.by)).toBeLessThan(1);               // at the height it would have had
+  });
+
+  test('labels that stood last time are placed first: a change of rank does not reshuffle the stack', () => {
+    // Two summits 3° apart at the edge of two cells, names too wide to stand side by side: one box is stacked over the other.
+    const t = buildTargets([
+      { id: 'a', name: 'Der erste lange Gipfelname', lon: LON + (10000 * Math.sin((89.5 * Math.PI) / 180)) / M_PER_DEG_LON, lat: LAT + (10000 * Math.cos((89.5 * Math.PI) / 180)) / M_PER_DEG_LAT, ele: 1500, prom: 300 },
+      { id: 'b', name: 'Der zweite lange Gipfelname', lon: LON + (10000 * Math.sin((92.5 * Math.PI) / 180)) / M_PER_DEG_LON, lat: LAT + (10000 * Math.cos((92.5 * Math.PI) / 180)) / M_PER_DEG_LAT, ele: 1500, prom: 290 },
+    ], obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const first = layoutLabels(t, cam(90), opt());
+    expect(first.map((p) => p.target.peak.id)).toEqual(['a', 'b']);
+    const boxOf = (placed: typeof first, id: string) => { const p = placed.find((q) => q.target.peak.id === id)!; return [p.bx, p.by]; };
+    expect(boxOf(first, 'a')[1]).not.toBe(boxOf(first, 'b')[1]);            // stacked
+    // b turns out to stand on the skyline: it now ranks first.
+    t.find((x) => x.peak.id === 'b')!.skyline = true;
+    const reshuffled = layoutLabels(t, cam(90), opt());
+    expect(boxOf(reshuffled, 'a')).not.toEqual(boxOf(first, 'a'));
+    const kept = layoutLabels(t, cam(90), { ...opt(), previous: first });
+    expect(boxOf(kept, 'a')).toEqual(boxOf(first, 'a'));
+    expect(boxOf(kept, 'b')).toEqual(boxOf(first, 'b'));
+  });
+
+  test('how many visible summits in the frame went without a name is counted', () => {
+    const t = buildTargets(row([72, 77, 82, 87, 92, 97, 102, 107]), obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const r = layout(t, cam(90), { ...opt(), maxLabels: 50 });
+    expect(r.placed.length).toBe(4);
+    expect(r.inFrame).toBe(8);
   });
 });
 

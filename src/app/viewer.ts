@@ -9,7 +9,7 @@
 import { AlignResult, DEFAULT_PROFILE, PHOTO_SKYLINE, alignPhoto, extractSkyline, horizonProfile } from '../engine/core/align';
 import { Camera, fovForAspect, longFovOf } from '../engine/core/camera';
 import { DEFAULT_HORIZON, HorizonTable, VisibilityJob } from '../engine/core/horizon';
-import { LabelTarget, PlacedLabel, buildTargets, layoutLabels, pickLabel } from '../engine/core/labels';
+import { LabelTarget, PlacedLabel, buildTargets, layout, pickLabel } from '../engine/core/labels';
 import { Peak } from '../engine/core/peaks';
 import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
 import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
@@ -99,7 +99,7 @@ export interface ViewerStatus {
    * `settled`: the targets are from the last rebuild (none pending) and all
    * their sightlines are decided, so the labels stand where they will stay.
    */
-  peaks: { total: number; visible: number; placed: number; settled: boolean; layouts: number };
+  peaks: { total: number; visible: number; placed: number; unnamed: number; settled: boolean; layouts: number };
   camera: { active: boolean; fovY: number; fovSource: 'default' | 'reported' | 'manual'; width: number; height: number };
   photo: PhotoStatus | null;
 }
@@ -554,14 +554,16 @@ export class Viewer {
     const obs = { lon: this.view.lon, lat: this.view.lat, ground: eye, eye: 0 };
     // Label pins go onto the summits as the mesh draws them, not the DEM's
     // sharper ones; the mesh follows the view, so its layout is read when asked.
+    const before = this.targets;
     this.targets = buildTargets(named, obs, hf, Math.min(LABEL_RANGE_KM * 1000, hf.maxRange),
       (lon, lat) => {
         const mesh = this.renderer.meshParams();
         return mesh ? meshTopNear(hf, mesh, lon, lat, eye) : { lon, lat, h: hf.height(lon, lat) };
       });
-    // Sightlines over frames, not in one go: see VisibilityJob.
-    this.visibility = new VisibilityJob(this.targets, hf, eye);
-    this.visibleCount = 0;
+    // Sightlines over frames, not in one go: see VisibilityJob. What was seen
+    // from here before stays seen until it is decided anew.
+    this.visibility = new VisibilityJob(this.targets, hf, eye, DEFAULT_HORIZON, undefined, before);
+    this.visibleCount = this.visibility.visible;
   }
 
   /**
@@ -577,6 +579,19 @@ export class Viewer {
   /** What the labels were last laid out for, and how often they have been (status().peaks.layouts). */
   private labelStamp = '';
   private layouts = 0;
+  /** Visible summits and lakes in the frame that went without a name in the last layout. */
+  private unnamed = 0;
+  /** What stands on the screen over the picture, CSS pixels from the overlay's corner (labels.ts LayoutOptions.blocked). */
+  private blocked: { x: number; y: number; w: number; h: number }[] = [];
+  private blockedKey = '';
+
+  /** The app says where its menu, panels and compass are: no label goes under them. */
+  setBlocked(rects: { x: number; y: number; w: number; h: number }[]) {
+    const key = rects.map((r) => `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.w)},${Math.round(r.h)}`).join(';');
+    if (key === this.blockedKey) return;
+    this.blockedKey = key;
+    this.blocked = rects;
+  }
 
   /**
    * Lays the labels out and paints them, when something they depend on
@@ -594,18 +609,20 @@ export class Viewer {
     const c = this.camera;
     const stamp = [
       cssW, cssH, globalThis.devicePixelRatio ?? 1, this.showLabels, this.targetsVersion, this.visibility?.decided ?? -1,
-      c.yaw, c.pitch, c.roll, c.fov, c.aspect, drawnKey ?? '', this.selected?.target.peak.id ?? '',
+      c.yaw, c.pitch, c.roll, c.fov, c.aspect, drawnKey ?? '', this.selected?.target.peak.id ?? '', this.blockedKey,
     ].join('|');
     if (stamp === this.labelStamp) return;
     this.labelStamp = stamp;
     this.layouts++;
     painter.resize(cssW, cssH);
-    if (!this.showLabels || !this.targets.length) { this.placed = []; return; }   // resize() cleared the overlay
-    this.placed = layoutLabels(this.targets, this.camera, {
+    if (!this.showLabels || !this.targets.length) { this.placed = []; this.unnamed = 0; return; }   // resize() cleared the overlay
+    const laid = layout(this.targets, this.camera, {
       width: cssW, height: cssH, measure: painter.measure,
       lineHeight: painter.style.nameSize + 3, maxLabels: 60, detailed: 6, gap: 5,
-      drawnKey,
+      drawnKey, blocked: this.blocked, previous: this.placed,
     });
+    this.placed = laid.placed;
+    this.unnamed = laid.inFrame - laid.placed.length;
     if (this.selected) {
       const id = this.selected.target.peak.id;
       this.selected = this.placed.find((p) => p.target.peak.id === id) ?? this.selected;
@@ -726,7 +743,7 @@ export class Viewer {
         active: this.sensors.active, offsetYaw: this.sensors.offsetYaw, offsetPitch: this.sensors.offsetPitch,
       },
       peaks: {
-        total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length, layouts: this.layouts,
+        total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length, unnamed: this.unnamed, layouts: this.layouts,
         settled: this.rebuildTimer === null && (this.visibility?.done ?? false),
       },
       camera: {

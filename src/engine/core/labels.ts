@@ -34,8 +34,9 @@ export interface LabelTarget {
   skyline?: boolean;
   /**
    * How big the feature looks from here, radians: the angle its own rise
-   * takes up, atan(prominence / range) for a summit, atan(width / range) for
-   * a lake. What the labels are handed out by; 0 when nothing is known.
+   * takes up, atan(prominence / range) for a summit (times what is known of
+   * its fame, RANK), atan(width / range) for a lake. What the labels are
+   * handed out by, with the skyline bonus on top (see `effectiveRank`).
    */
   rank: number;
   visible: boolean;
@@ -83,6 +84,32 @@ export interface LayoutOptions {
    * settled for one key settles again for the next.
    */
   drawnKey?: string;
+  /**
+   * What stands on the screen over the picture, CSS pixels: the menu rail,
+   * the status panel, the compass. No label box overlaps one, and a summit
+   * under one is not named (its pin would point under the panel).
+   */
+  blocked?: { x: number; y: number; w: number; h: number }[];
+  /** What the last layout placed: those cells are filled first, in that order, so the stack of boxes does not reshuffle. */
+  previous?: PlacedLabel[];
+}
+
+/**
+ * What goes into a summit's rank besides the angle its prominence takes up.
+ * `defaultProm`: a summit whose prominence nobody recorded (four fifths of
+ * the catalogue) counts as a 25 m knoll, not as nothing. `wikipedia`,
+ * `wikidata`: a summit people have written about is one people look for.
+ * `skyline`: with the sky behind it a summit is what the eye picks out.
+ * `lakeShare`: the most of the labels that go to lakes.
+ */
+export const RANK = { defaultProm: 25, wikipedia: 1.5, wikidata: 1.2, skyline: 1.6, lakeShare: 1 / 7 };
+
+/** A cell of the label grid in line heights, and the ladder its angular size steps on. */
+export const LABEL_GRID = { width: 9, height: 3, step: Math.SQRT2 };
+
+/** The rank the layout hands the cells out by. */
+export function effectiveRank(t: LabelTarget): number {
+  return t.skyline ? t.rank * RANK.skyline : t.rank;
 }
 
 const NEAR_ANCHOR_M = 140;
@@ -134,14 +161,15 @@ export function buildTargets(
       const o = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye },
         { lon: a.lon, lat: a.lat, alt: anchorAlt });
       if (o.range > maxRange || o.range < 20) return;
-      const size = p.kind === 'lake' ? p.extent : p.prom;
+      const size = p.kind === 'lake' ? p.extent : p.prom ?? RANK.defaultProm;
+      const fame = p.kind === 'lake' ? 1 : p.tags?.wikipedia ? RANK.wikipedia : p.tags?.wikidata ? RANK.wikidata : 1;
       out.push({
         peak: p,
         east: o.east, north: o.north, up: o.up,
         range: o.range, bearing: o.bearing, elevation: o.elevation,
         anchorAlt,
         anchor: { lon: a.lon, lat: a.lat },
-        rank: size ? Math.atan2(size, o.range) : 0,
+        rank: size ? Math.atan2(size, o.range) * fame : 0,
         visible: false,
         decided: false,
         spot,
@@ -176,16 +204,6 @@ export function buildTargets(
 }
 
 /**
- * Screen placement. The screen is a grid of cells about one label wide and
- * two lines tall; each cell names one feature, the best-ranked one whose
- * anchor falls into it (the tessellation of Raposo, Brewer and Stanislawski
- * 2013: a retained summit has room for its label). Zooming in spreads the
- * anchors over more cells, so more summits get their names, as a telescope
- * does in PeakFinder. Labels are stacked upwards from their summit; one that
- * finds no free slot is dropped rather than allowed to overlap, and leaves
- * its cell to the next.
- */
-/**
  * Moves a label's pin onto another point of its mountain: the visible edge
  * the sightline march found in front of a summit hidden a little behind
  * it (horizon.ts ownCrest). Geometry and height are the edge's; `range`,
@@ -206,29 +224,66 @@ export function pinAt(
   t.settledFor = undefined;
 }
 
-export function layoutLabels(
+/**
+ * The label grid: cells of bearing and elevation, degrees, about one label
+ * wide and two lines tall at this field of view. Their size is taken from
+ * a ladder of √2 steps, so a small zoom keeps the cells and the names in
+ * them; a cell is a patch of sky, not of screen, so turning the view moves
+ * the names with the mountains instead of dealing them out anew.
+ */
+export function labelCells(cam: Camera, opt: Pick<LayoutOptions, 'width' | 'height' | 'lineHeight'>): { bearing: number; elevation: number } {
+  const DEG = Math.PI / 180;
+  const vfov = cam.fov, hfov = (2 * Math.atan(Math.tan((vfov * DEG) / 2) * (opt.width / opt.height))) / DEG;
+  const onLadder = (deg: number) => LABEL_GRID.step ** Math.round(Math.log(deg) / Math.log(LABEL_GRID.step));
+  return {
+    bearing: onLadder((hfov * LABEL_GRID.width * opt.lineHeight) / opt.width),
+    elevation: onLadder((vfov * LABEL_GRID.height * opt.lineHeight) / opt.height),
+  };
+}
+
+/**
+ * Screen placement. Each cell of the label grid (labelCells) names one
+ * feature: the best-ranked visible one in it, a summit before a lake (the
+ * tessellation of Raposo, Brewer and Stanislawski 2013: a retained summit
+ * has room for its label). When that one is out of the frame the cell stays
+ * unnamed rather than go to the next for as long as it takes to pan there;
+ * when it is in the frame but cannot be placed (no room, under a panel), the
+ * next in the cell is tried. Zooming in makes the cells smaller, so more
+ * summits get their names, as a telescope does in PeakFinder. Labels are
+ * stacked upwards from their summit; one that finds no free slot is dropped
+ * rather than allowed to overlap.
+ *
+ * Returns what was placed and how many visible features are in the frame.
+ */
+export function layout(
   targets: LabelTarget[], cam: Camera, opt: LayoutOptions,
-): PlacedLabel[] {
+): { placed: PlacedLabel[]; inFrame: number } {
   const ndc = new Float32Array(3);
   const placed: PlacedLabel[] = [];
-  const boxes: PlacedLabel[] = [];
   const margin = 4;
+  const blocked = opt.blocked ?? [];
+
+  /** Anchor in CSS pixels, or null behind the camera. */
+  const project = (t: LabelTarget): { x: number; y: number } | null => {
+    const w = cam.project(t.east, t.north, t.up, ndc);
+    if (w <= 0) return null;
+    return { x: (ndc[0] * 0.5 + 0.5) * opt.width, y: (1 - (ndc[1] * 0.5 + 0.5)) * opt.height };
+  };
+  const at = new Map<LabelTarget, { x: number; y: number } | null>();
+  const where = (t: LabelTarget) => {
+    let p = at.get(t);
+    if (p === undefined) { p = project(t); at.set(t, p); }
+    return p;
+  };
+  const framed = (t: LabelTarget): boolean => {
+    const p = where(t);
+    return !!p && p.x >= 0 && p.x <= opt.width && p.y >= 0 && p.y <= opt.height;
+  };
 
   // One label per summit or lake: among its visible anchors, the most
   // preferred one that is in the frame (its main point if that shows there,
   // else the first spare spot that does). A long lake whose centre is left
   // of the frame is named on the end that is in it.
-  const inFrame = new Map<LabelTarget, boolean>();
-  const framed = (t: LabelTarget): boolean => {
-    let f = inFrame.get(t);
-    if (f === undefined) {
-      const w = cam.project(t.east, t.north, t.up, ndc);
-      const x = (ndc[0] * 0.5 + 0.5) * opt.width, y = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
-      f = w > 0 && x >= 0 && x <= opt.width && y >= 0 && y <= opt.height;
-      inFrame.set(t, f);
-    }
-    return f;
-  };
   const chosen = new Map<string, LabelTarget>();
   for (const t of targets) {
     if (!t.visible) continue;
@@ -238,60 +293,108 @@ export function layoutLabels(
     if (tIn === cIn ? t.spot < c.spot : tIn) chosen.set(t.peak.id, t);
   }
 
-  const cellW = 9 * opt.lineHeight, cellH = 3 * opt.lineHeight;
-  const taken = new Set<number>();
-  const cellOf = (x: number, y: number) => Math.floor(x / cellW) + 4096 * Math.floor(y / cellH);
-
-  for (let i = 0; i < targets.length && placed.length < opt.maxLabels; i++) {
-    const t = targets[i];
-    if (!t.visible || chosen.get(t.peak.id) !== t) continue;
-    let w = cam.project(t.east, t.north, t.up, ndc);
-    if (w <= 0) continue;
-    let ax = (ndc[0] * 0.5 + 0.5) * opt.width;
-    let ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
-    if (ax < -40 || ax > opt.width + 40 || ay < -40 || ay > opt.height + 40) continue;
-    if (taken.has(cellOf(ax, ay))) continue;
-    if (t.settle && t.settledFor !== (opt.drawnKey ?? '')) {
-      // On screen for the first time, or drawn anew: onto the summit as the mesh draws it.
-      Object.assign(t, t.settle(t));
-      t.settledFor = opt.drawnKey ?? '';
-      w = cam.project(t.east, t.north, t.up, ndc);
-      if (w <= 0) continue;
-      ax = (ndc[0] * 0.5 + 0.5) * opt.width;
-      ay = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
-    }
-
-    const detailed = placed.length < opt.detailed;
-    const lines = detailed
-      ? [t.peak.name, `${fmtEle(t.peak) || (t.peak.kind === 'lake' ? `${Math.round(t.anchorAlt)} m` : '')} · ${fmtRange(t.range)}`]
-      : [t.peak.name];
-    const bw = Math.max(...lines.map((s, li) => opt.measure(s, li === 0))) + 12;
-    const bh = lines.length * opt.lineHeight + 6;
-
-    let bx = Math.min(Math.max(ax - bw / 2, 2), opt.width - bw - 2);
-    let by = ay - 14 - bh;
-    // Stack upwards from the summit; a summit too close to the top edge for
-    // that keeps its label at the top and stacks downwards instead, because
-    // the highest peak in view is the last one that should lose its name.
-    let dir = -1;
-    if (by < 2) { by = 2; dir = 1; }
-    let ok = false;
-    for (let attempt = 0; attempt < 26; attempt++) {
-      if (by < 2 || by + bh > opt.height - 2) break;
-      const hit = boxes.some((b) =>
-        bx < b.bx + b.bw + opt.gap && bx + bw + opt.gap > b.bx
-        && by < b.by + b.bh + margin && by + bh + margin > b.by);
-      if (!hit) { ok = true; break; }
-      by += dir * (opt.lineHeight + opt.gap);
-    }
-    if (!ok) continue;
-
-    const p: PlacedLabel = { target: t, ax, ay, bx, by, bw, bh, lines };
-    placed.push(p);
-    boxes.push(p);
-    taken.add(cellOf(ax, ay));
+  // The cells: every visible feature goes into the cell of sky it stands in, best first.
+  const size = labelCells(cam, opt);
+  const better = (a: LabelTarget, b: LabelTarget) =>
+    (a.peak.kind === 'lake' ? 1 : 0) - (b.peak.kind === 'lake' ? 1 : 0)
+    || effectiveRank(b) - effectiveRank(a) || a.range - b.range;
+  const cells = new Map<string, LabelTarget[]>();
+  let inFrame = 0;
+  for (const t of chosen.values()) {
+    const bearing = ((t.bearing % 360) + 360) % 360;
+    const key = `${Math.floor(bearing / size.bearing)}:${Math.floor((t.elevation + 90) / size.elevation)}`;
+    const list = cells.get(key);
+    if (list) list.push(t); else cells.set(key, [t]);
+    if (framed(t)) inFrame++;
   }
-  return placed;
+
+  // The cells in the order they are filled: those named last time first, as
+  // they were, then by their best feature.
+  const before = new Map<string, number>();
+  (opt.previous ?? []).forEach((p, i) => before.set(p.target.peak.id, i));
+  const order: { list: LabelTarget[]; was: number }[] = [];
+  for (const list of cells.values()) {
+    list.sort(better);
+    if (!framed(list[0])) continue;                      // its best is out of the frame: unnamed for now
+    let was = Infinity;
+    for (const t of list) { const i = before.get(t.peak.id); if (i !== undefined && i < was) was = i; }
+    order.push({ list, was });
+  }
+  order.sort((a, b) => a.was - b.was || better(a.list[0], b.list[0]));
+
+  const lakeMax = Math.max(1, Math.round(opt.maxLabels * RANK.lakeShare));
+  let lakes = 0;
+  const hits = (bx: number, by: number, bw: number, bh: number) =>
+    placed.some((b) => bx < b.bx + b.bw + opt.gap && bx + bw + opt.gap > b.bx && by < b.by + b.bh + margin && by + bh + margin > b.by)
+    || blocked.some((r) => bx < r.x + r.w + margin && bx + bw + margin > r.x && by < r.y + r.h + margin && by + bh + margin > r.y);
+
+  for (const { list } of order) {
+    if (placed.length >= opt.maxLabels) break;
+    for (const t of list) {
+      if (!framed(t)) continue;
+      if (t.peak.kind === 'lake' && lakes >= lakeMax) continue;
+      if (t.settle && t.settledFor !== (opt.drawnKey ?? '')) {
+        // In the frame for the first time, or drawn anew: onto the summit as the mesh draws it.
+        Object.assign(t, t.settle(t));
+        t.settledFor = opt.drawnKey ?? '';
+        at.delete(t);
+      }
+      const p = where(t);
+      if (!p) continue;
+      const ax = p.x, ay = p.y;
+      // A summit under a panel is not named: its pin would point under the panel.
+      if (blocked.some((r) => ax >= r.x && ax <= r.x + r.w && ay >= r.y && ay <= r.y + r.h)) continue;
+
+      const detailed = placed.length < opt.detailed;
+      const lines = detailed
+        ? [t.peak.name, `${fmtEle(t.peak) || (t.peak.kind === 'lake' ? `${Math.round(t.anchorAlt)} m` : '')} · ${fmtRange(t.range)}`]
+        : [t.peak.name];
+      const bw = Math.max(...lines.map((s, li) => opt.measure(s, li === 0))) + 12;
+      const bh = lines.length * opt.lineHeight + 6;
+
+      // Where the box may stand: centred over the summit, or, when a panel
+      // is in the way there, beside the panel as long as it is still over
+      // the summit. At each place it is stacked upwards from the summit; a
+      // summit too close to the top edge keeps its label at the top and
+      // stacks downwards instead, because the highest peak in view is the
+      // last one that should lose its name. Below the summit is the last resort.
+      const centred = Math.min(Math.max(ax - bw / 2, 2), opt.width - bw - 2);
+      const columns = [centred];
+      for (const r of blocked) {
+        if (!(centred < r.x + r.w + margin && centred + bw + margin > r.x)) continue;
+        for (const x of [r.x + r.w + margin, r.x - margin - bw]) {
+          if (x >= 2 && x + bw <= opt.width - 2 && ax >= x && ax <= x + bw) columns.push(x);
+        }
+      }
+      const stack = (x: number, from: number, dir: number): number | null => {
+        let y = from;
+        for (let attempt = 0; attempt < 26; attempt++) {
+          if (y < 2 || y + bh > opt.height - 2) return null;
+          if (!hits(x, y, bw, bh)) return y;
+          y += dir * (opt.lineHeight + opt.gap);
+        }
+        return null;
+      };
+      let bx = centred, by: number | null = null;
+      const above = ay - 14 - bh;
+      for (const x of columns) {
+        by = above < 2 ? stack(x, 2, 1) : stack(x, above, -1);
+        if (by !== null) { bx = x; break; }
+      }
+      if (by === null && above >= 2) by = stack(centred, ay + 14, 1);
+      if (by === null) continue;
+
+      placed.push({ target: t, ax, ay, bx, by, bw, bh, lines });
+      if (t.peak.kind === 'lake') lakes++;
+      break;                                             // the cell is named
+    }
+  }
+  return { placed, inFrame };
+}
+
+/** The labels `layout` places. */
+export function layoutLabels(targets: LabelTarget[], cam: Camera, opt: LayoutOptions): PlacedLabel[] {
+  return layout(targets, cam, opt).placed;
 }
 
 export function fmtRange(m: number): string {

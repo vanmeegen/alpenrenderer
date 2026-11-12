@@ -76,6 +76,18 @@ export function readHash(hash = location.hash, fallback = DEFAULT_VIEW): ViewSta
   };
 }
 
+/**
+ * The view a hash asks for while the app shows `here`. What the hash leaves
+ * out stays as it is ("#yaw=180" turns the view, it does not move the
+ * standpoint), and a standpoint that is `here`'s to the five decimals a hash
+ * holds is `here`'s: the app's own hash, read back, is not a move.
+ */
+export function viewFromHash(hash: string, here: ViewState): ViewState {
+  const v = readHash(hash, here);
+  const same = Math.abs(v.lon - here.lon) < 6e-6 && Math.abs(v.lat - here.lat) < 6e-6;
+  return same ? { ...v, lon: here.lon, lat: here.lat } : v;
+}
+
 const defaultStorage = (): Storage | undefined => {
   try { return typeof localStorage !== 'undefined' ? localStorage : undefined; } catch { return undefined; }
 };

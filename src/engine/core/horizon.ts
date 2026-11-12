@@ -303,7 +303,10 @@ function decide(
  * at every level that arrives. `step` decides targets in order (nearest
  * first, as `buildTargets` sorts them) until the budget is spent,
  * and the render loop calls it again next frame. Undecided targets read as
- * not visible, so labels appear as they are confirmed rather than all at once.
+ * they did in `previous`, the targets this set replaces (a level arrived, the
+ * eye went up a metre): what was seen stays seen until it is decided anew,
+ * so a rebuild does not blank the labels. With nothing before, undecided is
+ * not visible, and labels appear as they are confirmed.
  */
 export class VisibilityJob {
   private i = 0;
@@ -319,10 +322,24 @@ export class VisibilityJob {
     private readonly eyeAlt: number,
     private readonly opt: HorizonOptions = DEFAULT_HORIZON,
     private readonly now: () => number = () => performance.now(),
+    previous: LabelTarget[] = [],
   ) {
     this.radius = localRadius(hf.lat);
     this.table = new HorizonTable(hf, eyeAlt, opt);
-    for (const t of targets) { t.visible = false; t.decided = false; }
+    const seen = new Map<string, boolean>();
+    for (const p of previous) if (p.visible) seen.set(`${p.peak.id}:${p.spot}`, !!p.skyline);
+    for (const t of targets) {
+      const was = seen.get(`${t.peak.id}:${t.spot}`);
+      t.visible = was !== undefined;
+      t.skyline = !!was;
+      t.decided = false;
+      if (t.visible && VisibilityJob.counts(t)) this.visible++;
+    }
+  }
+
+  /** Whether a target counts among the visible summits: its main point, and not a lake. */
+  private static counts(t: LabelTarget): boolean {
+    return t.spot === 0 && t.peak.kind !== 'lake';
   }
 
   get done(): boolean { return this.i >= this.targets.length; }
@@ -334,9 +351,10 @@ export class VisibilityJob {
     const t0 = this.now();
     while (this.i < this.targets.length) {
       const t = this.targets[this.i++];
+      const was = t.visible;
       t.visible = decide(t, this.table, this.hf, this.eyeAlt, this.opt, this.radius);
       t.decided = true;
-      if (t.visible && t.spot === 0 && t.peak.kind !== 'lake') this.visible++;
+      if (t.visible !== was && VisibilityJob.counts(t)) this.visible += t.visible ? 1 : -1;
       if (this.now() - t0 >= budgetMs) break;
     }
     return this.done;

@@ -1100,6 +1100,121 @@ the URL“ erwartete noch eine Meldung für den Ort ohne Test-Kacheln, die
 so nicht stimmt, weil die gröbste Ebene dorthin reicht; korrigiert und
 einzeln grün).
 
+### 8.ae Plan 4, Etappe 3: Sichtbarkeit und Labels neu (2026-11-12)
+
+**Befund vorher.** Der Sichtlinien-Marsch begann 80 m vor dem Auge: was
+näher stand, war im Bild der ganze Vordergrund und für die Labels nicht
+da (Pertisau: Böschung 10 bis 30 m voraus, Labels für Gipfel, die das
+Bild nicht zeigt). Er nahm 96 Proben je Gipfel, in 100 km also 6 bis
+7 km auseinander: ein Grat dazwischen existierte nicht. Die Toleranz war
+ein Winkel (0,05° = 87 m in 100 km, 0,9 m in 1 km). Jeder Neuaufbau der
+Ziele löschte alle Sichtbarkeiten (Blinken). Das Label-Raster lag auf dem
+Bildschirm, beim Schwenken wechselten die Gipfel die Zelle und damit die
+Namen. Seen schlugen Gipfel, Gipfel ohne Schartenhöhe hatten Rang 0,
+Labels lagen unter Menü, Statusfeld und Kompass.
+
+**Horizonttabelle (`core/horizon.ts`).** Für 2048 Peilungen die Treppe
+der höchsten scheinbaren Elevation vom Auge nach außen, als Paare
+(Entfernung, tan Elevation). Eine Zeile wird erst gegangen, wenn ein
+Gipfel sie braucht, die wichtigsten Gipfel also zuerst. Ab 2 m, nah in
+Schritten von 10 %, dann Posten für Posten je Ebene, so weit sie reicht;
+die Proben liegen auf den Linien durch die Postenmitten entlang der
+Hauptachse der Zeile, dazwischen linear: ein Grat von einem Posten
+Breite wird in voller Höhe gelesen. Je 48 Posten ein gerades Stück in
+Mercator-Pixeln zwischen zwei Großkreis-Punkten (Abweichung wenige
+Hundertstel Posten), also keine Trigonometrie je Probe. Ein Gipfel ist
+sichtbar, wenn er die Treppe vor seinem eigenen Boden überragt (zwischen
+den beiden Nachbar-Zeilen interpoliert), mit `2 m + 3 % der
+Krümmungssenke` Spiel: 2 m in der Nähe (Rundung des DEM), 22 m in 100 km
+(was die Refraktion von Tag zu Tag ausmacht). Die Eigene-Kante-Regel
+(§8.ab) bleibt, gespeist aus der Tabelle. Dazu je sichtbarem Ziel „steht
+am Himmel“: hinter ihm kommt nichts, das höher steht als alles bis zu
+ihm. Gemessen, Mauritzalm, echte Kacheln, niedrige Qualität: 2037
+Zeilen, 2,1 Mio. Posten, im Schnitt 1035 je Zeile; die Seite ist samt
+Sichtbarkeit in 5 s fertig.
+
+**Freier Blick (`core/eye.ts`).** Mit Sichtlinien ab dem Auge verdeckt
+eine Böschung in 10 m jeden Gipfel dahinter, im Bild wie bei den Labels,
+und der Standpunkt ist nur auf einige Meter genau. Erste Fassung wie
+geplant (Ebene durch eine Scheibe um den Standpunkt, Auge über den
+größten Überstand): auf der Mauritzalm, einer 20° steilen Wiese, hob sie
+das Auge um 6,5 m; im Kamera-Modus stünde ein Grat in 400 m um 1°
+daneben. Zweite Fassung, Richtung für Richtung: Hindernis ist Gelände in
+der Scheibe (Radius = Genauigkeit des Fixes, 15 bis 50 m, ohne Fix
+30 m), das über alles ragt, was dahinter kommt (Horizont jenseits der
+Scheibe aus derselben Tabelle). Das Auge steigt, bis der ferne Horizont
+in jeder Richtung mit 0,5 m Luft über dem nahen Boden steht, höchstens
+10 m. Ein Hang hebt nichts (darüber kommt mehr Berg), ein unebener wenig
+(Mauritzalm 0,9 m), ein Damm mit freiem Land dahinter und der Rand einer
+Mulde schon; am Seeufer in Pertisau 0. Nicht bei expliziter Höhe in der
+URL. HUD „(Boden + 2,6 m, freier Blick)“.
+
+**Rang (`core/labels.ts`).** Scheinbare Prominenz `atan(Schartenhöhe /
+Entfernung)`, ohne bekannte Schartenhöhe 25 m statt 0 (vier Fünftel des
+Katalogs kamen sonst nach jedem See); mal 1,5 mit Wikipedia-Artikel, mal
+1,2 mit Wikidata-Eintrag; mal 1,6, wenn der Gipfel am Himmel steht. Seen
+bekommen höchstens ein Siebtel der Labels und nehmen einem Gipfel nie
+die Zelle.
+
+**Layout.** Zellen im Winkelraum (Peilung × Elevation), etwa ein Label
+breit und zwei Zeilen hoch, die Größe auf einer √2-Leiter des
+Bildwinkels: ein kleiner Zoom behält die Zellen, Schwenken bewegt die
+Namen mit den Bergen. Je Zelle der Beste; liegt er außerhalb des Bildes,
+bleibt die Zelle leer statt für einen Schwenk an den Nächsten zu gehen;
+findet er keinen Platz oder liegt unter einem Bedienfeld, kommt der
+Nächste dran. Zellen, die beim letzten Mal benannt waren, werden zuerst
+gesetzt, in derselben Reihenfolge: ein Rangwechsel (ein Gipfel wird als
+„am Himmel“ erkannt) stapelt die Kästen nicht um. Menüleiste,
+Statusfeld, Kompass und Gipfelkarte meldet die App als Sperrflächen
+(`data-over-view`): kein Kasten liegt darunter, ein Gipfel unter einem
+Feld wird nicht benannt, und neben einem hohen Feld rückt der Kasten zur
+Seite, solange er noch über seinem Gipfel steht. Die Sichtbarkeit je
+Gipfel bleibt über einen Neuaufbau erhalten, bis neu entschieden ist.
+HUD „n weitere im Bild“ für sichtbare Gipfel ohne Namen.
+
+Vorher/Nachher mit echten Kacheln: am Gornergrat steht „Matterhorn“ am
+Matterhorn (vorher „Picco Muzio“ und „Épaule de Furggen“, zwei Schultern
+ohne Wikipedia-Artikel), von der Mauritzalm Sonnjoch, Bettlerkarspitze,
+Großer Bettelwurf, Rotspitze; Gschöllkopf und Haidachstellwand (Kante)
+sichtbar, Hochiss verdeckt.
+
+Offen geblieben: `mesh.lookRange` (Fernrohr) und `align.horizonProfile`
+(Foto-Ausrichtung) marschieren weiter selbst; sie auf die Tabelle
+umzustellen ändert nichts Sichtbares und kommt, wenn dort ohnehin
+gearbeitet wird.
+
+Tests rot → grün: `horizon.test.ts` („a 3 m bank 20 m ahead hides a
+summit 20 km out…“, „a ridge one post wide 88 km out hides the summit
+behind it“, „40 m under the sightline at 100 km is hidden, 10 m under it
+is seen…“, „a row is marched once, when a summit needs it…“, „a summit
+with nothing higher behind it stands on the skyline…“, „what was seen
+stays seen until it is decided anew…“), `eye.test.ts` (acht Tests),
+`labels.test.ts` (Rang: 25 m, Bekanntheit, Himmelslinie; Layout:
+√2-Leiter, eine Zelle ein Name, „panning a third of a cell keeps the
+labels…“, Bester außerhalb des Bildes, Zelle geht an den Nächsten, Seen,
+Sperrflächen, zur Seite neben der Leiste, „labels that stood last time
+are placed first…“, Zähler), `app.spec.ts` („with a bank in front of the
+standpoint the eye comes up until the ridges show over it…“),
+`labels.spec.ts` („labels keep clear of the menu, the status panel and
+the compass; a summit under a panel is named once the panel is gone“).
+
+Im ersten Suite-Lauf fiel der Foto-Test einmal durch: ein von außen
+gesetzter Hash (`fov=60`) kam nicht an. Die App liest den Hash jetzt aus
+dem Ereignis (`HashChangeEvent.newURL`) statt aus der Adresszeile, die
+ihr eigenes verzögertes Schreiben inzwischen überschrieben haben kann,
+und verwirft dabei das ausstehende Schreiben (`app.spec.ts` „a hash set
+from outside is read from the event that announces it…“, rot → grün).
+Dabei gefunden: der Standpunkt aus dem eigenen Hash (fünf Nachkommastellen)
+zählte gegen einen genaueren Fix als Ortswechsel um einen halben Meter;
+`state.ts viewFromHash` behält den Standpunkt, wenn er derselbe ist
+(`state.test.ts`).
+
+Messung: 320 Unit-Tests grün; volle E2E-Suite 73/73 grün in 10,4 min.
+Das sind 3 min mehr als bei E2, liegt aber an der Maschine: zur selben
+Zeit gemessen sind E2- und E3-Build gleich schnell (Seite fertig in 4,0
+gegen 3,6 s, zwanzig Schwenks mit Rücklesen 13,0 gegen 13,3 s, die beiden
+langsamsten Tests 32 und 24 s gegen 30 und 27 s).
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

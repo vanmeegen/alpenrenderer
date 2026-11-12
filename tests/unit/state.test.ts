@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { DEFAULT_VIEW, EYE_HEIGHT, OUTLINE, PLACES, eyeHeightFromSlider, formatHash, hasStandpoint, readEyeHeight, readHash, readLastView, readOptions, readOutline, sliderFromEyeHeight, startView, writeEyeHeight, writeLastView, writeOutline,
-  coarseFixNote, readStandSource, trailing, writeStandSource } from '../../src/app/state';
+  coarseFixNote, readStandSource, trailing, viewFromHash, writeStandSource } from '../../src/app/state';
 
 describe('readHash', () => {
   test('empty hash is the default view', () => {
@@ -22,6 +22,29 @@ describe('readHash', () => {
   test('garbage falls back to defaults', () => {
     expect(readHash('#lon=abc&lat=&fov=NaN')).toEqual(DEFAULT_VIEW);
     expect(readHash('#alt=xyz').alt).toBeUndefined();
+  });
+});
+
+describe('viewFromHash: a hash read against the view there is', () => {
+  const here = { lon: 11.764113456, lat: 47.443791234, yaw: 250, pitch: 0, fov: 60 };
+
+  test('what the hash leaves out stays: a direction alone turns the view where it stands', () => {
+    expect(viewFromHash('#yaw=180', here)).toEqual({ ...here, alt: undefined, yaw: 180 });
+  });
+
+  test('the standpoint the app wrote itself, to five decimals, is the standpoint there is, not a move by half a metre', () => {
+    // The hash holds 11.76411, the fix was 11.764113456: read back, that
+    // counted as a new standpoint, and every edited hash dropped the labels.
+    const v = viewFromHash(formatHash({ ...here, fov: 30 }), here);
+    expect(v.lon).toBe(here.lon);
+    expect(v.lat).toBe(here.lat);
+    expect(v.fov).toBe(30);
+  });
+
+  test('another standpoint is another standpoint', () => {
+    const v = viewFromHash('#lon=11.77&lat=47.44379', here);
+    expect(v.lon).toBe(11.77);
+    expect(v.lat).toBe(47.44379);
   });
 });
 
