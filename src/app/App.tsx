@@ -341,8 +341,11 @@ export function App() {
               <span className="text-red-700">{status.missing} Kacheln fehlen ·{' '}
                 <button className={BTN} onClick={() => void viewerRef.current?.retryTiles()}>Erneut laden</button> · </span>
             )}
+            {status && !loading && status.missing === 0 && status.levelsShown === 0 && (
+              <span className="text-red-700">Keine Geländedaten an diesem Ort · </span>
+            )}
             {status && !loading && (
-              <span>{status.levelsShown} Level · {fmtBytes(status.bytes)} · {status.backend}
+              <span>{status.levelsShown} Level{status.levelsEmpty > 0 ? ` · ${status.levelsEmpty} Ebenen ohne Daten` : ''} · {fmtBytes(status.bytes)} · {status.backend}
                 {status.peaks.total > 0 ? ` · Gipfel ${status.peaks.visible}/${status.peaks.total}` : ''}</span>
             )}
           </div>

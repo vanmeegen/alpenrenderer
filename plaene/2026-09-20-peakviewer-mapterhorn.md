@@ -1006,6 +1006,100 @@ gewachsen. Vorher/Nachher von der Mauritzalm und vom Gornergrat mit
 echten Kacheln: Grate tragen klare Linien, die Wände am Matterhorn sind
 Fels, die Ferne ist blau statt weiß.
 
+### 8.ad Plan 4, Etappe 2: Standpunkt robust, CPU ruhig (2026-11-12)
+
+Befunde aus dem Review von Standort und Laden, und was jetzt gilt.
+
+**Altes Gelände am neuen Ort.** `setCenter` setzte `px0/py0` einer Ebene
+sofort auf das neue Fenster, die Daten und `filled` blieben die alten:
+bis die Kacheln kamen, stand das alte Gelände unter den neuen
+Koordinaten. Jetzt hält eine Ebene immer ein ganzes Fenster an seinem
+eigenen Ort oder nichts. Das neue Fenster wird in einen eigenen Puffer
+gefüllt und erst vollständig getauscht; das alte bleibt so lange gültig
+(die Ebene reicht dann nur weniger weit), und eines, das der Betrachter
+verlassen hat, wird geleert. Dazu eine Hysterese: ein Fenster folgt erst,
+wenn der Betrachter mehr als ein Achtel seiner Größe von der Mitte
+entfernt ist (bei 13-m-Posten etwa 1 km), vorher ändert sich nur die
+Reichweite der Ebene (mindestens 75 %). Damit ist `setCenter` bei jedem
+GPS-Fix billig, die Voraussetzung für das Mitlaufen in E7.
+
+**Kacheln, die nicht kommen.** Ein Netzfehler wurde wie „gibt es nicht“
+behandelt: die Kachel blieb leer, ein Loch 1000 m unter dem Meer, für
+immer. `TileSource.load` unterscheidet jetzt: `null` heißt „gibt es
+nicht“ (204/403/404/410, zählt als `absent`), ein Netz- oder Serverfehler
+wirft (zählt als `failed`, ein Abbruch nicht). Der Streamer fragt nach
+400, 1500 und 4000 ms neu; bleibt eine Kachel aus, bleibt ihre Ebene
+draußen (das Bild kommt dann aus den gröberen), `progress.failed` zählt,
+und nach einer aufgegebenen Ebene fragen die folgenden nur einmal (das
+Netz ist offenbar weg). Das HUD zeigt „n Kacheln fehlen · Erneut laden“.
+Das Overlay „Gelände lädt“ erscheint nur noch, solange eine Ebene nichts
+zeigt. Hat die Quelle für einen Teil eines Fensters keine Daten (die
+feinen Zooms gibt es bei Mapterhorn nur, wo eine Vermessung existiert),
+bleibt die Ebene ebenfalls draußen, wird dort nicht wieder angefragt und
+zählt als erledigt; das HUD nennt „n Ebenen ohne Daten“. Offen für E5:
+Fenster am Rand der Abdeckung aus der gröberen Ebene auffüllen statt die
+ganze Ebene wegzulassen.
+
+**Standpunkt.**
+- Ein Ortswechsel verwirft Ziele, Sichtlinien und Platzierungen sofort
+  (sie tragen Peilung und Entfernung vom alten Standpunkt); nur Drehen
+  oder Zoomen über `relocate` behält sie.
+- „Start am Standort“ wirkte nur beim ersten Öffnen, weil die App den
+  Standpunkt selbst in die URL schreibt. Der Tab merkt sich jetzt
+  (`sessionStorage`), woher der Standpunkt kam und welcher es war: beim
+  Neuladen wird neu geortet, wenn der Standpunkt in der URL der eigene
+  vom Gerät ist; einer aus einem Link, von der Karte oder aus der Liste
+  bleibt.
+- Eine GPS-Antwort, die eintrifft, nachdem inzwischen anders gewählt
+  wurde, wird verworfen. Ein Fix gröber als 100 m wird übernommen, mit
+  dem Hinweis „Standort nur auf ± x genau … Auf der Karte nachsetzen“.
+- Ein Hash ohne `lon/lat` (etwa `#yaw=180`) dreht die Ansicht und behält
+  den Standpunkt; vorher sprang er zum Gornergrat.
+- Die URL folgt der Ansicht alle 400 ms mit nachlaufender Kante. Vorher
+  300 ms nach der letzten Änderung: mit Sensoren ändert sich die Ansicht
+  jeden Frame, die URL kam erst, wenn das Handy ruhte.
+
+**Kompass-Korrektur.** Die Korrektur des Benutzers wurde auf den
+Kompasswert vor der Fusion addiert. Ein Wisch sah damit aus wie ein
+Kompass, der springt, während der Kreisel stillsteht: genau das Muster,
+an dem die Fusion eine magnetische Störung erkennt und dem Kompass
+misstraut. Die Korrektur wird jetzt nach der Fusion addiert und steht im
+selben Frame im Bild; der E2E-Test dazu läuft in 12 statt 42 s.
+
+**CPU.** Label-Layout und Overlay liefen je Animationsframe, auch im
+Stand. Jetzt nur, wenn sich Ansicht, Größe, Ziele, Zahl der entschiedenen
+Sichtlinien, Netz oder Auswahl geändert haben. Ein Gipfel außer
+Reichweite fällt weg, bevor sein höchster Punkt im DEM gesucht wird. Ein
+See, dessen Mittelpunkt sichtbar, aber nicht im Bild ist, wird am
+Ersatzpunkt im Bild benannt.
+
+Tests rot → grün: `clipmap.test.ts` („a window stays where it is…“, „a
+moved level is never the old terrain at the new place…“, „nearby, the
+old window is kept whole…“, „a failed tile is asked again…“, „a tile that
+keeps failing leaves its level out…“), `terrarium.test.ts` (404, 503,
+Netzfehler, Abbruch), `state.test.ts` (Start-Quelle, `coarseFixNote`,
+`trailing`), `pose.test.ts` („a correction dragged in applies at once and
+in full…“), `sensorLook.test.ts` („…the next tick reports the change, so
+the URL follows“), `labels.test.ts` (See-Ersatzpunkt im Bild, Filter vor
+der Gipfelsuche), `app.spec.ts` („a hash change relocates…; a hash
+without a standpoint keeps the one there is“, „tiles that do not arrive
+leave their level out, not a pit…“ mit abgebrochenen Kachel-Anfragen, „a
+view that keeps changing reaches the URL while it changes…“, „a view
+nobody moves draws no further frames…“ um die Layouts erweitert),
+`labels.spec.ts` („a new standpoint drops the labels of the old one at
+once…“), `map.spec.ts` („a fix good to 850 m only is taken, with a
+warning…“, „a fix that comes late is dropped…“, „reloaded, a start from
+the device asks the device again; a standpoint from a link stands“).
+Ein E2E-Test „URL folgt im Sensor-Modus“ war im Software-Renderer sofort
+grün (die Frames sind dort langsamer als die alte Wartezeit) und ist
+durch den Test am Änderungs-Handler ersetzt.
+
+Messung: 293 Unit-Tests grün; volle E2E-Suite 70/70 grün in 7,4 min
+lokal (69 im Lauf, der Test „the standpoint menu writes the place into
+the URL“ erwartete noch eine Meldung für den Ort ohne Test-Kacheln, die
+so nicht stimmt, weil die gröbste Ebene dorthin reicht; korrigiert und
+einzeln grün).
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

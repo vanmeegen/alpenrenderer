@@ -76,6 +76,8 @@ export interface ViewerStatus {
   pending: number;
   /** Tiles that did not arrive, retries included; their levels are left out until retryTiles(). */
   missing: number;
+  /** Levels the tile source has no data for at this place. */
+  levelsEmpty: number;
   /** DEM ground under the eye, metres. */
   ground: number;
   eyeAltitude: number;
@@ -676,7 +678,7 @@ export class Viewer {
       tilesDone: p.done, tilesTotal: p.total, levelsReady: p.levelsReady,
       levels: hf.eyeLevels().length,
       levelsShown: hf.eyeLevels().filter((l) => l.filled).length,
-      pending: p.pending, missing: p.failed,
+      pending: p.pending, missing: p.failed, levelsEmpty: p.empty,
       ground: hf.groundAt(this.view.lon, this.view.lat),
       eyeAltitude: this.renderer.eyeAltitude,
       altitudeSource: this.view.alt === undefined ? 'dem' : 'given',

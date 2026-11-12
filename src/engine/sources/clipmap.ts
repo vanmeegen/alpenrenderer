@@ -8,7 +8,9 @@
  * only when it is complete does it take the old one's place. A level
  * therefore always holds one whole window in its own place, or nothing:
  * never the old terrain under the new coordinates, and never a window with
- * a tile missing (a pit 1000 m below sea level). Because tiles are cached,
+ * a tile missing (a pit 1000 m below sea level), whether the tile failed to
+ * arrive or the source has none there (the fine zooms exist only where a
+ * survey does); the coarser level is drawn instead. Because tiles are cached,
  * walking around a valley refills from local storage and never touches the
  * network.
  *
@@ -84,13 +86,17 @@ export interface FillProgress {
   levelsReady: number;
   /** Tiles that did not arrive, retries included; their levels are left out until retry(). */
   failed: number;
+  /** Levels the source has no complete data for here; they are left out and not asked for again. */
+  empty: number;
 }
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export class ClipmapStreamer {
   readonly heightField: HeightField;
-  readonly progress: FillProgress = { pending: 0, done: 0, total: 0, levelsReady: 0, failed: 0 };
+  readonly progress: FillProgress = { pending: 0, done: 0, total: 0, levelsReady: 0, failed: 0, empty: 0 };
+  /** Per level: the window the source turned out to have no complete data for, or null. */
+  private emptyAt: ({ px0: number; py0: number } | null)[] = [];
   private readonly retryDelays: number[];
 
   private levels: Level[] = [];
@@ -174,8 +180,8 @@ export class ClipmapStreamer {
       const lv = this.lookLevels[job.index];
       const tiles = await Promise.all(job.keys.map((key) => this.fetchTile(key, signal, this.retryDelays, () => gen !== this.lookGeneration)));
       if (gen !== this.lookGeneration) return;
-      // The telescope only sharpens: a window with a tile missing is not shown.
-      if (tiles.some((t) => t === FAILED)) continue;
+      // The telescope only sharpens: a window with a tile missing, failed or not there, is not shown.
+      if (tiles.some((t) => t === FAILED || t === null)) continue;
       // A window moves as a whole: cut, filled, then shown, so no frame draws half of each.
       lv.px0 = job.px0;
       lv.py0 = job.py0;
@@ -249,9 +255,13 @@ export class ClipmapStreamer {
     this.levels.forEach((lv, i) => {
       const cx = lonToMercX(lon, lv.z);
       const cy = latToMercY(lat, lv.z);
+      const near = (w: { px0: number; py0: number }) => Math.abs(cx - (w.px0 + size / 2)) <= size * RECENTRE
+        && Math.abs(cy - (w.py0 + size / 2)) <= size * RECENTRE;
       const held = this.loaded[i] !== null && lv.filled;
-      if (held && Math.abs(cx - (lv.px0 + size / 2)) <= size * RECENTRE
-        && Math.abs(cy - (lv.py0 + size / 2)) <= size * RECENTRE) return;
+      if (held && near(lv)) return;
+      // The source has no data for this level here: known, not asked again.
+      const empty = this.emptyAt[i];
+      if (empty && near(empty)) return;
       const px0 = Math.round(cx) - (size >> 1);
       const py0 = Math.round(cy) - (size >> 1);
       // The old window stays, in its own place, until the new one is
@@ -294,12 +304,13 @@ export class ClipmapStreamer {
     for (const job of jobs) {
       const lv = this.levels[job.index];
       const raw = new Uint16Array(lv.w * lv.h);
-      let failed = 0;
+      let failed = 0, absent = 0;
       await Promise.all(job.keys.map(async (key) => {
         const heights = await this.fetchTile(key, signal, delays, () => gen !== this.generation);
         if (gen !== this.generation) return;
         if (heights === FAILED) failed++;
         else if (heights) this.blit(raw, lv.w, lv.h, job.px0, job.py0, key, heights);
+        else absent++;
         this.progress.done++;
         this.progress.pending--;
       }));
@@ -309,6 +320,15 @@ export class ClipmapStreamer {
         delays = [];
         continue;
       }
+      if (absent) {
+        // No data for part of this window: the level is done, with nothing to show.
+        this.emptyAt[job.index] = { px0: job.px0, py0: job.py0 };
+        this.progress.empty = this.emptyAt.filter(Boolean).length;
+        this.progress.levelsReady++;
+        continue;
+      }
+      this.emptyAt[job.index] = null;
+      this.progress.empty = this.emptyAt.filter(Boolean).length;
       // The window moves as a whole: cut, filled, then shown.
       lv.px0 = job.px0;
       lv.py0 = job.py0;

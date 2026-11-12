@@ -259,7 +259,7 @@ describe('tiles that fail', () => {
   const cfg = { size: 640, levels: [{ z: 12 }, { z: 9 }] };
   const quick = { retryDelays: [0, 0] };
 
-  test('a failed tile is asked again and the level fills; a tile the server does not have is asked once', async () => {
+  test('a failed tile is asked again and the level fills; a tile the server does not have is asked once and its level is left out for good', async () => {
     const asked: TileKey[] = [];
     const s = new ClipmapStreamer(flaky(11, 2, asked), cfg, LON, LAT, quick);
     await s.setCenter(LON, LAT);
@@ -272,10 +272,23 @@ describe('tiles that fail', () => {
     const once: TileKey[] = [];
     const t = new ClipmapStreamer(flaky(-1, 0, once, (k) => k.z === 11), cfg, LON, LAT, quick);
     await t.setCenter(LON, LAT);
-    expect(t.heightField.levels.every((l) => l.filled)).toBe(true);   // a hole in the data is the data
-    expect(t.progress.failed).toBe(0);
+    // No data at that zoom (Mapterhorn has the fine zooms only where a survey
+    // exists): the level shows nothing rather than a pit 1000 m below the
+    // sea where the tile would be, and the coarser one is drawn there.
+    const [fine, coarse] = t.heightField.levels;
+    expect(fine.filled).toBe(false);
+    expect(coarse.filled).toBe(true);
+    expect(t.progress.failed).toBe(0);                                 // nothing to retry
+    expect(t.progress.empty).toBe(1);
+    expect(t.progress.levelsReady).toBe(2);                            // and nothing to wait for
     const ids = once.filter((k) => k.z === 11).map((k) => `${k.x}/${k.y}`);
     expect(new Set(ids).size).toBe(ids.length);
+    // Asked for the same place again, the answer is known.
+    const n = once.length;
+    await t.setCenter(LON, LAT);
+    await t.retry();
+    expect(once.length).toBe(n);
+    expect(t.progress.empty).toBe(1);
   });
 
   test('a tile that keeps failing leaves its level out, counted, instead of a pit 1000 m below sea level; retry() asks again', async () => {

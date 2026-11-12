@@ -20,7 +20,7 @@ function url(hash: Record<string, number | string> = {}, query: Record<string, s
 
 interface Status {
   tilesDone: number; tilesTotal: number; levelsReady: number; levels: number;
-  ground: number; eyeAltitude: number; failed: number; fps: number; missing: number; pending: number; levelsShown: number;
+  ground: number; eyeAltitude: number; failed: number; fps: number; missing: number; pending: number; levelsShown: number; levelsEmpty: number;
   diagnostics: { framesDrawn: number; frameErrors: number; terrainReady: boolean; shadeReady: boolean;
     compositeReady: boolean; shaderErrors: string[]; vertices: number };
 }
@@ -295,15 +295,16 @@ test.describe('controls', () => {
     await page.goto(url());
     await ready(page);
     await page.evaluate(() => {
-      const v = (window as any).alp;
-      let yaw = 100;
-      (window as any).__turning = setInterval(() => { yaw += 0.5; v.onView({ ...v.current, yaw }); }, 50);
+      const v = (window as any).alp, w = window as any;
+      w.__yaw = 100;
+      w.__turning = setInterval(() => { w.__yaw += 0.5; v.onView({ ...v.current, yaw: w.__yaw % 360 }); }, 50);
     });
-    await page.waitForTimeout(1500);
-    const during = hashNum(await hashOf(page), 'yaw');
+    // It used to stay the 90 of the URL for as long as the view kept turning.
+    await expect.poll(async () => hashNum(await hashOf(page), 'yaw'), { timeout: 20_000 }).toBeGreaterThan(100);
+    // And it is still turning: this was not the write after the last change.
+    const a = await page.evaluate(() => (window as any).__yaw as number);
+    await expect.poll(() => page.evaluate(() => (window as any).__yaw as number), { timeout: 10_000 }).toBeGreaterThan(a + 1);
     await page.evaluate(() => clearInterval((window as any).__turning));
-    expect(during).toBeGreaterThan(100);                         // it used to be the 90 of the URL still
-    expect(during).toBeLessThan(120);
   });
 
   test('arrow keys turn the view', async ({ page }) => {
@@ -403,8 +404,16 @@ test.describe('standpoint', () => {
     await page.getByRole('button', { name: 'Zugspitze (DE/AT)' }).click();
     await expect.poll(async () => hashNum(await hashOf(page), 'lon'), { timeout: 30_000 }).toBeCloseTo(10.98527, 4);
     await expect.poll(async () => hashNum(await hashOf(page), 'yaw'), { timeout: 30_000 }).toBe(110);
-    // No fixture tiles there: the app reports it instead of failing.
-    await expect(page.getByText(/fehlgeschlagen/)).toBeVisible({ timeout: 60_000 });
+    // No fixture tiles there (every request is answered "no such tile"). The
+    // coarsest level still reaches the place from where it was cut; the
+    // others have no data, are left out rather than drawn as a pit, and the
+    // app says so. Nothing failed, so there is nothing to retry.
+    await expect(page.getByText(/\d Ebenen ohne Daten/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('button', { name: 'Erneut laden' })).toHaveCount(0);
+    const s = await status(page);
+    expect(s.missing).toBe(0);
+    expect(s.levelsEmpty).toBeGreaterThanOrEqual(s.levels - 1);
+    expect(s.levelsEmpty + s.levelsShown).toBe(s.levels);
   });
 });
 
