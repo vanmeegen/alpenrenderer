@@ -363,6 +363,34 @@ fn waterAt(lv : i32, dLon : f32, dIso : f32) -> f32 {
   return step(0.5, textureSampleLevel(heights, heightsSampler, uv, 0.0).b);
 }
 
+/** The land cover class (0 = none) of the DEM post at this point moved jit metres east and north (see glsl.ts). */
+fn coverAt(lv : i32, dLon : f32, dIso : f32, jit : vec2<f32>) -> f32 {
+  let A = uniforms.uLvlA[lv];
+  let o = atlasOrigin(lv);
+  let perMetre = A.z / (uniforms.uRadius * uniforms.uCosLat0);
+  let px = clamp(floor(A.x + dLon * A.z + jit.x * perMetre), 0.0, uniforms.uLevelPx - 1.0) + o.x;
+  let py = clamp(floor(A.y - dIso * A.z - jit.y * perMetre), 0.0, uniforms.uLevelPx - 1.0) + o.y;
+  let uv = vec2<f32>((px + 0.5) / uniforms.uTexSize.x, (py + 0.5) / uniforms.uTexSize.y);
+  return floor(textureSampleLevel(heights, heightsSampler, uv, 0.0).a * 255.0 / 16.0 + 0.5);
+}
+
+/** The ground's own colour for a class at height h, or none (the height's tint) where there is no class. */
+fn coverColor(c : f32, h : f32, none : vec3<f32>) -> vec3<f32> {
+  if (c < 0.5) { return none; }
+  if (c < 1.5) { return COVER_TREE; }
+  if (c < 2.5) { return COVER_SHRUB; }
+  if (c < 3.5) { return mix(COVER_GRASS_LOW, COVER_GRASS_HIGH, smoothstep(GRASS_FROM, GRASS_TO, h)); }
+  if (c < 4.5) { return COVER_CROP; }
+  if (c < 5.5) { return COVER_BUILT; }
+  if (c < 6.5) { return COVER_BARE; }
+  if (c < 7.5) { return COVER_SNOW; }
+  if (c < 8.5) { return uniforms.uWaterColor; }
+  if (c < 9.5) { return COVER_WETLAND; }
+  if (c < 10.5) { return COVER_TREE; }
+  if (c < 11.5) { return COVER_MOSS; }
+  return none;
+}
+
 /** Unit vector from the eye to this point, east-north-up (see glsl.ts). */
 fn viewDir() -> vec3<f32> {
   let hz = vec2<f32>(fragmentInputs.vDLon, fragmentInputs.vDIso);
@@ -394,19 +422,24 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   // any branch, where the sampler still has its derivatives for the mip.
   let ground = vec2<f32>(dLon, dIso);
   let fineUv = ground * uniforms.uDetail.x + uniforms.uDetailOrigin.xy;
-  let grain = textureSample(detail, detailSampler, fineUv).rgb
-            + textureSample(detail, detailSampler, ground * uniforms.uDetail.y + uniforms.uDetailOrigin.zw).rgb - vec3<f32>(1.0)
+  let fineGrain = textureSample(detail, detailSampler, fineUv).rgb;
+  let coarseGrain = textureSample(detail, detailSampler, ground * uniforms.uDetail.y + uniforms.uDetailOrigin.zw).rgb;
+  let grain = fineGrain + coarseGrain - vec3<f32>(1.0)
             + DETAIL_FINEST * (2.0 * textureSample(detail, detailSampler, fineUv * DETAIL_FINER).rgb - vec3<f32>(1.0));
+  // Where the land cover is read: moved by the grain, so the 106 m steps of its pixels fray.
+  let jit = COVER_JITTER * ((2.0 * coarseGrain.xy - vec2<f32>(1.0)) + 0.5 * (2.0 * fineGrain.xy - vec2<f32>(1.0)));
 
   let lv = levelFor(r);
   var sf = surfaceAt(lv, dLon, dIso);
   var wet = waterAt(lv, dLon, dIso);
+  var cover = coverAt(lv, dLon, dIso, jit);
   if (f32(lv) + 1.0 < uniforms.uLevelCount && uniforms.uLvlA[lv + 1].w > 0.0) {
     let outer = uniforms.uLvlA[lv].w;
     let fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) {
       sf = mix(sf, surfaceAt(lv + 1, dLon, dIso), fade);
       wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
+      if (fade > 0.5) { cover = coverAt(lv + 1, dLon, dIso, jit); }
     }
   }
   let lk = lookLevel(dLon, dIso);
@@ -428,12 +461,16 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   var col = mix(valley, forest, smoothstep(700.0, 1100.0, h));
   col = mix(col, meadow, smoothstep(1500.0, 1900.0, h));
   col = mix(col, rock, smoothstep(1950.0, 2350.0, h));
+  // Where a survey says what the ground is, that; rock and snow over it as ever.
+  col = coverColor(cover, h, col);
   // Rock from 33° to 45°, weaker below the tree line; snow gone between 40° and 50° (shading.ts GROUND).
   let rocky = smoothstep(ROCK_LOW, ROCK_HIGH, slope)
             * mix(ROCK_BELOW, ROCK_ABOVE, smoothstep(ROCK_FROM, ROCK_TO, h));
   col = mix(col, rock, rocky);
+  // Ground the survey knows and does not call ice keeps only a share of the height's snow.
+  let known = step(0.5, cover) * step(cover, 11.5) * (1.0 - step(6.5, cover) * step(cover, 7.5));
   let snowy = smoothstep(uniforms.uSnowLine - 350.0, uniforms.uSnowLine + 50.0, h)
-            * (1.0 - smoothstep(SNOW_LOW, SNOW_HIGH, slope));
+            * (1.0 - smoothstep(SNOW_LOW, SNOW_HIGH, slope)) * mix(1.0, SNOW_ON_LAND, known);
   col = mix(col, snow, snowy);
   col = mix(col, uniforms.uWaterColor, wet);
 

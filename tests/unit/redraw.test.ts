@@ -37,6 +37,7 @@ describe('frameFingerprint', () => {
       { origin: [10, 47.0001] },
       { levels: [{ version: 4, waterVersion: 1, filled: true, px0: 100, py0: 200 }, { version: 2, waterVersion: 0, filled: false, px0: 0, py0: 0 }] },
       { levels: [{ version: 3, waterVersion: 2, filled: true, px0: 100, py0: 200 }, { version: 2, waterVersion: 0, filled: false, px0: 0, py0: 0 }] },
+      { levels: [{ version: 3, waterVersion: 1, coverVersion: 1, filled: true, px0: 100, py0: 200 }, { version: 2, waterVersion: 0, filled: false, px0: 0, py0: 0 }] },
       { levels: [{ version: 3, waterVersion: 1, filled: true, px0: 100, py0: 200 }, { version: 2, waterVersion: 0, filled: true, px0: 0, py0: 0 }] },
       { levels: [{ version: 3, waterVersion: 1, filled: true, px0: 101, py0: 200 }, { version: 2, waterVersion: 0, filled: false, px0: 0, py0: 0 }] },
       { knobs: { shaded: false, outline: 0.7, band: null, horizonColor: [0.7, 0.8, 0.9] } },

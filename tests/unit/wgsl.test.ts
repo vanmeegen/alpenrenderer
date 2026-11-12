@@ -275,6 +275,25 @@ describe('the grain of the near ground', () => {
   });
 });
 
+describe('land cover in the shade pass', () => {
+  test('both dialects read the class from the atlas\'s alpha channel and colour by the palette of shading.ts', async () => {
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { COVER } = await import('../../src/engine/render/shading');
+    const { shaderFloat } = await import('../../src/engine/render/gpu/consts');
+    for (const src of [GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_SHADE_FRAGMENT]) {
+      expect(src).toMatch(/fn coverAt\(|float coverAt\(/);
+      expect(src).toMatch(/fn coverColor\(|vec3 coverColor\(/);
+      expect(src).toMatch(/\)\.a\b/);
+      for (const rgb of [COVER.tree, COVER.shrub, COVER.grassLow, COVER.grassHigh, COVER.crop, COVER.built, COVER.snow, COVER.wetland, COVER.moss]) {
+        expect(src).toContain(rgb.map(shaderFloat).join(', '));
+      }
+      for (const [name, value] of [['COVER_JITTER', COVER.jitter], ['GRASS_FROM', COVER.grassFrom], ['GRASS_TO', COVER.grassTo], ['SNOW_ON_LAND', COVER.snowOnLand]] as [string, number][]) {
+        expect(src).toMatch(new RegExp(`const (float )?${name}\\b[^;]*= ${shaderFloat(value).replace('.', '\\.')};`));
+      }
+    }
+  });
+});
+
 describe('shader text Babylon can take apart', () => {
   test('no comment behind code holds a semicolon: the preprocessor cuts declarations there', async () => {
     // "uniform float uRim;   // …; 0 = off" compiled to a lone "0 = off" and a black screen (WebGL2).

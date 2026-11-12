@@ -226,6 +226,8 @@ export interface AppOptions {
   peaks: string;
   /** Lake catalogue cell template, likewise. */
   lakes: string;
+  /** Land cover tile template (sources/landcover.ts), likewise. */
+  cover: string;
   /**
    * Draw the lit shade pass (`shade=0` turns it off): without it the range
    * pass and the composite still run and the view is the outline over white
@@ -246,12 +248,14 @@ export function readOptions(search = location.search): AppOptions {
   const tiles = q.get('tiles');
   const peaks = q.get('peaks') || 'peaks';
   const lakes = q.get('lakes') || 'lakes';
+  const cover = q.get('cover') || 'landcover';
   return {
     backend: b === 'webgpu' ? 'webgpu' : 'webgl2',
     quality: ql === 'high' || ql === 'low' ? ql : 'auto',
     tiles: tiles ? (tiles.endsWith('/') ? tiles : tiles + '/') + '{z}/{x}/{y}.webp' : undefined,
     peaks: (peaks.endsWith('/') ? peaks : peaks + '/') + '{x}_{y}.json',
     lakes: (lakes.endsWith('/') ? lakes : lakes + '/') + '{x}_{y}.json',
+    cover: (cover.endsWith('/') ? cover : cover + '/') + '{z}/{x}/{y}.png',
     shade: q.get('shade') !== '0',
     ...(q.get('adapt') === '1' ? { adapt: true } : q.get('adapt') === '0' ? { adapt: false } : {}),
   };

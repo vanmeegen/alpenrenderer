@@ -1379,6 +1379,87 @@ Offen: `mesh.lookRange` und `align.horizonProfile` marschieren weiter
 selbst (§8.ae). Die WGSL-Fassung des Flächen-Atlas und der Körnung ist
 in CI nur als Text geprüft; bitte einmal `?backend=webgpu` ansehen.
 
+### 8.ah Plan 4, Etappe 6: Landbedeckung (2026-11-12)
+
+**Befund vorher.** Die Farbe kam allein aus Höhenstufe und Hangneigung:
+bis 1100 m „Wald“, darüber „Wiese“, darüber Fels, ab der Schneegrenze
+weiß. Die Haidachstellwand war ein grüner Hügel, der Gornergrat ein
+Schneefeld, ein Tal ohne Wald so grün wie eines mit.
+
+**Daten.** ESA WorldCover 2021 v200 (10 m, CC BY 4.0): Wald, Gebüsch,
+Grasland, Acker, Siedlung, Fels und Schutt, Schnee und Eis, Wasser,
+Feuchtgebiet, Moos. `tools/build_landcover.mjs` liest die
+40-m-Übersichten der 3°-GeoTIFFs aus dem öffentlichen Bucket (je 5 s,
+über Range-Requests), tastet sie viermal feiner ab als die Zielkachel,
+reduziert zweimal nach Mehrheit und nimmt einzelne Streupixel heraus
+(`despeckle`: Linien und Kanten bleiben). Ergebnis: eigene Kacheln unter
+`public/landcover/{z}/{x}/{y}.png`, 512 px, 4-Bit-Graustufen (der
+Klassenindex 0 bis 11 je Pixel), Pixel-Zoom 10 bis 7, die gröberen Stufen
+als Mehrheit der feineren; `index.json` nennt Quelle und Lizenz. Kacheln
+ohne Klasse (Meer außerhalb) werden nicht geschrieben.
+
+Abweichung vom Plan: feinste Stufe ist Pixel-Zoom 10 (106 m bei 47°
+Nord), nicht 11. Gemessen wären es mit 53 m 35 MB für die Alpen-Box
+(5°–17° Ost, 43°–49° Nord), mit 106 m sind es 10,9 MB in 373 Kacheln:
+im Rahmen der Schätzung (5 bis 20 MB) und in der Größenordnung der
+Gipfel- und Seenkataloge. PNG-Zeilenfilter bringen bei Klassenkarten
+nichts (gemessen: ohne Filter am kleinsten).
+
+**Zur Laufzeit (`sources/landcover.ts`).** Wie die Seemaske: je
+Clipmap-Ebene um den Beobachter die Klasse je Posten. Eine Ebene auf
+einem Zoom der Kacheln liest sie eins zu eins, eine feinere liest den
+feinsten Zoom, jedes Kachelpixel über die Posten gespreizt, die es
+deckt. Rund zwanzig kleine Kacheln je Standpunkt. Die Klasse liegt im
+freien vierten Kanal des Höhen-Atlas (sechzehn je Klasse), neben Höhe
+und Seemaske; der Shade-Pass braucht einen Tap mehr. Bis die Kacheln da
+sind, wird eine Ebene ohne Klasse gezeichnet, nie mit den Klassen des
+alten Fensters.
+
+**Farbe (`shading.ts COVER`).** Wo die Erhebung eine Klasse nennt,
+ersetzt deren Farbe den Ton der Höhenstufe: Wald dunkelgrün, Gras im Tal
+grün und ab 1400 m bis 2100 m fahler, Acker gelbgrün, Siedlung grau,
+Fels grau, Eis weiß auch unter der Schneegrenze, Wasser in der Seefarbe
+(Flüsse und Seen ohne Katalogeintrag). Fels am Steilhang liegt wie
+bisher darüber. Der Schnee der Höhenstufe gilt voll nur noch, wo es
+keine Klasse gibt oder die Klasse Eis ist; Boden, den die Erhebung
+kennt, behält 30 % davon: der Gornergrat ist Fels, das Matterhorn eine
+graue Pyramide mit Schneeflecken. Ohne Klasse (außerhalb der Box, vor
+dem Laden) bleibt alles wie vorher.
+
+**Kanten.** 106-m-Pixel wären im Nahbereich Treppen. Wo die Klasse
+gelesen wird, verschiebt die Körnung aus E5 (Steigungskanäle der groben
+und der feinen Kachel, bis etwa 50 m): die Grenze zwischen Wald und
+Wiese franst aus, statt in Stufen zu laufen. In der Ferne mittelt der
+Sampler die Körnung weg und nichts verschiebt sich.
+
+**Quellen.** „ESA WorldCover“ steht im Quellen-Panel, in README und
+THIRD-PARTY-NOTICES. `geotiff` ist nur Build-Abhängigkeit.
+
+Tests rot → grün: `landcover.test.ts` (neu: Klassen und ihre Reihenfolge
+gleich der Palette, Mehrheit, 4-Bit-PNG hin und zurück, Kachelbereich,
+`mercatorTile`, `despeckle`; zur Laufzeit: eins zu eins, gespreizt,
+fehlende Kachel, jede Kachel einmal, Dekodierung), `shading.test.ts`
+(Wald dunkler und grüner als Wiese, Gras mit der Höhe fahler, Eis unter
+der Schneegrenze, Fels über ihr mit Schneeanteil, Wasserklasse, ohne
+Klasse wie vorher, `coverJitter`), `wgsl.test.ts` („both dialects read
+the class from the atlas's alpha channel…“), `redraw.test.ts`
+(`coverVersion`), `state.test.ts` (`cover`), `app.spec.ts` („where the
+land cover says forest the ground is forest, where it says meadow,
+meadow…“ gegen die Testlandschaft mit einem Wald- und einem Wiesenstück,
+Abweichung von der Formel 0,065 → unter 0,02; „credits name…“ mit ESA
+WorldCover). Alle E2E-URLs zeigen auf die Kacheln der Testlandschaft,
+nie auf die der Alpen.
+
+Messung: 388 Unit-Tests grün; volle E2E-Suite 79/79 grün in 12,8 min.
+Backen der Alpen-Box: 4 bis 5 Minuten, 10,9 MB. Bilder: an der
+Mauritzalm und über dem Achensee stehen die Hänge im Wald, die Almen
+sind hell; am Gornergrat ist der Grat Fels, die Gletscher sind weiß, im
+Vorfeld liegt ein Gletschersee.
+
+Offen: Am Ufer des Achensees stehen sich Seemaske (genau) und
+Wasserklasse (106 m, ausgefranst) gegenüber; am Gegenufer bleibt ein
+unruhiger Saum. Die Kanten von Schneeflecken sind gezoomt gepunktet.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

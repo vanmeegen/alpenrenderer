@@ -57,6 +57,10 @@ export interface Level extends LevelSpec {
   water?: Uint8Array;
   /** Bumped whenever `water` is replaced, so the renderer re-uploads. */
   waterVersion?: number;
+  /** Land cover class per post on the same grid (sources/landcover.ts); absent = no class anywhere. */
+  cover?: Uint8Array;
+  /** Bumped whenever `cover` is replaced. */
+  coverVersion?: number;
 }
 
 export interface Observer {

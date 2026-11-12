@@ -27,7 +27,7 @@ test.use({
 });
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', q: 'low', shade: '0', ...query });
+  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', q: 'low', shade: '0', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;

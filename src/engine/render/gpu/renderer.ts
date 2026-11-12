@@ -588,10 +588,11 @@ export class GpuRenderer {
     const texture = this.atlas.getInternalTexture();
 
     levels.forEach((l, i) => {
-      const stamp = `${l.version}:${l.waterVersion ?? 0}`;
+      const stamp = `${l.version}:${l.waterVersion ?? 0}:${l.coverVersion ?? 0}`;
       if (this.uploaded[i] === stamp) return;
       const raw = l.raw;
       const water = l.water && l.water.length === raw.length ? l.water : null;
+      const cover = l.cover && l.cover.length === raw.length ? l.cover : null;
       for (let p = 0, o = 0; p < raw.length; p++, o += 4) {
         // The stored value is already quantised; re-express it in the
         // atlas's own steps so one packing works for every level.
@@ -600,7 +601,7 @@ export class GpuRenderer {
         block[o] = v >> 8;
         block[o + 1] = v & 255;
         block[o + 2] = water ? water[p] : 0;   // lake mask, see core/water.ts
-        block[o + 3] = 255;
+        block[o + 3] = cover ? cover[p] << 4 : 0;   // land cover class, sixteen to the class
       }
       const at = layout.origin(i);
       // Both engines have it; the type they share does not declare it.
@@ -747,7 +748,7 @@ export class GpuRenderer {
       },
       eye: this.eyeAltitude,
       origin: [hf.lon, hf.lat] as [number, number],
-      levels: hf.levels.map((l) => ({ version: l.version, waterVersion: l.waterVersion, filled: l.filled, px0: l.px0, py0: l.py0 })),
+      levels: hf.levels.map((l) => ({ version: l.version, waterVersion: l.waterVersion, coverVersion: l.coverVersion, filled: l.filled, px0: l.px0, py0: l.py0 })),
       knobs: {
         shaded: this.shaded, outline: this.outline, detail: this.detail, snowLine: this.snowLine, fogRange: this.fogRange,
         skyTop: this.skyTop, horizonColor: this.horizonColor, waterColor: this.waterColor,

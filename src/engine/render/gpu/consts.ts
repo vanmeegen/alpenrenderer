@@ -4,7 +4,7 @@
  * computes and what the GPU draws cannot drift apart.
  */
 import { OUTLINE } from '../outline';
-import { FOG, GROUND } from '../shading';
+import { COVER, FOG, GROUND } from '../shading';
 import { SURFACE } from '../../core/surface';
 import { DETAIL } from '../detail';
 
@@ -30,6 +30,10 @@ export const SHADE_CONSTS: Const[] = [
   ['AO', SURFACE.strength],
   ['DETAIL_GRAIN', DETAIL.grain], ['DETAIL_TILT', DETAIL.tilt], ['DETAIL_NEAR', DETAIL.near], ['DETAIL_FAR', DETAIL.far],
   ['DETAIL_FINER', DETAIL.finer], ['DETAIL_FINEST', DETAIL.finest],
+  ['COVER_TREE', COVER.tree], ['COVER_SHRUB', COVER.shrub], ['COVER_GRASS_LOW', COVER.grassLow], ['COVER_GRASS_HIGH', COVER.grassHigh],
+  ['GRASS_FROM', COVER.grassFrom], ['GRASS_TO', COVER.grassTo], ['COVER_CROP', COVER.crop], ['COVER_BUILT', COVER.built],
+  ['COVER_BARE', COVER.bare], ['COVER_SNOW', COVER.snow], ['COVER_WETLAND', COVER.wetland], ['COVER_MOSS', COVER.moss],
+  ['COVER_JITTER', COVER.jitter], ['SNOW_ON_LAND', COVER.snowOnLand],
 ];
 
 export const glslConsts = (list: Const[]): string => list.map(([n, v]) => (typeof v === 'number'

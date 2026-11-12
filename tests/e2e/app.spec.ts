@@ -3,7 +3,7 @@
  * here is derived from tests/e2e/fixtures/terrain.ts, not read off a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { BACK_RIDGE, BANK, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, heightAt, skylineRow, spotAt, summitScreenY, terrainHit } from './fixtures/terrain';
+import { BACK_RIDGE, BANK, COVER_PATCHES, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, coverAt, heightAt, skylineRow, spotAt, summitScreenY, terrainHit } from './fixtures/terrain';
 import { HORIZON_COLOR, luminance as lumOf, terrainColor } from '../../src/engine/render/shading';
 import { LogField, OUTLINE, rimAt } from '../../src/engine/render/outline';
 import { DETAIL, detailAt, detailFade, detailFrame } from '../../src/engine/render/detail';
@@ -13,7 +13,7 @@ const R_EFF_M = 6371008.8 / (1 - 0.13);
 const W = 1000, H = 600;
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', q: 'low', shade: '0', ...query });
+  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', q: 'low', shade: '0', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;
@@ -478,6 +478,7 @@ test.describe('panels', () => {
     await expect(page.getByRole('link', { name: 'Mapterhorn' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'peakviewer' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'OpenStreetMap contributors' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'ESA WorldCover' })).toBeVisible();   // the land cover
   });
 
   test('the check panel reports compiled pipelines', async ({ page }) => {
@@ -615,6 +616,57 @@ test.describe('appearance', () => {
       for (let i = 0; i < got.length; i++) if (sharp[i]) expect(Math.abs(got[i] - want[i])).toBeLessThan(0.02);
     });
   }
+
+  test('where the land cover says forest the ground is forest, where it says meadow, meadow: each as the palette says, and darker and lighter than the bare plain', async ({ page }) => {
+    // Two squares on the plain (fixtures/terrain.ts COVER_PATCHES), seen from
+    // 300 m up, each looked at straight: the middle of the picture is the
+    // middle of the square, a hundred metres and more from its edge.
+    const seen: Record<string, { got: number; want: number; bare: number }> = {};
+    for (const patch of COVER_PATCHES) {
+      const east = (patch.west + patch.east) / 2, north = (patch.south + patch.north) / 2;
+      const yaw = Math.round(((Math.atan2(east, north) * 180) / Math.PI + 360) % 360 * 10) / 10;
+      const pitch = -Math.round((Math.atan2(300, Math.hypot(east, north)) * 180) / Math.PI * 10) / 10;
+      await page.goto(url({ yaw, pitch, alt: PLAIN_M + 300 }, { shade: '1' }));   // a colour test
+      const s = await ready(page);
+      // 5 × 5 probes, 10 px apart, round the middle: brightness (3 × 3 px) and range, read in the page.
+      const probes: [number, number][] = [];
+      for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) probes.push([W / 2 + 10 * i, H / 2 + 10 * j]);
+      const read = () => page.evaluate(async (probes) => {
+        const r = (window as any).alp.renderer;
+        const c = await r.capture(), b = await r.readRange();
+        return probes.map(([x, y]) => {
+          let sum = 0;
+          for (let yy = y - 1; yy <= y + 1; yy++) for (let xx = x - 1; xx <= x + 1; xx++) {
+            const o = (yy * c.width + xx) * 4;
+            sum += 0.2126 * c.pixels[o] + 0.7152 * c.pixels[o + 1] + 0.0722 * c.pixels[o + 2];
+          }
+          const o = ((b.height - 1 - y) * b.width + x) * 4;
+          return { lum: sum / 9 / 255, packed: b.pixels[o] * 65536 + b.pixels[o + 1] * 256 + b.pixels[o + 2] };
+        });
+      }, probes);
+      const frame = detailFrame(STAND.lon, STAND.lat);
+      const LOG_MIN = Math.log(8), LOG_SPAN = Math.log(4e5) - Math.log(8);
+      const expected = (px: Awaited<ReturnType<typeof read>>, withCover: boolean) => px.map((p, i) => {
+        const range = Math.exp(LOG_MIN + (p.packed / 16777215) * LOG_SPAN);
+        const spot = spotAt(yaw, pitch, probes[i][0], probes[i][1], 60, W, H, range);
+        expect(coverAt(spot.lon, spot.lat)).toBe(patch.cls);            // the probe is on the square
+        const detail = { d: detailAt(frame, spot.east, spot.north), fade: detailFade(range) };
+        return lumOf(terrainColor(spot.h, spot.normal, range, false, undefined, yaw, s.eyeAltitude, 0.5, detail, withCover ? patch.cls : 0));
+      });
+      const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+      // The cover's tiles come after the terrain's: the picture follows within a moment.
+      let px = await read();
+      await expect.poll(async () => {
+        px = await read();
+        return Math.abs(mean(px.map((p) => p.lum)) - mean(expected(px, true)));
+      }, { timeout: 30_000 }).toBeLessThan(0.02);
+      seen[patch.name] = { got: mean(px.map((p) => p.lum)), want: mean(expected(px, true)), bare: mean(expected(px, false)) };
+    }
+    // Not the plain's own tint: forest clearly darker than it, and than the meadow.
+    expect(seen.forest.got).toBeLessThan(seen.forest.bare - 0.05);
+    expect(seen.forest.got).toBeLessThan(seen.meadow.got - 0.05);
+    expect(Math.abs(seen.meadow.got - seen.meadow.bare)).toBeGreaterThan(0.02);
+  });
 
   test('the Testhorn view matches the golden within tolerance', async ({ page }) => {
     // A page screenshot of a software-rendered WebGL canvas can take well

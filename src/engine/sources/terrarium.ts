@@ -61,7 +61,7 @@ export function probeDeviation(px: Uint8ClampedArray): number {
  */
 export type Decoder = 'bitmap' | 'image';
 
-async function pixelsOf(bytes: ArrayBuffer | Uint8Array, size: number, how: Decoder): Promise<Uint8ClampedArray | null> {
+export async function pixelsOf(bytes: ArrayBuffer | Uint8Array, size: number, how: Decoder): Promise<Uint8ClampedArray | null> {
   const blob = new Blob([bytes as BlobPart]);
   if (how === 'bitmap') {
     const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });

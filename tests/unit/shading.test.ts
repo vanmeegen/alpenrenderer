@@ -184,3 +184,76 @@ describe('the grain of the near ground', () => {
     expect(DETAIL.grain).toBeLessThan(0.2);
   });
 });
+
+describe('land cover: what the ground is, where a survey says so', () => {
+  const up: [number, number, number] = [0, 0, 1];
+  const at = (h: number, cover: number, n = up) => terrainColor(h, n, 500, false, undefined, 0, h, 0.5, undefined, cover);
+  const idx = async (name: string) => (await import('../../src/engine/render/shading')).COVER_CLASSES.indexOf(name as never);
+
+  test('without a class the ground is the height\'s own tint, as before', () => {
+    const plain = terrainColor(1500, up, 500, false, undefined, 0, 1500);
+    const none = at(1500, 0);
+    for (let i = 0; i < 3; i++) expect(none[i]).toBeCloseTo(plain[i], 9);
+  });
+
+  test('forest is darker and greener than the meadow beside it; a village is grey; a field lighter than the forest', async () => {
+    const forest = at(1000, await idx('tree')), grass = at(1000, await idx('grass')), built = at(1000, await idx('built')), crop = at(1000, await idx('crop'));
+    expect(luminance(forest)).toBeLessThan(luminance(grass) - 0.05);
+    expect(forest[1]).toBeGreaterThan(forest[0] * 1.3);                 // green
+    expect(Math.abs(built[0] - built[1])).toBeLessThan(0.04);           // grey
+    expect(luminance(crop)).toBeGreaterThan(luminance(forest) + 0.1);
+  });
+
+  test('grass turns from valley green to the paler alpine meadow with height', async () => {
+    const g = await idx('grass');
+    const low = at(800, g), high = at(2300, g);
+    expect(high[0] / high[1]).toBeGreaterThan(low[0] / low[1] + 0.1);   // less green, more yellow
+  });
+
+  test('ice is white well below the snow line, where the height alone would paint meadow; a steep icefall shows rock', async () => {
+    const ice = await idx('snow');
+    const glacier = at(2300, ice), meadow = at(2300, 0);
+    expect(luminance(glacier)).toBeGreaterThan(luminance(meadow) + 0.2);
+    const steep: [number, number, number] = [Math.sin(Math.PI / 3), 0, Math.cos(Math.PI / 3)];
+    const fall = terrainColor(2300, steep, 500, false, undefined, 90, 2300, 0.5, undefined, ice);
+    const flat = terrainColor(2300, up, 500, false, undefined, 90, 2300, 0.5, undefined, ice);
+    expect(fall[2] / fall[0]).toBeLessThan(flat[2] / flat[0]);          // rock is warmer than ice
+  });
+
+  test('above the snow line the survey decides: ice is white, ground it calls bare keeps only a share of the height\'s snow, ground without a class all of it', async () => {
+    const { COVER } = await import('../../src/engine/render/shading');
+    const bare = await idx('bare'), ice = await idx('snow');
+    const rock = at(3300, bare), glacier = at(3300, ice), unknown = at(3300, 0), lowRock = at(2400, bare);
+    expect(luminance(rock)).toBeLessThan(luminance(glacier) - 0.15);     // the Gornergrat is not a snowfield
+    expect(luminance(rock)).toBeGreaterThan(luminance(lowRock) + 0.02);  // but lighter than rock below the line
+    expect(luminance(unknown)).toBeGreaterThan(luminance(rock) + 0.15);  // no survey: the height's snow, as before
+    expect(COVER.snowOnLand).toBeGreaterThan(0.1);
+    expect(COVER.snowOnLand).toBeLessThan(0.5);
+  });
+
+  test('the water class is the lake\'s colour: rivers and lakes the catalogue does not name', async () => {
+    const w = at(600, await idx('water'));
+    expect(w[2]).toBeGreaterThan(w[1]);
+    expect(w[1]).toBeGreaterThan(w[0]);
+  });
+
+  test('bare ground is rock at any height, and a class the palette does not know changes nothing', async () => {
+    const bare = at(900, await idx('bare')), rockHigh = at(2400, 0);
+    // The same grey: rock is what the height's tint ends in.
+    expect(Math.abs(bare[0] / bare[1] - rockHigh[0] / rockHigh[1])).toBeLessThan(0.03);
+    const odd = at(1500, 15), none = at(1500, 0);
+    for (let i = 0; i < 3; i++) expect(odd[i]).toBeCloseTo(none[i], 9);
+  });
+
+  test('the grain frays the edge between two classes: where a class is read moves with the grain, by COVER.jitter metres at most per unit', async () => {
+    const { COVER, coverJitter } = await import('../../src/engine/render/shading');
+    expect(coverJitter([0, 0, 0], [0, 0, 0])).toEqual([0, 0]);
+    const j = coverJitter([1, -1, 0], [0, 0, 0]);
+    expect(j[0]).toBeCloseTo(COVER.jitter, 9);
+    expect(j[1]).toBeCloseTo(-COVER.jitter, 9);
+    // The fine grain adds half as much again.
+    expect(coverJitter([1, 0, 0], [1, 0, 0])[0]).toBeCloseTo(COVER.jitter * 1.5, 9);
+    expect(COVER.jitter).toBeGreaterThan(10);
+    expect(COVER.jitter).toBeLessThan(60);
+  });
+});

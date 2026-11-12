@@ -62,7 +62,8 @@ describe('formatHash', () => {
 describe('readOptions', () => {
   test('defaults to WebGL2 and automatic quality', () => {
     expect(readOptions('')).toEqual({
-      backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json', lakes: 'lakes/{x}_{y}.json', shade: true,
+      backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json', lakes: 'lakes/{x}_{y}.json',
+      cover: 'landcover/{z}/{x}/{y}.png', shade: true,
     });
   });
 
@@ -85,6 +86,11 @@ describe('readOptions', () => {
   test('peaks base becomes a cell URL template, default next to the app', () => {
     expect(readOptions('?peaks=/tests/e2e/fixtures/peaks').peaks).toBe('/tests/e2e/fixtures/peaks/{x}_{y}.json');
     expect(readOptions('?peaks=/p/').peaks).toBe('/p/{x}_{y}.json');
+  });
+
+  test('the land cover base becomes a tile URL template', () => {
+    expect(readOptions('?cover=/tests/e2e/fixtures/cover').cover).toBe('/tests/e2e/fixtures/cover/{z}/{x}/{y}.png');
+    expect(readOptions('?cover=/c/').cover).toBe('/c/{z}/{x}/{y}.png');
   });
 
   test('lakes base becomes a cell URL template like the peaks', () => {

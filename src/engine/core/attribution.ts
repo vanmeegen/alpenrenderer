@@ -42,6 +42,12 @@ export const FIXED_CREDITS: Credit[] = [
     url: 'https://www.openstreetmap.org/copyright',
   },
   {
+    who: 'ESA WorldCover',
+    text: 'Land cover (forest, meadow, rock, ice, settlement): © ESA WorldCover project 2021 / '
+      + 'Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium, CC BY 4.0.',
+    url: 'https://esa-worldcover.org',
+  },
+  {
     who: 'NOAA NCEI and the British Geological Survey',
     text: 'Magnetic declination from the World Magnetic Model 2025.',
     url: 'https://www.ncei.noaa.gov/products/world-magnetic-model',

@@ -211,6 +211,26 @@ const lakeCell = `${Math.floor(T.LAKE.lon)}_${Math.floor(T.LAKE.lat)}.json`;
 writeFileSync(join(lakesDir, lakeCell), JSON.stringify(T.LAKES));
 console.log(`fixture lakes: ${T.LAKES.length} in ${lakesDir}/${lakeCell}`);
 
+// --- land cover: the range's forest and meadow, at every zoom the app reads ---
+{
+  const C = await import('../../../tools/landcover.mjs');
+  const coverDir = join(here, 'cover');
+  let tiles = 0;
+  for (let pz = C.PIXEL_ZOOMS.max; pz >= C.PIXEL_ZOOMS.min; pz--) {
+    const tz = pz - 1;
+    // The tiles around the standpoint that hold any class; the rest are simply not there.
+    const cx = Math.floor(C.mercX(T.STAND.lon, tz, 1)), cy = Math.floor(C.mercY(T.STAND.lat, tz, 1));
+    for (let ty = cy - 1; ty <= cy + 1; ty++) for (let tx = cx - 1; tx <= cx + 1; tx++) {
+      const px = C.mercatorTile(T.coverAt, tz, tx, ty);
+      if (!px.some((c) => c > 0)) continue;
+      mkdirSync(join(coverDir, String(tz), String(tx)), { recursive: true });
+      writeFileSync(join(coverDir, String(tz), String(tx), `${ty}.png`), C.encodeGray4(px, C.TILE, C.TILE));
+      tiles++;
+    }
+  }
+  console.log(`fixture cover: ${tiles} tiles in ${coverDir}`);
+}
+
 // The fake camera: one 640x480 frame, light grey above, dark grey below (Y4M
 // 4:2:0, no chroma, so no colour-matrix ambiguity). Chromium plays it as the
 // device camera with --use-file-for-fake-video-capture.

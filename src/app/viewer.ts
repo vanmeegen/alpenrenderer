@@ -14,6 +14,7 @@ import { Peak } from '../engine/core/peaks';
 import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
 import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
 import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
+import { LandCover, urlCoverLoader } from '../engine/sources/landcover';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
 import { bandFor, lookRange, meshTopNear } from '../engine/render/mesh';
 import { DEG, destination, localRadius } from '../engine/core/geodesy';
@@ -82,6 +83,8 @@ export interface ViewerStatus {
   missing: number;
   /** Levels the tile source has no data for at this place. */
   levelsEmpty: number;
+  /** Levels that hold a land cover class per post (sources/landcover.ts). */
+  levelsCovered: number;
   /** DEM ground under the eye, metres. */
   ground: number;
   eyeAltitude: number;
@@ -148,6 +151,8 @@ export class Viewer {
   private lakesVersion = 0;
   /** Per level: what its current water mask was drawn from. */
   private waterStamp = new WeakMap<object, string>();
+  private landCover: LandCover;
+  private coverStamp = new WeakMap<object, string>();
   private targets: LabelTarget[] = [];
   /** Counts every new set of targets, the empty one after a move included. */
   private targetsVersion = 0;
@@ -202,6 +207,7 @@ export class Viewer {
     this.sensors = new SensorLook(this.camera);
     this.catalog = new PeakCatalog(urlFetcher(opt.peaks));
     this.lakeCatalog = new LakeCatalog(lakeFetcher(opt.lakes));
+    this.landCover = new LandCover(urlCoverLoader(opt.cover));
     this.painter = overlay ? new LabelPainter(overlay) : null;
     this.camera.set({ yaw: view.yaw, pitch: view.pitch, fov: view.fov });
   }
@@ -582,6 +588,29 @@ export class Viewer {
     }
   }
 
+  /**
+   * Reads the land cover onto every filled level around the observer whose
+   * grid or data changed since (sources/landcover.ts). The tiles come over
+   * the network: until they are in, a level that moved is drawn without a
+   * class rather than with the classes of where it was.
+   */
+  private applyCover() {
+    const hf = this.streamer.heightField;
+    for (const l of hf.levels) {
+      if (!l.filled || l.role === 'look') continue;
+      const stamp = `${l.version}|${l.px0},${l.py0}`;
+      if (this.coverStamp.get(l) === stamp) continue;
+      this.coverStamp.set(l, stamp);
+      if (l.cover) { l.cover = undefined; l.coverVersion = (l.coverVersion ?? 0) + 1; }
+      void this.landCover.rasterize(l).then((classes) => {
+        if (this.disposed || !classes || this.coverStamp.get(l) !== stamp) return;
+        l.cover = classes;
+        l.coverVersion = (l.coverVersion ?? 0) + 1;
+        this.renderer.setHeightField(hf);
+      });
+    }
+  }
+
   /** Summit geometry and what the terrain hides: once per position or level, not per frame. */
   private rebuildTargets() {
     const hf = this.streamer.heightField;
@@ -693,6 +722,7 @@ export class Viewer {
   private onLevel() {
     this.applyAltitude();
     this.applyWater();
+    this.applyCover();
     this.renderer.setHeightField(this.streamer.heightField);
     this.scheduleRebuildTargets();
   }
@@ -768,6 +798,7 @@ export class Viewer {
       levels: hf.eyeLevels().length,
       levelsShown: hf.eyeLevels().filter((l) => l.filled).length,
       pending: p.pending, missing: p.failed, levelsEmpty: p.empty,
+      levelsCovered: this.streamer.heightField.levels.filter((l) => l.cover).length,
       ground: hf.groundAt(this.view.lon, this.view.lat),
       eyeAltitude: this.renderer.eyeAltitude,
       eyeLift: this.eyeLift,

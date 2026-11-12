@@ -110,6 +110,26 @@ function terrace(lon: number, lat: number): number {
   return Math.abs(x) <= BANK.halfWidth && y >= BANK.from && y <= BANK.to ? BANK.rise : 0;
 }
 
+/**
+ * Land cover of the range: a square of forest and a square of meadow on the
+ * plain west-south-west of the standpoint, half a kilometre each side,
+ * given in metres east and north of the standpoint. Everywhere else there
+ * is no class, and the ground keeps the tint of its height. gen.mjs writes
+ * them as cover tiles (tools/landcover.mjs); the class numbers are the
+ * palette's (render/shading.ts COVER_CLASSES).
+ */
+export const COVER_PATCHES = [
+  { name: 'forest', cls: 1, west: -1000, east: -500, south: -500, north: 0 },
+  { name: 'meadow', cls: 3, west: -1000, east: -500, south: -1100, north: -600 },
+] as const;
+
+/** The land cover class at a geodetic point, 0 where there is none. */
+export function coverAt(lon: number, lat: number): number {
+  const x = (lon - STAND.lon) * M_PER_DEG_LON, y = (lat - STAND.lat) * M_PER_DEG_LAT;
+  for (const p of COVER_PATCHES) if (x >= p.west && x < p.east && y >= p.south && y < p.north) return p.cls;
+  return 0;
+}
+
 /** Height in metres at a geodetic point. */
 export function heightAt(lon: number, lat: number): number {
   if (inLake(lon, lat)) return LAKE.surface;
@@ -272,7 +292,7 @@ export function spotAt(yawDeg: number, pitchDeg: number, x: number, y: number, f
   const dhE = (heightAt(lon + e / M_PER_DEG_LON, lat) - heightAt(lon - e / M_PER_DEG_LON, lat)) / (2 * e);
   const dhN = (heightAt(lon, lat + e / M_PER_DEG_LAT) - heightAt(lon, lat - e / M_PER_DEG_LAT)) / (2 * e);
   const l = Math.hypot(dhE, dhN, 1);
-  return { east, north, h: heightAt(lon, lat), normal: [-dhE / l, -dhN / l, 1 / l] as [number, number, number] };
+  return { east, north, lon, lat, h: heightAt(lon, lat), normal: [-dhE / l, -dhN / l, 1 / l] as [number, number, number] };
 }
 
 /**

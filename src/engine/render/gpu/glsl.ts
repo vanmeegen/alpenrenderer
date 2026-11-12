@@ -339,6 +339,37 @@ float waterAt(int lv, float dLon, float dIso) {
 }
 
 /**
+ * The land cover class (render/shading.ts COVER_CLASSES, 0 = none) of the
+ * DEM post at this point moved jit metres east and north: the atlas's
+ * alpha channel, sixteen to the class.
+ */
+float coverAt(int lv, float dLon, float dIso, vec2 jit) {
+  vec4 A = uLvlA[lv];
+  vec2 o = atlasOrigin(lv);
+  float perMetre = A.z / (uRadius * uCosLat0);
+  float px = clamp(floor(A.x + dLon * A.z + jit.x * perMetre), 0.0, uLevelPx - 1.0) + o.x;
+  float py = clamp(floor(A.y - dIso * A.z - jit.y * perMetre), 0.0, uLevelPx - 1.0) + o.y;
+  return floor(texelFetch(heights, ivec2(int(px), int(py)), 0).a * 255.0 / 16.0 + 0.5);
+}
+
+/** The ground's own colour for a class at height h, or none (the height's tint) where there is no class. */
+vec3 coverColor(float c, float h, vec3 none) {
+  if (c < 0.5) { return none; }
+  if (c < 1.5) { return COVER_TREE; }
+  if (c < 2.5) { return COVER_SHRUB; }
+  if (c < 3.5) { return mix(COVER_GRASS_LOW, COVER_GRASS_HIGH, smoothstep(GRASS_FROM, GRASS_TO, h)); }
+  if (c < 4.5) { return COVER_CROP; }
+  if (c < 5.5) { return COVER_BUILT; }
+  if (c < 6.5) { return COVER_BARE; }
+  if (c < 7.5) { return COVER_SNOW; }
+  if (c < 8.5) { return uWaterColor; }
+  if (c < 9.5) { return COVER_WETLAND; }
+  if (c < 10.5) { return COVER_TREE; }
+  if (c < 11.5) { return COVER_MOSS; }
+  return none;
+}
+
+/**
  * Unit vector from the eye to this point, east-north-up, from what the pass
  * already has: the horizontal direction from the offsets (Mercator is
  * conformal, so east and north scale alike), the vertical from the height
@@ -375,19 +406,24 @@ void main(void) {
   // sampler still has its derivatives for the mip.
   vec2 ground = vec2(dLon, dIso);
   vec2 fineUv = ground * uDetail.x + uDetailOrigin.xy;
-  vec3 grain = texture2D(detail, fineUv).rgb
-             + texture2D(detail, ground * uDetail.y + uDetailOrigin.zw).rgb - vec3(1.0)
+  vec3 fineGrain = texture2D(detail, fineUv).rgb;
+  vec3 coarseGrain = texture2D(detail, ground * uDetail.y + uDetailOrigin.zw).rgb;
+  vec3 grain = fineGrain + coarseGrain - vec3(1.0)
              + DETAIL_FINEST * (2.0 * texture2D(detail, fineUv * DETAIL_FINER).rgb - vec3(1.0));
+  // Where the land cover is read: moved by the grain, so the 106 m steps of its pixels fray.
+  vec2 jit = COVER_JITTER * ((2.0 * coarseGrain.xy - vec2(1.0)) + 0.5 * (2.0 * fineGrain.xy - vec2(1.0)));
 
   int lv = levelFor(r);
   vec3 sf = surfaceAt(lv, dLon, dIso);
   float wet = waterAt(lv, dLon, dIso);
+  float cover = coverAt(lv, dLon, dIso, jit);
   if (float(lv) + 1.0 < uLevelCount && uLvlA[lv + 1].w > 0.0) {
     float outer = uLvlA[lv].w;
     float fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) {
       sf = mix(sf, surfaceAt(lv + 1, dLon, dIso), fade);
       wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
+      if (fade > 0.5) { cover = coverAt(lv + 1, dLon, dIso, jit); }
     }
   }
   int lk = lookLevel(dLon, dIso);
@@ -409,12 +445,16 @@ void main(void) {
   vec3 col = mix(valley, forest, smoothstep(700.0, 1100.0, h));
   col = mix(col, meadow, smoothstep(1500.0, 1900.0, h));
   col = mix(col, rock, smoothstep(1950.0, 2350.0, h));
+  // Where a survey says what the ground is, that; rock and snow over it as ever.
+  col = coverColor(cover, h, col);
   // Rock from 33° to 45°, weaker below the tree line; snow gone between 40° and 50° (shading.ts GROUND).
   float rocky = smoothstep(ROCK_LOW, ROCK_HIGH, slope)
               * mix(ROCK_BELOW, ROCK_ABOVE, smoothstep(ROCK_FROM, ROCK_TO, h));
   col = mix(col, rock, rocky);
+  // Ground the survey knows and does not call ice keeps only a share of the height's snow.
+  float known = step(0.5, cover) * step(cover, 11.5) * (1.0 - step(6.5, cover) * step(cover, 7.5));
   float snowy = smoothstep(uSnowLine - 350.0, uSnowLine + 50.0, h)
-              * (1.0 - smoothstep(SNOW_LOW, SNOW_HIGH, slope));
+              * (1.0 - smoothstep(SNOW_LOW, SNOW_HIGH, slope)) * mix(1.0, SNOW_ON_LAND, known);
   col = mix(col, snow, snowy);
   col = mix(col, uWaterColor, wet);
 

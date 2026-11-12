@@ -56,6 +56,13 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   `public/lakes/` (Build: `node tools/build_lakes.mjs`), die Wassermaske
   wird pro Clipmap-Level gerastert und im freien Kanal des Höhenatlas an den
   Shader gegeben.
+- **Landbedeckung**: Wo Wald steht, ist das Gelände dunkelgrün, Wiesen
+  sind hell (im Tal grüner, oben fahler), Fels und Schutt grau, Gletscher
+  weiß auch unter der Schneegrenze, Orte grau, Felder gelbgrün. Die Klassen
+  kommen aus ESA WorldCover (10 m, 2021), gebacken zu 106-m-Kacheln unter
+  `public/landcover/` (Build: `node tools/build_landcover.mjs`); sie liegen
+  je DEM-Posten im vierten Kanal des Höhenatlas. Wo es keine Klasse gibt,
+  bleibt die Farbe der Höhenstufe.
 - **Bedienung**: Das Menü ist eine schmale Icon-Leiste am linken Rand,
   Status und Panels stehen daneben und scrollen statt über den Bildschirm
   zu laufen; „Menü ausblenden“ lässt nur einen Knopf stehen (Handy quer).
@@ -135,4 +142,7 @@ Shading-Pass erweitert.
   Seen (`public/lakes/`, 10 374 Seen, `natural=water` mit Namen, per Overpass gebaut) und
   Standpunkt-Karte: © OpenStreetMap contributors, ODbL; die Kartenkacheln
   kommen vom Standard-Tile-Layer der OpenStreetMap Foundation.
+- Landbedeckung (`public/landcover/`): © ESA WorldCover project 2021 /
+  Contains modified Copernicus Sentinel data (2021) processed by ESA
+  WorldCover consortium, CC BY 4.0.
 - Code: MIT. Drittkomponenten in `THIRD-PARTY-NOTICES.md`.

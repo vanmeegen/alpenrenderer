@@ -54,6 +54,38 @@ export const WATER_COLOR: [number, number, number] = [0.17, 0.33, 0.50];
  */
 export const WATER_SHINE = { f0: 0.02, sky: 0.6, glint: 0.35, sharpness: 60 };
 
+/**
+ * Land cover (sources/landcover.ts): the classes of ESA WorldCover in the
+ * order of their index in the tiles, 0 for none, and what each looks like.
+ * Where a survey says what the ground is, its colour replaces the tint the
+ * height alone would give; rock on steep ground and snow up high are laid
+ * over it as before. Grass turns from valley green to the paler alpine
+ * meadow between `grassFrom` and `grassTo` metres. `jitter` is how far, in
+ * metres per unit of the grain's slope (detail.ts), the place a class is
+ * read at is moved: it frays the 106 m steps of the cover's pixels.
+ * `snowOnLand` is the share of the height's snow that ground of any class
+ * but ice keeps above the snow line: the survey is a summer's, and what it
+ * calls rock up there is rock with old snow in it, not a snowfield.
+ */
+export const COVER_CLASSES = ['none', 'tree', 'shrub', 'grass', 'crop', 'built', 'bare', 'snow', 'water', 'wetland', 'mangrove', 'moss'] as const;
+type RGB = [number, number, number];
+export const COVER = {
+  tree: [0.2, 0.35, 0.2] as RGB,
+  shrub: [0.4, 0.48, 0.28] as RGB,
+  grassLow: [0.47, 0.62, 0.31] as RGB,
+  grassHigh: [0.6, 0.61, 0.38] as RGB,
+  grassFrom: 1400,
+  grassTo: 2100,
+  crop: [0.66, 0.65, 0.39] as RGB,
+  built: [0.62, 0.59, 0.56] as RGB,
+  bare: [0.52, 0.5, 0.47] as RGB,
+  snow: [0.9, 0.94, 0.98] as RGB,
+  wetland: [0.36, 0.46, 0.32] as RGB,
+  moss: [0.55, 0.57, 0.45] as RGB,
+  jitter: 50,
+  snowOnLand: 0.3,
+};
+
 const DEG = Math.PI / 180;
 
 /** Bearing of the light for a view direction `yaw`, degrees 0..360. */
@@ -118,6 +150,32 @@ export function haze(col: [number, number, number], range: number, h: number, ey
   return [0, 1, 2].map((i) => HORIZON_COLOR[i] + (col[i] - HORIZON_COLOR[i]) * t[i]) as [number, number, number];
 }
 
+/** The ground's own colour for a land cover class at `h` metres; `none` (the height's tint) where there is no class. */
+export function coverColor(cls: number, h: number, none: RGB): RGB {
+  switch (COVER_CLASSES[cls]) {
+    case 'tree': case 'mangrove': return COVER.tree;
+    case 'shrub': return COVER.shrub;
+    case 'grass': return mix(COVER.grassLow, COVER.grassHigh, smoothstep(COVER.grassFrom, COVER.grassTo, h));
+    case 'crop': return COVER.crop;
+    case 'built': return COVER.built;
+    case 'bare': return COVER.bare;
+    case 'snow': return COVER.snow;
+    case 'water': return WATER_COLOR;
+    case 'wetland': return COVER.wetland;
+    case 'moss': return COVER.moss;
+    default: return none;
+  }
+}
+
+/**
+ * Where the class of a point is read: `metres` east and north of it, from
+ * the slope channels of the grain's coarse and fine tile there (each −1..1,
+ * detail.ts). Far out the sampler averages the grain away and nothing moves.
+ */
+export function coverJitter(coarse: RGB, fine: RGB): [number, number] {
+  return [COVER.jitter * (coarse[0] + 0.5 * fine[0]), COVER.jitter * (coarse[1] + 0.5 * fine[1])];
+}
+
 /**
  * Linear RGB of a terrain pixel at altitude `h` metres, with the surface
  * normal `n` (east, north, up; unit) and ground range `range` metres;
@@ -127,11 +185,12 @@ export function haze(col: [number, number, number], range: number, h: number, ey
  * point's own height when not given); `occlusion` what core/surface.ts
  * gives for the point, 0.5 on even ground; `detail` the grain of the near
  * ground (detail.ts: `d` from detailAt, `fade` from detailFade), which
- * changes the light on dry ground and not what the ground is made of.
+ * changes the light on dry ground and not what the ground is made of;
+ * `cover` the land cover class there (COVER_CLASSES), 0 for none.
  */
 export function terrainColor(
   h: number, n: [number, number, number], range: number, water = false, view?: [number, number, number], yaw = 0,
-  eyeAlt = h, occlusion = 0.5, detail?: { d: [number, number, number]; fade: number },
+  eyeAlt = h, occlusion = 0.5, detail?: { d: [number, number, number]; fade: number }, cover = 0,
 ): [number, number, number] {
   const slope = 1 - n[2];
   const valley: [number, number, number] = [0.47, 0.60, 0.33];
@@ -142,11 +201,14 @@ export function terrainColor(
   let col = mix(valley, forest, smoothstep(700, 1100, h));
   col = mix(col, meadow, smoothstep(1500, 1900, h));
   col = mix(col, rock, smoothstep(1950, 2350, h));
+  col = coverColor(cover, h, col);
   const G = GROUND;
   const rocky = smoothstep(G.rockLow, G.rockHigh, slope)
     * (G.rockBelow + (G.rockAbove - G.rockBelow) * smoothstep(G.rockFrom, G.rockTo, h));
   col = mix(col, rock, rocky);
-  const snowy = smoothstep(SNOW_LINE - 350, SNOW_LINE + 50, h) * (1 - smoothstep(G.snowLow, G.snowHigh, slope));
+  const known = COVER_CLASSES[cover] !== undefined && cover !== 0 && COVER_CLASSES[cover] !== 'snow';
+  const snowy = smoothstep(SNOW_LINE - 350, SNOW_LINE + 50, h) * (1 - smoothstep(G.snowLow, G.snowHigh, slope))
+    * (known ? COVER.snowOnLand : 1);
   col = mix(col, snow, snowy);
   if (water) col = [...WATER_COLOR];
   const s = sunVector(yaw);

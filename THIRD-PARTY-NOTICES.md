@@ -11,6 +11,7 @@ The code in this repository is MIT (see `LICENSE`). It builds on:
 | [Leaflet](https://leafletjs.com) | BSD-2-Clause | Standpoint map |
 | [React](https://react.dev) | MIT | UI shell |
 | [Tailwind CSS](https://tailwindcss.com) | MIT | Styling |
+| [geotiff.js](https://geotiffjs.github.io) (build only) | MIT | Reading WorldCover in `tools/build_landcover.mjs` |
 | [three.js](https://threejs.org) (spike only, from CDN) | MIT | `spike/zugspitze/` |
 
 Data:
@@ -25,6 +26,12 @@ Data:
   European Union and ESA.
 - Summit names and positions (`public/peaks/`, built from `natural=peak` nodes
   via Overpass by `tools/build_peaks.mjs`): © OpenStreetMap contributors, ODbL.
+- Land cover (`public/landcover/`, baked from the 40 m overviews of the
+  WorldCover GeoTIFFs by `tools/build_landcover.mjs`, reduced to 106 m class
+  tiles): © ESA WorldCover project 2021 / Contains modified Copernicus
+  Sentinel data (2021) processed by ESA WorldCover consortium,
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The tiles are a
+  derived product: resampled and reduced by majority.
 - Standpoint map tiles: © OpenStreetMap contributors, ODbL, served by the
   OpenStreetMap Foundation's standard tile layer under its
   [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
