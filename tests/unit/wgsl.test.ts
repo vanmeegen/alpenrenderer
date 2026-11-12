@@ -192,6 +192,21 @@ describe('shader dialect parity', () => {
   });
 });
 
+describe('the height atlas', () => {
+  test('both dialects find a level by column and row, the column count from atlas.ts', async () => {
+    // One column of ten 640 px levels was a texture 6400 px tall; a phone
+    // whose limit is 4096 drew nothing.
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { ATLAS_COLUMNS } = await import('../../src/engine/render/atlas');
+    const { shaderFloat } = await import('../../src/engine/render/gpu/consts');
+    for (const src of [GL.TERRAIN_VERTEX_GL, GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_VERTEX, S.TERRAIN_SHADE_FRAGMENT]) {
+      expect(src).toMatch(new RegExp(`const (float )?ATLAS_COLS\\b[^;]*= ${shaderFloat(ATLAS_COLUMNS).replace('.', '\\.')};`));
+      expect(src).toMatch(/atlasOrigin\(/);
+      expect(src).not.toMatch(/(float|f32)\(lv\) \* (uniforms\.)?uLevelPx/);   // the single column
+    }
+  });
+});
+
 describe('shader text Babylon can take apart', () => {
   test('no comment behind code holds a semicolon: the preprocessor cuts declarations there', async () => {
     // "uniform float uRim;   // …; 0 = off" compiled to a lone "0 = off" and a black screen (WebGL2).

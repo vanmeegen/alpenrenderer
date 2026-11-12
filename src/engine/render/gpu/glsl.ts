@@ -25,7 +25,8 @@
  */
 
 import { WATER_SHINE } from '../shading';
-import { OUTLINE_CONSTS, SHADE_CONSTS, glslConsts } from './consts';
+import { OUTLINE_CONSTS, SHADE_CONSTS, glslConsts, shaderFloat } from './consts';
+import { ATLAS_COLUMNS } from '../atlas';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -67,9 +68,18 @@ const CLIPMAP_SAMPLER = /* glsl */ `
  * (iPad, Safari, 2026). The WGSL keeps its normalised sample; WebGPU has no
  * reduced precision to lose.
  */
+const float ATLAS_COLS = ${shaderFloat(ATLAS_COLUMNS)};
+
+/** Top-left texel of a level in the atlas: the levels lie ATLAS_COLS abreast (render/atlas.ts). */
+vec2 atlasOrigin(int lv) {
+  float row = floor(float(lv) / ATLAS_COLS);
+  return vec2(float(lv) - row * ATLAS_COLS, row) * uLevelPx;
+}
+
 float texel(int lv, float x, float y) {
-  float px = clamp(x, 0.0, uLevelPx - 1.0);
-  float py = clamp(y, 0.0, uLevelPx - 1.0) + float(lv) * uLevelPx;
+  vec2 o = atlasOrigin(lv);
+  float px = clamp(x, 0.0, uLevelPx - 1.0) + o.x;
+  float py = clamp(y, 0.0, uLevelPx - 1.0) + o.y;
   vec4 c = texelFetch(heights, ivec2(int(px), int(py)), 0);
   return floor(c.r * 255.0 + 0.5) * 256.0 + floor(c.g * 255.0 + 0.5);
 }
@@ -309,8 +319,9 @@ vec2 gradientAt(int lv, float dLon, float dIso) {
  */
 float waterAt(int lv, float dLon, float dIso) {
   vec4 A = uLvlA[lv];
-  float px = clamp(floor(A.x + dLon * A.z), 0.0, uLevelPx - 1.0);
-  float py = clamp(floor(A.y - dIso * A.z), 0.0, uLevelPx - 1.0) + float(lv) * uLevelPx;
+  vec2 o = atlasOrigin(lv);
+  float px = clamp(floor(A.x + dLon * A.z), 0.0, uLevelPx - 1.0) + o.x;
+  float py = clamp(floor(A.y - dIso * A.z), 0.0, uLevelPx - 1.0) + o.y;
   return step(0.5, texelFetch(heights, ivec2(int(px), int(py)), 0).b);
 }
 

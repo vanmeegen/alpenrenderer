@@ -1,0 +1,27 @@
+/**
+ * Where each clipmap level lies in the height atlas.
+ *
+ * The levels are squares of the same size. Stacked in one column, ten of
+ * them at 640 px made a texture 6400 px tall, and 4096 is the only size
+ * every phone takes (most take 8192, some old Androids do not). Two abreast
+ * they are 1280 × 3200. The shaders find a level's corner the same way
+ * (gpu/glsl.ts and gpu/wgsl.ts `atlasOrigin`, with ATLAS_COLUMNS injected).
+ */
+
+/** Levels side by side in the atlas. */
+export const ATLAS_COLUMNS = 2;
+
+export interface AtlasLayout {
+  width: number;
+  height: number;
+  /** Top-left texel of level `i`. */
+  origin(i: number): { x: number; y: number };
+}
+
+export function atlasLayout(levels: number, levelPx: number): AtlasLayout {
+  return {
+    width: ATLAS_COLUMNS * levelPx,
+    height: Math.max(1, Math.ceil(levels / ATLAS_COLUMNS)) * levelPx,
+    origin: (i) => ({ x: (i % ATLAS_COLUMNS) * levelPx, y: Math.floor(i / ATLAS_COLUMNS) * levelPx }),
+  };
+}

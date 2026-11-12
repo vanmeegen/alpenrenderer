@@ -59,6 +59,7 @@ import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, WATER_COLOR, sunVector } from '../
 import { Band, RadialParams, radialParams } from '../mesh';
 import { RedrawGate, frameFingerprint } from '../redraw';
 import { OUTLINE } from '../outline';
+import { atlasLayout } from '../atlas';
 import { QUALITY_HIGH, QUALITY_LOW, QUALITY_MID, Quality } from '../quality';
 import { renderPixelRatio } from '../resolution';
 import {
@@ -85,6 +86,11 @@ const VIEW_MASK = 0x2;
  * dialect and the depth clip range differ.
  */
 export type Backend = 'webgpu' | 'webgl2';
+
+/** Writes a block of texels into a texture (ThinEngine and WebGPUEngine both implement it). */
+interface SubUpload {
+  updateTextureData(texture: unknown, data: ArrayBufferView, x: number, y: number, width: number, height: number): void;
+}
 
 export { QUALITY_HIGH, QUALITY_LOW, QUALITY_MID };
 export type { Quality };
@@ -193,7 +199,9 @@ export class GpuRenderer {
   private rangeRtt!: RenderTargetTexture;
   private colorRtt!: RenderTargetTexture;
   private atlas: RawTexture | null = null;
-  private atlasData: Uint8Array | null = null;
+  /** One level's texels, packed for upload; and the atlas's size as "w×h". */
+  private levelBlock: Uint8Array | null = null;
+  private atlasShape = '';
   private atlasLevelPx = 0;
   private blank!: RawTexture;
   private video: VideoTexture | null = null;
@@ -262,7 +270,7 @@ export class GpuRenderer {
       d.webgpu = false;
       d.engine = `Babylon.js WebGL${gl.webGLVersion}`;
       d.adapter = gl.getGlInfo().renderer || 'unreported';
-      // What this renderer asks of the device: a 640×5120 atlas, texture
+      // What this renderer asks of the device: an atlas of up to 1280×3200, texture
       // fetches in the vertex stage, two vec4[8] uniform arrays, highp there.
       const g = (gl as unknown as { _gl: WebGL2RenderingContext })._gl;
       this.gl2 = g;
@@ -530,50 +538,53 @@ export class GpuRenderer {
     for (const l of levels) {
       if (l.w !== w || l.h !== h) throw new Error('clipmap levels must share a size');
     }
-    const need = w * h * 4 * levels.length;
-    if (!this.atlasData || this.atlasData.length !== need) {
-      this.atlasData = new Uint8Array(need);
+    // The levels lie two abreast (render/atlas.ts); a level that changed is
+    // packed into its own block and sent alone, not the whole atlas with it.
+    const layout = atlasLayout(levels.length, h);
+    const shape = `${layout.width}×${layout.height}`;
+    if (this.atlasShape !== shape) {
+      this.atlasShape = shape;
       this.atlas?.dispose();
       this.atlas = null;
-      this.uploaded = levels.map(() => '');
     }
-    this.atlasLevelPx = h;
-
-    let changed = false;
-    levels.forEach((l, i) => {
-      const stamp = `${l.version}:${l.waterVersion ?? 0}`;
-      if (this.uploaded[i] === stamp && this.atlas) return;
-      changed = true;
-      const base = i * w * h * 4;
-      const raw = l.raw;
-      const water = l.water && l.water.length === raw.length ? l.water : null;
-      for (let p = 0, o = base; p < raw.length; p++, o += 4) {
-        // The stored value is already quantised; re-express it at one metre so
-        // one packing works for every level.
-        const m = Math.round(raw[p] * l.quant + l.bias) - HEIGHT_BIAS;
-        const v = m < 0 ? 0 : m > 65535 ? 65535 : m;
-        this.atlasData![o] = v >> 8;
-        this.atlasData![o + 1] = v & 255;
-        this.atlasData![o + 2] = water ? water[p] : 0;   // lake mask, see core/water.ts
-        this.atlasData![o + 3] = 255;
-      }
-      this.uploaded[i] = stamp;
-    });
-
     if (!this.atlas) {
-      this.atlas = RawTexture.CreateRGBATexture(this.atlasData!, w, h * levels.length,
+      this.atlas = new RawTexture(null, layout.width, layout.height, Constants.TEXTUREFORMAT_RGBA,
         this.scene, false, false, Texture.NEAREST_SAMPLINGMODE);
       this.atlas.wrapU = Texture.CLAMP_ADDRESSMODE;
       this.atlas.wrapV = Texture.CLAMP_ADDRESSMODE;
       this.terrainMat.setTexture('heights', this.atlas);
       this.shadeMat.setTexture('heights', this.atlas);
-    } else if (changed) {
-      this.atlas.update(this.atlasData!);
+      this.uploaded = levels.map(() => '');
     }
+    this.atlasLevelPx = h;
+    if (!this.levelBlock || this.levelBlock.length !== w * h * 4) this.levelBlock = new Uint8Array(w * h * 4);
+    const block = this.levelBlock;
+    const texture = this.atlas.getInternalTexture();
+
+    levels.forEach((l, i) => {
+      const stamp = `${l.version}:${l.waterVersion ?? 0}`;
+      if (this.uploaded[i] === stamp) return;
+      const raw = l.raw;
+      const water = l.water && l.water.length === raw.length ? l.water : null;
+      for (let p = 0, o = 0; p < raw.length; p++, o += 4) {
+        // The stored value is already quantised; re-express it at one metre so
+        // one packing works for every level.
+        const m = Math.round(raw[p] * l.quant + l.bias) - HEIGHT_BIAS;
+        const v = m < 0 ? 0 : m > 65535 ? 65535 : m;
+        block[o] = v >> 8;
+        block[o + 1] = v & 255;
+        block[o + 2] = water ? water[p] : 0;   // lake mask, see core/water.ts
+        block[o + 3] = 255;
+      }
+      const at = layout.origin(i);
+      // Both engines have it; the type they share does not declare it.
+      if (texture) (this.engine as unknown as SubUpload).updateTextureData(texture, block, at.x, at.y, w, h);
+      this.uploaded[i] = stamp;
+    });
     if (this.gl2) this.diagnostics.glError = this.gl2.getError();
 
     this.diagnostics.levels = levels.length;
-    this.diagnostics.atlas = `${w}×${h * levels.length} rgba8`;
+    this.diagnostics.atlas = `${shape} rgba8`;
     this.syncLevels(hf);
   }
 
@@ -760,7 +771,8 @@ export class GpuRenderer {
       m.setFloat('uRefRadius', effectiveRadiusAt(hf.lat, this.refractionK));
       m.setFloat('uDropScale', this.curvature ? 1 : 0);
       m.setFloat('uLevelCount', hf.levels.length);
-      m.setVector2('uTexSize', new Vector2(hf.levels[0].w, this.atlasLevelPx * hf.levels.length));
+      const atlas = atlasLayout(hf.levels.length, this.atlasLevelPx);
+      m.setVector2('uTexSize', new Vector2(atlas.width, atlas.height));
       m.setFloat('uLevelPx', this.atlasLevelPx);
       m.setFloat('uFar', this.camera.far);
       m.setMatrix('uViewProj', Matrix.FromArray(this.camera.viewProj));

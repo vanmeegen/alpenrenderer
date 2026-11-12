@@ -127,6 +127,10 @@ test.describe('loading', () => {
     expect(s.diagnostics).toMatchObject({ terrainReady: true, shadeReady: true, compositeReady: true, frameErrors: 0 });
     expect(s.diagnostics.shaderErrors).toEqual([]);
     await expect(page.getByText('6 Level')).toBeVisible();
+    // The eight levels (six and the telescope's two) lie two abreast in the
+    // height atlas: no side over the 4096 px every phone takes. In one
+    // column they were 640 × 5120.
+    expect((s.diagnostics as any).atlas).toBe('1280×2560 rgba8');
   });
 
   test('the eye stands 1.7 m above the ground under it, ripple or not', async ({ page }) => {

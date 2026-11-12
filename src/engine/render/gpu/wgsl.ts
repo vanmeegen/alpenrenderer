@@ -25,7 +25,8 @@
  */
 
 import { WATER_SHINE } from '../shading';
-import { OUTLINE_CONSTS, SHADE_CONSTS, wgslConsts } from './consts';
+import { OUTLINE_CONSTS, SHADE_CONSTS, shaderFloat, wgslConsts } from './consts';
+import { ATLAS_COLUMNS } from '../atlas';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -88,10 +89,19 @@ fn unpackLogRange(p : vec4<f32>) -> f32 {
  * `heights` texture in scope.
  */
 const CLIPMAP_SAMPLER = /* wgsl */ `
-/** One exact texel out of the stacked clipmap atlas. */
+const ATLAS_COLS : f32 = ${shaderFloat(ATLAS_COLUMNS)};
+
+/** Top-left texel of a level in the atlas: the levels lie ATLAS_COLS abreast (render/atlas.ts). */
+fn atlasOrigin(lv : i32) -> vec2<f32> {
+  let row = floor(f32(lv) / ATLAS_COLS);
+  return vec2<f32>(f32(lv) - row * ATLAS_COLS, row) * uniforms.uLevelPx;
+}
+
+/** One exact texel out of the clipmap atlas. */
 fn texel(lv : i32, x : f32, y : f32) -> f32 {
-  let px = clamp(x, 0.0, uniforms.uLevelPx - 1.0);
-  let py = clamp(y, 0.0, uniforms.uLevelPx - 1.0) + f32(lv) * uniforms.uLevelPx;
+  let o = atlasOrigin(lv);
+  let px = clamp(x, 0.0, uniforms.uLevelPx - 1.0) + o.x;
+  let py = clamp(y, 0.0, uniforms.uLevelPx - 1.0) + o.y;
   let uv = vec2<f32>((px + 0.5) / uniforms.uTexSize.x, (py + 0.5) / uniforms.uTexSize.y);
   let c = textureSampleLevel(heights, heightsSampler, uv, 0.0);
   return round(c.r * 255.0) * 256.0 + round(c.g * 255.0);
@@ -329,8 +339,9 @@ fn gradient(lv : i32, dLon : f32, dIso : f32) -> vec2<f32> {
 /** 1 where the lake mask (the atlas's blue channel) marks this DEM post, 0 on dry ground. */
 fn waterAt(lv : i32, dLon : f32, dIso : f32) -> f32 {
   let A = uniforms.uLvlA[lv];
-  let px = clamp(floor(A.x + dLon * A.z), 0.0, uniforms.uLevelPx - 1.0);
-  let py = clamp(floor(A.y - dIso * A.z), 0.0, uniforms.uLevelPx - 1.0) + f32(lv) * uniforms.uLevelPx;
+  let o = atlasOrigin(lv);
+  let px = clamp(floor(A.x + dLon * A.z), 0.0, uniforms.uLevelPx - 1.0) + o.x;
+  let py = clamp(floor(A.y - dIso * A.z), 0.0, uniforms.uLevelPx - 1.0) + o.y;
   let uv = vec2<f32>((px + 0.5) / uniforms.uTexSize.x, (py + 0.5) / uniforms.uTexSize.y);
   return step(0.5, textureSampleLevel(heights, heightsSampler, uv, 0.0).b);
 }
