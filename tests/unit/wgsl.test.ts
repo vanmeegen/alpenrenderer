@@ -192,6 +192,29 @@ describe('shader dialect parity', () => {
   });
 });
 
+describe('how many levels the shaders hold', () => {
+  test('both dialects size their level arrays and loops by MAX_LEVELS, which holds the default clipmap and its look levels within 4096 px', async () => {
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { MAX_LEVELS, atlasLayout } = await import('../../src/engine/render/atlas');
+    const { DEFAULT_CLIPMAP } = await import('../../src/engine/sources/clipmap');
+    const levels = DEFAULT_CLIPMAP.levels.length + (DEFAULT_CLIPMAP.look?.length ?? 0);
+    expect(levels).toBeLessThanOrEqual(MAX_LEVELS);
+    const atlas = atlasLayout(levels, DEFAULT_CLIPMAP.size);
+    expect(Math.max(atlas.width, atlas.height)).toBeLessThanOrEqual(4096);
+    for (const src of [GL.TERRAIN_VERTEX_GL, GL.TERRAIN_SHADE_FRAGMENT_GL]) {
+      expect(src).toContain(`uniform vec4  uLvlA[${MAX_LEVELS}];`);
+      expect(src).toContain(`uniform vec4  uLvlB[${MAX_LEVELS}];`);
+      expect(src).toContain(`i < ${MAX_LEVELS}; i++`);
+      expect(src).not.toMatch(/\[10\]|i < 10\b|i = 9\b/);
+    }
+    for (const src of [S.TERRAIN_VERTEX, S.TERRAIN_SHADE_FRAGMENT]) {
+      expect(src).toContain(`array<vec4<f32>, ${MAX_LEVELS}>`);
+      expect(src).toContain(`i < ${MAX_LEVELS}; i = i + 1`);
+      expect(src).not.toMatch(/, 10>|i < 10\b|= 9;/);
+    }
+  });
+});
+
 describe('the height atlas', () => {
   test('both dialects find a level by column and row, the column count from atlas.ts', async () => {
     // One column of ten 640 px levels was a texture 6400 px tall; a phone

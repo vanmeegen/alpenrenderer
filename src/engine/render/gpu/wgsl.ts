@@ -26,7 +26,7 @@
 
 import { WATER_SHINE } from '../shading';
 import { OUTLINE_CONSTS, SHADE_CONSTS, shaderFloat, wgslConsts } from './consts';
-import { ATLAS_COLUMNS } from '../atlas';
+import { ATLAS_COLUMNS, MAX_LEVELS } from '../atlas';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -128,13 +128,13 @@ fn sampleLevel(lv : i32, dLon : f32, dIso : f32) -> f32 {
 /** Finest observer level that still covers a ground range (a look level, flagged < 0, never). */
 fn levelFor(r : f32) -> i32 {
   var lv : i32 = i32(uniforms.uLevelCount) - 1;
-  for (var i : i32 = 0; i < 10; i = i + 1) {
+  for (var i : i32 = 0; i < ${MAX_LEVELS}; i = i + 1) {
     if (f32(i) >= uniforms.uLevelCount) { break; }
     let reach = uniforms.uLvlA[i].w;
     if (reach > 0.0 && r <= reach) { lv = i; break; }
   }
   if (uniforms.uLvlA[lv].w < 0.0) {
-    for (var i : i32 = 9; i >= 0; i = i - 1) {
+    for (var i : i32 = ${MAX_LEVELS - 1}; i >= 0; i = i - 1) {
       if (f32(i) < uniforms.uLevelCount && uniforms.uLvlA[i].w > 0.0) { lv = i; break; }
     }
   }
@@ -143,7 +143,7 @@ fn levelFor(r : f32) -> i32 {
 
 /** The telescope's window this point lies in (finest first), or -1: taken by position, not range. */
 fn lookLevel(dLon : f32, dIso : f32) -> i32 {
-  for (var i : i32 = 0; i < 10; i = i + 1) {
+  for (var i : i32 = 0; i < ${MAX_LEVELS}; i = i + 1) {
     if (f32(i) >= uniforms.uLevelCount) { break; }
     if (uniforms.uLvlA[i].w >= 0.0) { continue; }
     let A = uniforms.uLvlA[i];
@@ -192,8 +192,8 @@ uniform uTexSize   : vec2<f32>;
 uniform uLevelPx   : f32;         // pixels per clipmap level in the stacked atlas
 uniform uViewProj  : mat4x4<f32>;
 uniform uFar       : f32;
-uniform uLvlA      : array<vec4<f32>, 10>;  // cx, cy, pxPerRad, maxRange (< 0: a look level, taken by position)
-uniform uLvlB      : array<vec4<f32>, 10>;  // quant, bias, w, h
+uniform uLvlA      : array<vec4<f32>, ${MAX_LEVELS}>;  // cx, cy, pxPerRad, maxRange (< 0: a look level, taken by position)
+uniform uLvlB      : array<vec4<f32>, ${MAX_LEVELS}>;  // quant, bias, w, h
 
 var heightsSampler : sampler;
 var heights        : texture_2d<f32>;
@@ -302,8 +302,8 @@ uniform uTexSize    : vec2<f32>;
 uniform uLevelPx    : f32;
 uniform uRadius     : f32;
 uniform uCosLat0    : f32;
-uniform uLvlA       : array<vec4<f32>, 10>;
-uniform uLvlB       : array<vec4<f32>, 10>;
+uniform uLvlA       : array<vec4<f32>, ${MAX_LEVELS}>;
+uniform uLvlB       : array<vec4<f32>, ${MAX_LEVELS}>;
 uniform uSun        : vec3<f32>;      // towards the sun, ENU, unit
 uniform uSnowLine   : f32;            // metres
 uniform uFogRange   : f32;            // metres to 1/e of the terrain colour

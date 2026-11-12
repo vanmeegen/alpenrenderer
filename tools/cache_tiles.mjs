@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'tile-cache');
-const LEVELS = [14, 13, 12, 11, 10, 9, 8, 7];   // pixel zooms of DEFAULT_CLIPMAP
+const LEVELS = [15, 14, 13, 12, 11, 10, 9, 8, 7];   // pixel zooms of DEFAULT_CLIPMAP, and the near level above it
 const SIZE = 640;
 const TILE = 512;
 

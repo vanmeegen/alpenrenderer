@@ -455,14 +455,17 @@ test.describe('standpoint', () => {
     await expect.poll(async () => hashNum(await hashOf(page), 'lon'), { timeout: 30_000 }).toBeCloseTo(10.98527, 4);
     await expect.poll(async () => hashNum(await hashOf(page), 'yaw'), { timeout: 30_000 }).toBe(110);
     // No fixture tiles there (every request is answered "no such tile"). The
-    // coarsest level still reaches the place from where it was cut; the
-    // others have no data, are left out rather than drawn as a pit, and the
+    // coarsest level still reaches the place from where it was cut, and the
+    // two above it have the fixture's tiles in the west of their windows:
+    // the rest of those is filled from the level below. The three finest
+    // have no data at all, are left out rather than drawn as a pit, and the
     // app says so. Nothing failed, so there is nothing to retry.
     await expect(page.getByText(/\d Ebenen ohne Daten/)).toBeVisible({ timeout: 60_000 });
     await expect(page.getByRole('button', { name: 'Erneut laden' })).toHaveCount(0);
     const s = await status(page);
     expect(s.missing).toBe(0);
-    expect(s.levelsEmpty).toBeGreaterThanOrEqual(s.levels - 1);
+    expect(s.levelsEmpty).toBeGreaterThanOrEqual(3);
+    expect(s.levelsShown).toBeGreaterThanOrEqual(1);
     expect(s.levelsEmpty + s.levelsShown).toBe(s.levels);
   });
 });

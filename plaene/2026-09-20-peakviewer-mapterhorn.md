@@ -1288,6 +1288,97 @@ Echte Geräte kann ich nicht messen. Bitte auf iPad und Handy ins
 Check-Panel schauen: Gerät, Qualität, Atlas, und nach einigem Schwenken
 die Zeile „In Bewegung: Auflösung ÷ …“.
 
+### 8.ag Plan 4, Etappe 5: die Fläche (2026-11-12)
+
+**Befund vorher.** Der Shade-Pass nahm die Normale aus vier Höhen-Texeln
+der DEM-Zelle, in die ein Pixel fällt: eine Normale pro Zelle. Gezoomt
+war das Matterhorn ein Schachbrett, jede Zelle mit eigener Helligkeit
+und, an der Schneegrenze, eigener Meinung zu Schnee oder Fels. Die Höhen
+lagen auf ganzen Metern: ein 4°-Hang bekam alle 13 m eine Stufe. Im
+Nahbereich blieben wenige einfarbige Riesenflächen.
+
+**Viertelmeter.** Höhen werden in 0,25-m-Schritten gehalten
+(`clipmap.ts QUANT`, im Atlas `HEIGHT_QUANT`): sechzehn Bit reichen von
+−1000 m bis 15 383 m. `summitAt` vergleicht weiter ganze Meter (sonst
+macht DEM-Rauschen jeden Buckel zum Gipfel) und gibt die genaue Höhe
+zurück.
+
+**Fläche je Posten (`core/surface.ts`).** Kommt eine Ebene an, rechnet
+die CPU je Posten die Normale (Sobel über die acht Nachbarn) und schärft
+sie nach (Unsharp-Maske auf den Steigungen, Anteil 0,5): ohne das wird
+der Fuß jeder Wand rund, der Grund, aus dem geglättete Normalen früher
+verworfen wurden. Dazu die Mulden-Abdunklung: Höhe minus Mittel über
+9 × 9 Posten, in Einheiten der Steigung, die dazu gehört; Rinnen und
+Wandfüße dunkler, Grate heller (`shade · (1 ± 0,22)`). Beides liegt in
+einem zweiten Atlas im Layout des Höhen-Atlas (R, G Normale, B Mulde),
+gebaut nur, wenn schattiert wird, 17 bis 39 ms je Ebene. Der Shade-Pass
+liest die vier Posten um den Pixel als exakte Texel und mischt sie
+selbst (aus dem Grund, aus dem die Höhen so gelesen werden: WebKit
+rechnet normalisierte Koordinaten in geringer Präzision). Vier Taps wie
+bisher, `gradientAt` entfällt.
+
+**Körnung des nahen Bodens (`render/detail.ts`).** Mit glatter Normale
+ist die Wiese vor den Füßen eine einfarbige Fläche: ein Posten misst
+3 bis 13 m, darunter weiß das Gelände nichts. Eine 64²-Rauschkachel
+(deterministisch erzeugt, ohne Naht, mit Mips; Wert und eigene Steigung
+in den Kanälen) liegt in drei Größen darüber: 211 m, 23 m und 4,6 m. Sie
+kippt die Normale, die das Licht sieht, und sprenkelt die Helligkeit
+(± 13 %); woraus der Boden besteht (Fels, Schnee), entscheidet weiter
+die glatte Normale. Voll bis 300 m, weg ab 2400 m, nicht auf Wasser. Die
+Kachel ist am Boden verankert, nicht am Bildschirm oder Standpunkt:
+`detailFrame(lon, lat)` rechnet in double, wo der Standpunkt in der
+Kachel liegt; der Shader addiert die Mercator-Versätze, die er hat. Der
+Maßstab gilt für den nächsten ganzen Breitengrad, damit Gehen das Muster
+nicht dehnt. Drei Taps; die Anpassung an langsame Frames schaltet die
+Körnung zusammen mit dem Dunstsaum ab.
+
+**Nah-Ebene (`clipmap.ts DEFAULT_CLIPMAP`).** Tablet und Desktop
+bekommen eine neunte Ebene, Pixel-Zoom 15: 3,3-m-Posten für den
+Kilometer um den Standpunkt, wo Mapterhorn sie hat (an Mauritzalm,
+Pertisau und Gornergrat vorhanden). Die Shader halten jetzt zwölf Ebenen
+(`atlas.ts MAX_LEVELS`, in beide Dialekte injiziert): neun plus zwei
+Fernrohr-Fenster, Atlas 1280 × 3840. Das Handy bleibt bei sechs.
+
+**Rand der Abdeckung.** Der offene Punkt aus §8.ad: Hat die Quelle nur
+einen Teil eines Fensters, wird der Rest aus der gröberen Ebene gefüllt
+(zwischen ihren Posten gemischt) und die Ebene gezeigt, statt sie ganz
+wegzulassen. Nur wenn die gröbere Ebene das Fenster wirklich überdeckt;
+fehlt alles, bleibt die Ebene wie bisher draußen.
+
+Tests rot → grün: `surface.test.ts` (neu: gleichmäßiger Hang, Kegel
+≤ 1°, Knick bleibt Knick, Mulde dunkler als Grat, Rauschen ≤ 3°),
+`detail.test.ts` (neu: Kachel ohne Naht, Mittel neutral,
+Steigungskanäle; derselbe Fleck hat von zwei Standpunkten dieselbe
+Körnung; Ausblendung), `clipmap.test.ts` („how finely heights are
+held“, neun Ebenen, „where the source has only part of a window, the
+rest is filled from the coarser level“, „…but only from a coarser level
+that reaches across the window“), `heightfield.test.ts`, `wgsl.test.ts`
+(Flächen-Atlas, Körnung, Ebenenzahl in beiden Dialekten),
+`shading.test.ts` (Mulden-Term, Körnung ändert das Licht, nicht das
+Material), `app.spec.ts` („through the telescope a face is one surface,
+not a chequerboard of DEM cells“: Helligkeitssprung zwischen
+Nachbarpixeln 0,022 → unter 0,008; „the ground below you has grain, and
+it lies on the ground“ in zwei Blickrichtungen: jeder Messpunkt hat die
+Helligkeit, die die Formel für seinen Fleck Boden sagt). Golden einmal
+neu.
+
+Ein Test war zuerst sofort grün und wurde verworfen: die Streuung der
+Helligkeit in einem Fenster der Kegelflanke. Der Kegel ist dafür zu
+glatt; was das Schachbrett ausmacht, ist der Sprung an der Zellgrenze.
+
+Messung: 364 Unit-Tests grün; volle E2E-Suite 78/78 grün in 10,7 min.
+Im ersten Lauf war ein Test rot, und zu Recht: „the standpoint menu
+writes the place into the URL“ zählte an der Zugspitze fünf Ebenen ohne
+Daten; mit dem Auffüllen vom Rand sind es die drei feinsten, die
+wirklich keine Kachel haben. Die Erwartung ist angepasst. Bilder: am
+Matterhorn (Bildwinkel 14°) ist das Schachbrett weg, Schneefelder und
+Wände sind zusammenhängende Flächen; an der Mauritzalm liest sich die
+Wiese als Boden.
+
+Offen: `mesh.lookRange` und `align.horizonProfile` marschieren weiter
+selbst (§8.ae). Die WGSL-Fassung des Flächen-Atlas und der Körnung ist
+in CI nur als Text geprüft; bitte einmal `?backend=webgpu` ansehen.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

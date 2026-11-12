@@ -42,15 +42,18 @@ export interface ClipmapConfig {
 }
 
 /**
- * Eight levels, pixel zoom 14 down to 7: 6.6 m posts out to ~2 km, doubling
- * each step to ~850 m posts at 272 km. Eight is what the shader's level arrays
- * hold. Mapterhorn serves LiDAR-grade data down to tile zoom 17, so the two
- * finest levels here are where the summit shapes come from; the coarse ones
- * are what makes a 200 km horizon affordable.
+ * Nine levels, pixel zoom 15 down to 7: 3.3 m posts for the kilometre
+ * around the standpoint, doubling each step to ~850 m posts at 272 km. With
+ * the two telescope windows that is eleven of the twelve the shaders hold
+ * (render/atlas.ts MAX_LEVELS). Mapterhorn serves LiDAR-grade data down to
+ * tile zoom 17 where a survey exists, so the finest levels are where the
+ * ground at your feet and the summit shapes come from; the coarse ones are
+ * what makes a 200 km horizon affordable. Where the fine zooms end, a level
+ * is filled from the one below it or left out (setCenter).
  */
 export const DEFAULT_CLIPMAP: ClipmapConfig = {
   size: 640,
-  levels: [{ z: 14 }, { z: 13 }, { z: 12 }, { z: 11 }, { z: 10 }, { z: 9 }, { z: 8 }, { z: 7 }],
+  levels: [{ z: 15 }, { z: 14 }, { z: 13 }, { z: 12 }, { z: 11 }, { z: 10 }, { z: 9 }, { z: 8 }, { z: 7 }],
   // The telescope: 6.6 m and 13 m posts around the summit looked at, zoomed in.
   look: [{ z: 14 }, { z: 13 }],
 };
@@ -310,13 +313,14 @@ export class ClipmapStreamer {
     for (const job of jobs) {
       const lv = this.levels[job.index];
       const raw = new Uint16Array(lv.w * lv.h);
-      let failed = 0, absent = 0;
+      let failed = 0;
+      const absent: TileKey[] = [];
       await Promise.all(job.keys.map(async (key) => {
         const heights = await this.fetchTile(key, signal, delays, () => gen !== this.generation);
         if (gen !== this.generation) return;
         if (heights === FAILED) failed++;
         else if (heights) this.blit(raw, lv.w, lv.h, job.px0, job.py0, key, heights);
-        else absent++;
+        else absent.push(key);
         this.progress.done++;
         this.progress.pending--;
       }));
@@ -326,8 +330,16 @@ export class ClipmapStreamer {
         delays = [];
         continue;
       }
-      if (absent) {
-        // No data for part of this window: the level is done, with nothing to show.
+      // The fine zooms end where a survey ends. A window that has part of
+      // its tiles is drawn from them, and the rest of it from the level
+      // below, which is filled by now (coarsest first) unless it failed.
+      const below = this.levels[job.index + 1];
+      if (absent.length && absent.length < job.keys.length && below?.filled && this.reaches(below, job.px0, job.py0, lv)) {
+        for (const key of absent) this.fillFrom(raw, lv.w, lv.h, job.px0, job.py0, lv.z, key, below);
+        absent.length = 0;
+      }
+      if (absent.length) {
+        // No data for this window: the level is done, with nothing to show.
         this.emptyAt[job.index] = { px0: job.px0, py0: job.py0 };
         this.progress.empty = this.emptyAt.filter(Boolean).length;
         this.progress.levelsReady++;
@@ -371,6 +383,41 @@ export class ClipmapStreamer {
         const dst = (y - py0) * w - px0;
         for (let x = x0; x < x1; x++) {
           raw[dst + x] = Math.max(0, Math.min(65535, Math.round((heights[src + x] - BIAS) / QUANT)));
+        }
+      }
+    }
+  }
+
+  /** Whether a coarser level's window, where it lies now, covers the window of `lv` cut at px0, py0. */
+  private reaches(coarse: Level, px0: number, py0: number, lv: Level): boolean {
+    const s = 2 ** (coarse.z - lv.z);
+    return px0 * s >= coarse.px0 && (px0 + lv.w) * s <= coarse.px0 + coarse.w
+      && py0 * s >= coarse.py0 && (py0 + lv.h) * s <= coarse.py0 + coarse.h;
+  }
+
+  /**
+   * Fills the part of a window (pixel zoom `z`) that a tile the source does
+   * not have would have covered, from a coarser level: its heights, blended
+   * between its posts.
+   */
+  private fillFrom(raw: Uint16Array, w: number, h: number, px0: number, py0: number, z: number, key: TileKey, coarse: Level) {
+    const T = this.source.tileSize;
+    const n = T * (1 << key.z);
+    const s = 2 ** (coarse.z - z);                   // coarse pixels per pixel of this level
+    const cw = coarse.w, ch = coarse.h, c = coarse.raw;
+    for (const originX of [key.x * T, key.x * T - n, key.x * T + n]) {
+      const x0 = Math.max(px0, originX), x1 = Math.min(px0 + w, originX + T);
+      const y0 = Math.max(py0, key.y * T), y1 = Math.min(py0 + h, key.y * T + T);
+      if (x1 <= x0 || y1 <= y0) continue;
+      for (let y = y0; y < y1; y++) {
+        const v = Math.min(ch - 1, Math.max(0, (y + 0.5) * s - 0.5 - coarse.py0));
+        const v0 = Math.min(ch - 2, Math.floor(v)), tv = v - v0;
+        for (let x = x0; x < x1; x++) {
+          const u = Math.min(cw - 1, Math.max(0, (x + 0.5) * s - 0.5 - coarse.px0));
+          const u0 = Math.min(cw - 2, Math.floor(u)), tu = u - u0;
+          const i = v0 * cw + u0;
+          raw[(y - py0) * w + (x - px0)] = Math.round(
+            (c[i] * (1 - tu) + c[i + 1] * tu) * (1 - tv) + (c[i + cw] * (1 - tu) + c[i + cw + 1] * tu) * tv);
         }
       }
     }

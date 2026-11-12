@@ -26,7 +26,7 @@
 
 import { WATER_SHINE } from '../shading';
 import { OUTLINE_CONSTS, SHADE_CONSTS, glslConsts, shaderFloat } from './consts';
-import { ATLAS_COLUMNS } from '../atlas';
+import { ATLAS_COLUMNS, MAX_LEVELS } from '../atlas';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -103,13 +103,13 @@ float sampleLevel(int lv, float dLon, float dIso) {
 /** Finest observer level that still covers a ground range (a look level, flagged < 0, never). */
 int levelFor(float r) {
   int lv = int(uLevelCount) - 1;
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < ${MAX_LEVELS}; i++) {
     if (float(i) >= uLevelCount) { break; }
     float reach = uLvlA[i].w;
     if (reach > 0.0 && r <= reach) { lv = i; break; }
   }
   // The coarsest observer level, not a look level, as the last resort.
-  if (uLvlA[lv].w < 0.0) { for (int i = 9; i >= 0; i--) { if (float(i) < uLevelCount && uLvlA[i].w > 0.0) { lv = i; break; } } }
+  if (uLvlA[lv].w < 0.0) { for (int i = ${MAX_LEVELS - 1}; i >= 0; i--) { if (float(i) < uLevelCount && uLvlA[i].w > 0.0) { lv = i; break; } } }
   return lv;
 }
 
@@ -119,7 +119,7 @@ int levelFor(float r) {
  * by position: inside the window with room for the bilinear taps.
  */
 int lookLevel(float dLon, float dIso) {
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < ${MAX_LEVELS}; i++) {
     if (float(i) >= uLevelCount) { break; }
     if (uLvlA[i].w >= 0.0) { continue; }
     vec4 A = uLvlA[i];
@@ -170,8 +170,8 @@ uniform vec2  uTexSize;
 uniform float uLevelPx;     // pixels per clipmap level in the stacked atlas
 uniform mat4  uViewProj;
 uniform float uFar;
-uniform vec4  uLvlA[10];    // cx, cy, pxPerRad, maxRange (< 0: a look level, taken by position)
-uniform vec4  uLvlB[10];    // quant, bias, w, h
+uniform vec4  uLvlA[${MAX_LEVELS}];    // cx, cy, pxPerRad, maxRange (< 0: a look level, taken by position)
+uniform vec4  uLvlB[${MAX_LEVELS}];    // quant, bias, w, h
 
 uniform sampler2D heights;
 
@@ -276,8 +276,8 @@ uniform vec2  uTexSize;
 uniform float uLevelPx;
 uniform float uRadius;
 uniform float uCosLat0;
-uniform vec4  uLvlA[10];
-uniform vec4  uLvlB[10];
+uniform vec4  uLvlA[${MAX_LEVELS}];
+uniform vec4  uLvlB[${MAX_LEVELS}];
 uniform vec3  uSun;          // towards the sun, ENU, unit
 uniform float uSnowLine;     // metres
 uniform float uFogRange;     // metres to 1/e of the terrain colour

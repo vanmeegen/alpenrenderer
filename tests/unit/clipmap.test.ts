@@ -97,8 +97,9 @@ describe('how finely heights are held', () => {
 });
 
 describe('clipmap configurations', () => {
-  test('default has eight levels 14..7 and two look levels 14, 13; low six levels 13..8 and look levels 13, 12', () => {
-    expect(DEFAULT_CLIPMAP.levels.map((l) => l.z)).toEqual([14, 13, 12, 11, 10, 9, 8, 7]);
+  test('default has nine levels 15..7 and two look levels 14, 13; low six levels 13..8 and look levels 13, 12', () => {
+    // Pixel zoom 15 is 3.3 m posts for the kilometre around the standpoint, where a survey has them.
+    expect(DEFAULT_CLIPMAP.levels.map((l) => l.z)).toEqual([15, 14, 13, 12, 11, 10, 9, 8, 7]);
     expect(DEFAULT_CLIPMAP.look?.map((l) => l.z)).toEqual([14, 13]);
     expect(LOW_CLIPMAP.levels.map((l) => l.z)).toEqual([13, 12, 11, 10, 9, 8]);
     expect(LOW_CLIPMAP.look?.map((l) => l.z)).toEqual([13, 12]);
@@ -121,7 +122,7 @@ describe('clipmap configurations', () => {
     const streamer = new ClipmapStreamer(syntheticSource(512), DEFAULT_CLIPMAP, LON, LAT);
     const keys = streamer.planPreload(LON, LAT, 150);
     const zooms = new Set(keys.map((k) => k.z));
-    expect([...zooms].sort((a, b) => a - b)).toEqual([6, 7, 8, 9, 10, 11, 12, 13]);
+    expect([...zooms].sort((a, b) => a - b)).toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14]);
     expect(keys.length).toBeLessThan(120);
   });
 });
@@ -316,6 +317,65 @@ describe('tiles that fail', () => {
     await t.retry();
     expect(once.length).toBe(n);
     expect(t.progress.empty).toBe(1);
+  });
+
+  test('where the source has only part of a window, the rest is filled from the coarser level: no pit, and the level is shown', async () => {
+    // The fine zooms end where a survey ends. Standing near that edge, the
+    // window is drawn from what there is, and the rest of it from the level
+    // below, blended between its posts; the whole level used to be left out.
+    const asked: TileKey[] = [];
+    const cx = Math.round(lonToMercX(LON, 12)), T = 512;
+    const eastOfCentre = (k: TileKey) => k.z === 11 && k.x * T >= cx;       // the tile columns east of the standpoint
+    const s = new ClipmapStreamer(flaky(-1, 0, asked, eastOfCentre), cfg, LON, LAT, quick);
+    await s.setCenter(LON, LAT);
+    const [fine, coarse] = s.heightField.levels;
+    expect(asked.some(eastOfCentre)).toBe(true);
+    expect(fine.filled).toBe(true);
+    expect(s.progress.empty).toBe(0);
+    expect(s.progress.levelsReady).toBe(2);
+    const at = (lv: typeof fine, x: number, y: number) => lv.raw[y * lv.w + x] * lv.quant + lv.bias;
+    // West of the edge: the fine tiles' own pixels.
+    expect(at(fine, 10, 320)).toBeCloseTo(value(12, fine.px0 + 10, fine.py0 + 320), 0);
+    // East of it: what the coarse level holds there, between its posts.
+    const x = fine.w - 10, y = 320;
+    const shift = 2 ** (coarse.z - fine.z);
+    const u = (fine.px0 + x + 0.5) * shift - 0.5 - coarse.px0, v = (fine.py0 + y + 0.5) * shift - 0.5 - coarse.py0;
+    const u0 = Math.floor(u), v0 = Math.floor(v), tu = u - u0, tv = v - v0;
+    const want = (at(coarse, u0, v0) * (1 - tu) + at(coarse, u0 + 1, v0) * tu) * (1 - tv)
+      + (at(coarse, u0, v0 + 1) * (1 - tu) + at(coarse, u0 + 1, v0 + 1) * tu) * tv;
+    expect(Math.abs(at(fine, x, y) - want)).toBeLessThan(0.3);
+    expect(at(fine, x, y)).toBeGreaterThan(-900);
+    // Known, not asked again.
+    const n = asked.length;
+    await s.setCenter(LON, LAT);
+    expect(asked.length).toBe(n);
+  });
+
+  test('…but only from a coarser level that reaches across the window: one left behind at the old place is not stretched over it', async () => {
+    // The coarse window could not follow (its tiles fail), and the observer
+    // has moved 300 of its 640 px: it still reaches them, but not the far
+    // side of the fine window around them.
+    const asked: TileKey[] = [];
+    const east = LON + 300 / ((256 * 2 ** 9) / 360);
+    const cx = Math.round(lonToMercX(east, 12));
+    let down = false;
+    // The fine tiles from the boundary 98 px west of the new standpoint on are not there.
+    const gone = (k: TileKey) => k.z === 11 && k.x * 512 >= cx - 100;
+    const inner = flaky(-1, 0, asked, gone);
+    const source: TileSource = { ...inner, async load(k, signal) { if (down && k.z === 8) throw new Error('network'); return inner.load(k, signal); } };
+    const s = new ClipmapStreamer(source, cfg, LON, LAT, quick);
+    await s.setCenter(LON, LAT);
+    expect(s.heightField.levels.every((l) => l.filled)).toBe(true);
+    down = true;
+    await s.setCenter(east, LAT);
+    const [fine, coarse] = s.heightField.levels;
+    const fineAsked = asked.filter((k) => k.z === 11).slice(-4);
+    expect(fineAsked.some(gone)).toBe(true);
+    expect(fineAsked.every(gone)).toBe(false);           // part of the window is there
+    expect(coarse.filled).toBe(true);                    // the old window, still under the observer
+    expect(coarse.maxRange).toBeGreaterThan(0);
+    expect(fine.filled).toBe(false);
+    expect(s.progress.empty).toBe(1);
   });
 
   test('a tile that keeps failing leaves its level out, counted, instead of a pit 1000 m below sea level; retry() asks again', async () => {

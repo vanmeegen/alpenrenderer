@@ -8,6 +8,13 @@
  * (gpu/glsl.ts and gpu/wgsl.ts `atlasOrigin`, with ATLAS_COLUMNS injected).
  */
 
+/**
+ * Levels the shaders hold: nine around the observer (pixel zoom 15 to 7),
+ * two telescope windows, one to spare. At 640 px, two abreast, twelve are
+ * 1280 × 3840.
+ */
+export const MAX_LEVELS = 12;
+
 /** Levels side by side in the atlas. */
 export const ATLAS_COLUMNS = 2;
 

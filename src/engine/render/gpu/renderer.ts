@@ -59,7 +59,7 @@ import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, WATER_COLOR, sunVector } from '../
 import { Band, RadialParams, radialParams } from '../mesh';
 import { RedrawGate, frameFingerprint } from '../redraw';
 import { OUTLINE } from '../outline';
-import { atlasLayout } from '../atlas';
+import { MAX_LEVELS, atlasLayout } from '../atlas';
 import { levelSurface } from '../../core/surface';
 import { DETAIL, detailFrame, detailTexture } from '../detail';
 import { QUALITY_HIGH, QUALITY_LOW, QUALITY_MID, Quality } from '../quality';
@@ -74,7 +74,6 @@ import {
   TERRAIN_VERTEX,
 } from './wgsl';
 
-const MAX_LEVELS = 10;   // eight around the observer, two telescope windows (clipmap.ts look)
 const TERRAIN_MASK = 0x1;
 const VIEW_MASK = 0x2;
 
