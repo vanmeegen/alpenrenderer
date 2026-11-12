@@ -137,6 +137,39 @@ describe('buildTargets', () => {
     expect(placed[0].target.spot).toBe(0);
   });
 
+  test('a lake whose centre is in view but out of the frame is named on the part that is in the frame', () => {
+    // A lake 10 km long from west to east, 3 km north: looking north-east
+    // with a narrow lens its centre is left of the frame, its eastern end is
+    // in it. The name used to stay with the centre and never showed.
+    const ring = [east(-5), north(2.6), east(5), north(2.6), east(5), north(3.4), east(-5), north(3.4)];
+    const lake = lakeLabel({ id: 'osm:relation/7', name: 'Quersee', lon: LON, lat: north(3), area: 8e6, rings: [ring] });
+    expect(lake.spots?.length).toBeGreaterThan(0);
+    const t = buildTargets([lake], obs, hf, hf.maxRange);
+    for (const x of t) x.visible = true;
+    const spare = t.filter((x) => x.spot > 0).sort((a, b) => b.bearing - a.bearing)[0];   // the easternmost spare spot
+    expect(spare.bearing).toBeGreaterThan(15);
+    const cam = camera(spare.bearing);
+    cam.set({ fov: 12 });
+    cam.update();
+    const placed = layoutLabels(t, cam, opt());
+    expect(placed.map((p) => p.target.peak.name)).toEqual(['Quersee']);
+    expect(placed[0].target.spot).toBeGreaterThan(0);
+    expect(placed[0].ax).toBeGreaterThan(0);
+    expect(placed[0].ax).toBeLessThan(1000);
+    // Looking at the centre, the centre has it, as before.
+    expect(layoutLabels(t, camera(0), opt())[0].target.spot).toBe(0);
+  });
+
+  test('a summit beyond the range is dropped before its top is searched for in the DEM', () => {
+    // The search reads a few hundred posts; the catalogue holds tens of thousands of summits out of range.
+    let searched = 0;
+    const counting = Object.create(hf) as HeightField;
+    counting.summitAt = (lon: number, lat: number, radius?: number) => { searched++; return hf.summitAt(lon, lat, radius); };
+    const t = buildTargets(peaks, obs, counting, hf.maxRange);
+    expect(t.map((x) => x.peak.name)).not.toContain('Fernberg');
+    expect(searched).toBe(peaks.length - 1);
+  });
+
   test('with the drawn surface given, a label on screen goes onto the drawn top, where and how high; only labels on screen pay for it', () => {
     // The mesh draws the wall's top 40 m lower and one DEM row (420 m) nearer
     // than the DEM holds it: the pin goes there, exactly onto the drawn top.

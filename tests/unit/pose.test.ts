@@ -147,6 +147,29 @@ describe('PoseTracker', () => {
     expect(Math.abs(angleDelta(p.orientation.yaw, 90 + p.status.declination - 5))).toBeLessThan(0.5);
   });
 
+  test('a correction dragged in applies at once and in full: it is the user speaking, not the magnetometer lying', () => {
+    // The offset used to be added to the compass before the fusion. A drag
+    // then looked like a compass that jumped while the gyro stood still,
+    // which is what a ferrous object does, and the view followed it late.
+    const p = new PoseTracker({});
+    p.applyDeclination = false;
+    let i = 0;
+    const frame = () => {
+      const e = upright(42);
+      p.feedOrientation(e.alpha, e.beta, e.gamma, 0);
+      p.feedGyro(0, 0, 0);
+      return p.sample(i++ * DT).yaw;
+    };
+    for (let k = 0; k < 2 * HZ; k++) frame();
+    expect(Math.abs(angleDelta(p.orientation.yaw, 42))).toBeLessThan(0.05);
+    p.nudgeOffset(8);
+    expect(Math.abs(angleDelta(frame(), 50))).toBeLessThan(0.05);   // the very next frame
+    for (let k = 0; k < HZ; k++) frame();
+    expect(Math.abs(angleDelta(p.orientation.yaw, 50))).toBeLessThan(0.05);
+    p.setOffset(0);
+    expect(Math.abs(angleDelta(frame(), 42))).toBeLessThan(0.05);
+  });
+
   test('pitch below the horizon reads negative, not 340', () => {
     const p = new PoseTracker({});
     p.applyDeclination = false;

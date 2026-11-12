@@ -94,7 +94,7 @@ export interface ViewerStatus {
    * `settled`: the targets are from the last rebuild (none pending) and all
    * their sightlines are decided, so the labels stand where they will stay.
    */
-  peaks: { total: number; visible: number; placed: number; settled: boolean };
+  peaks: { total: number; visible: number; placed: number; settled: boolean; layouts: number };
   camera: { active: boolean; fovY: number; fovSource: 'default' | 'reported' | 'manual'; width: number; height: number };
   photo: PhotoStatus | null;
 }
@@ -137,6 +137,8 @@ export class Viewer {
   /** Per level: what its current water mask was drawn from. */
   private waterStamp = new WeakMap<object, string>();
   private targets: LabelTarget[] = [];
+  /** Counts every new set of targets, the empty one after a move included. */
+  private targetsVersion = 0;
   private visibility: VisibilityJob | null = null;
   private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
   private placed: PlacedLabel[] = [];
@@ -471,6 +473,7 @@ export class Viewer {
       this.standAt = { lon: this.view.lon, lat: this.view.lat };
       this.select(null);
       this.targets = [];
+      this.targetsVersion++;
       this.visibility = null;
       this.visibleCount = 0;
       this.placed = [];
@@ -537,7 +540,8 @@ export class Viewer {
     // The selection survives a rebuild: drawLabels re-binds it to the same
     // summit by id. Only a new standpoint (relocate) clears it.
     const named = this.lakeLabels.length ? [...this.peaks, ...this.lakeLabels] : this.peaks;
-    if (!named.length || !hf.levels.length) { this.targets = []; this.visibleCount = 0; return; }
+    this.targetsVersion++;
+    if (!named.length || !hf.levels.length) { this.targets = []; this.visibility = null; this.visibleCount = 0; return; }
     const eye = this.renderer.eyeAltitude;
     const obs = { lon: this.view.lon, lat: this.view.lat, ground: eye, eye: 0 };
     // Label pins go onto the summits as the mesh draws them, not the DEM's
@@ -562,17 +566,37 @@ export class Viewer {
     this.rebuildTimer = setTimeout(() => { this.rebuildTimer = null; this.rebuildTargets(); }, REBUILD_SETTLE_MS);
   }
 
+  /** What the labels were last laid out for, and how often they have been (status().peaks.layouts). */
+  private labelStamp = '';
+  private layouts = 0;
+
+  /**
+   * Lays the labels out and paints them, when something they depend on
+   * changed: the view, the overlay's size, the targets, how many of them are
+   * decided, the mesh the pins sit on, the selection. A still view costs
+   * nothing; it used to cost a layout of every visible summit and a repaint
+   * of the overlay per animation frame.
+   */
   private drawLabels() {
     const painter = this.painter;
     if (!painter) return;
     const cssW = painter.canvas.clientWidth || 1, cssH = painter.canvas.clientHeight || 1;
+    const mesh = this.renderer.meshParams();
+    const drawnKey = mesh ? `${mesh.az0.toFixed(9)}:${mesh.azStep.toFixed(12)}:${mesh.rNearEnd.toFixed(3)}:${mesh.rSplit.toFixed(3)}` : undefined;
+    const c = this.camera;
+    const stamp = [
+      cssW, cssH, globalThis.devicePixelRatio ?? 1, this.showLabels, this.targetsVersion, this.visibility?.decided ?? -1,
+      c.yaw, c.pitch, c.roll, c.fov, c.aspect, drawnKey ?? '', this.selected?.target.peak.id ?? '',
+    ].join('|');
+    if (stamp === this.labelStamp) return;
+    this.labelStamp = stamp;
+    this.layouts++;
     painter.resize(cssW, cssH);
     if (!this.showLabels || !this.targets.length) { this.placed = []; return; }   // resize() cleared the overlay
-    const mesh = this.renderer.meshParams();
     this.placed = layoutLabels(this.targets, this.camera, {
       width: cssW, height: cssH, measure: painter.measure,
       lineHeight: painter.style.nameSize + 3, maxLabels: 60, detailed: 6, gap: 5,
-      drawnKey: mesh ? `${mesh.az0.toFixed(9)}:${mesh.azStep.toFixed(12)}:${mesh.rNearEnd.toFixed(3)}:${mesh.rSplit.toFixed(3)}` : undefined,
+      drawnKey,
     });
     if (this.selected) {
       const id = this.selected.target.peak.id;
@@ -668,7 +692,7 @@ export class Viewer {
         active: this.sensors.active, offsetYaw: this.sensors.offsetYaw, offsetPitch: this.sensors.offsetPitch,
       },
       peaks: {
-        total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length,
+        total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length, layouts: this.layouts,
         settled: this.rebuildTimer === null && (this.visibility?.done ?? false),
       },
       camera: {

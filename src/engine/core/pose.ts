@@ -251,6 +251,8 @@ export class PoseTracker {
   private target: DeviceFrame | null = null;
   private gyro: { x: number; y: number; z: number } | null = null;
   private yawStarted = false;
+  /** The fused heading before the user's correction, degrees. */
+  private fused = 0;
   private pitchFilter = new AngleFilter(1.0, 0.03);
   private rollFilter = new AngleFilter(1.2, 0.03);
   private compassFilter = new AngleFilter(0.6, 0.02);
@@ -265,8 +267,16 @@ export class PoseTracker {
 
   constructor(private opt: PoseOptions = {}) {}
 
+  /**
+   * The user's correction of the compass, degrees. It is added to the fused
+   * heading, not to the compass reading: dragged in, it is in the view the
+   * same moment and in full. Added before the fusion it looked like a
+   * compass that jumped while the gyro stood still, a magnetic disturbance,
+   * and was followed late.
+   */
   setOffset(deg: number) {
     this.status.offset = ((deg % 360) + 360) % 360;
+    if (this.yawStarted) this.orientation.yaw = wrap(this.fused + this.status.offset);
   }
 
   nudgeOffset(deltaDeg: number) {
@@ -372,7 +382,7 @@ export class PoseTracker {
 
     const decl = this.status.headingIsTrue || !this.applyDeclination
       ? 0 : this.status.declination;
-    const compass = wrap(t.yaw + decl + this.status.offset);
+    const compass = wrap(t.yaw + decl);
 
     if (!this.yawStarted || dt <= 0) {
       // Nothing to fuse from yet: take the reading whole rather than easing in
@@ -380,7 +390,8 @@ export class PoseTracker {
       // on the first frame.
       this.yawStarted = true;
       this.compassFilter.reset(compass);
-      o.yaw = compass;
+      this.fused = compass;
+      o.yaw = wrap(compass + this.status.offset);
       o.pitch = this.pitchFilter.filter(t.pitch, dt || 1 / 60);
       o.roll = this.rollFilter.filter(t.roll, dt || 1 / 60);
       this.opt.onOrientation?.(o);
@@ -393,7 +404,7 @@ export class PoseTracker {
     if (this.gyro) {
       const [ux, uy, uz] = t.upRow;
       turned = -(this.gyro.x * ux + this.gyro.y * uy + this.gyro.z * uz) * gyroDt;
-      o.yaw = wrap(o.yaw + turned);
+      this.fused = wrap(this.fused + turned);
     }
 
     // Ease the compass itself before trusting it, then pull toward it. A
@@ -423,7 +434,8 @@ export class PoseTracker {
     this.lastCompass = compass;
 
     const k = (1 - Math.exp(-dt / this.fusionTau)) * (1 - this.distrust);
-    o.yaw = wrap(o.yaw + angleDelta(this.gyro ? eased : compass, o.yaw) * k);
+    this.fused = wrap(this.fused + angleDelta(this.gyro ? eased : compass, this.fused) * k);
+    o.yaw = wrap(this.fused + this.status.offset);
 
     o.pitch = this.pitchFilter.filter(t.pitch, dt);
     o.roll = this.rollFilter.filter(t.roll, dt);

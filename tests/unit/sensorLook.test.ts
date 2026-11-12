@@ -93,6 +93,23 @@ describe('SensorLook', () => {
     expect(cam.pitch).toBeCloseTo(5, 0);
   });
 
+  test('a correction or its reset is in the view at once, and the next tick reports the change, so the URL follows', async () => {
+    const { cam, s } = setup();
+    await s.start();
+    settle(s, upright(90));
+    const base = cam.yaw;
+    s.nudge(8, 0);
+    expect(Math.abs(angleDelta(cam.yaw, base + 8))).toBeLessThan(0.05);     // not eased in over seconds
+    s.pose.handleOrientation(upright(90), true, 0);
+    expect(s.tick(3000 + DT)).toBe(true);
+    s.pose.handleOrientation(upright(90), true, 0);
+    expect(s.tick(3000 + 2 * DT)).toBe(false);                               // and then it is quiet again
+    s.resetOffset();
+    expect(Math.abs(angleDelta(cam.yaw, base))).toBeLessThan(0.05);
+    s.pose.handleOrientation(upright(90), true, 0);
+    expect(s.tick(3000 + 3 * DT)).toBe(true);
+  });
+
   test('the correction is persisted and restored, and reset clears it', async () => {
     const { s, store } = setup();
     await s.start();

@@ -595,10 +595,24 @@ test.describe('drawing only what changed', () => {
       requestAnimationFrame(tick);
     }));
     await expect.poll(quiet, { timeout: 30_000 }).toBe(0);
-    const before = await drawn();
+    // The labels likewise: laid out and painted when the view, the targets
+    // or what is known to be visible changed, not sixty times a second.
+    const layouts = () => page.evaluate(() => (window as any).alp.status().peaks.layouts as number);
+    const stillLayouts = () => page.evaluate(() => new Promise<number>((resolve) => {
+      const a = (window as any).alp.status().peaks.layouts as number;
+      let n = 0;
+      const tick = () => { if (++n < 30) requestAnimationFrame(tick); else resolve((window as any).alp.status().peaks.layouts - a); };
+      requestAnimationFrame(tick);
+    }));
+    await expect.poll(() => page.evaluate(() => (window as any).alp.status().peaks.settled as boolean), { timeout: 30_000 }).toBe(true);
+    await expect.poll(stillLayouts, { timeout: 30_000 }).toBe(0);
+    expect(await layouts()).toBeGreaterThan(0);
+    const before = await drawn(), laidOut = await layouts();
     await page.keyboard.press('ArrowRight');
     await expect.poll(drawn, { timeout: 10_000 }).toBeGreaterThan(before);
+    await expect.poll(layouts, { timeout: 10_000 }).toBeGreaterThan(laidOut);
     await expect.poll(quiet, { timeout: 30_000 }).toBe(0);
+    await expect.poll(stillLayouts, { timeout: 30_000 }).toBe(0);
   });
 });
 

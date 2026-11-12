@@ -118,6 +118,10 @@ export function buildTargets(
       // water; the summit search would climb the shore.
       let a = c;
       let anchorAlt: number;
+      // Out of range by more than the summit search could move it: dropped
+      // before the search, which reads a few hundred posts of the DEM.
+      const rough = localOffset({ lon: obs.lon, lat: obs.lat, alt: eye }, { lon: c.lon, lat: c.lat, alt: eye });
+      if (rough.range > maxRange + NEAR_ANCHOR_M) return;
       if (spot === 0 && p.demEle !== undefined) anchorAlt = p.demEle;
       else if (p.kind === 'lake') anchorAlt = hf.groundAt(c.lon, c.lat);
       else {
@@ -209,12 +213,27 @@ export function layoutLabels(
   const margin = 4;
 
   // One label per summit or lake: among its visible anchors, the most
-  // preferred (its main point if that shows, else the first spare spot).
+  // preferred one that is in the frame (its main point if that shows there,
+  // else the first spare spot that does). A long lake whose centre is left
+  // of the frame is named on the end that is in it.
+  const inFrame = new Map<LabelTarget, boolean>();
+  const framed = (t: LabelTarget): boolean => {
+    let f = inFrame.get(t);
+    if (f === undefined) {
+      const w = cam.project(t.east, t.north, t.up, ndc);
+      const x = (ndc[0] * 0.5 + 0.5) * opt.width, y = (1 - (ndc[1] * 0.5 + 0.5)) * opt.height;
+      f = w > 0 && x >= 0 && x <= opt.width && y >= 0 && y <= opt.height;
+      inFrame.set(t, f);
+    }
+    return f;
+  };
   const chosen = new Map<string, LabelTarget>();
   for (const t of targets) {
     if (!t.visible) continue;
     const c = chosen.get(t.peak.id);
-    if (!c || t.spot < c.spot) chosen.set(t.peak.id, t);
+    if (!c) { chosen.set(t.peak.id, t); continue; }
+    const tIn = framed(t), cIn = framed(c);
+    if (tIn === cIn ? t.spot < c.spot : tIn) chosen.set(t.peak.id, t);
   }
 
   const cellW = 9 * opt.lineHeight, cellH = 3 * opt.lineHeight;

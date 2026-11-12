@@ -192,6 +192,8 @@ export class VisibilityJob {
   }
 
   get done(): boolean { return this.i >= this.targets.length; }
+  /** How many targets are decided so far: changes whenever a label may have appeared or moved. */
+  get decided(): number { return this.i; }
 
   /** Decides targets until `budgetMs` has passed; returns whether all are decided. */
   step(budgetMs: number): boolean {

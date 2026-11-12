@@ -79,14 +79,14 @@ export class SensorLook {
     this.pose.nudgeOffset(dYaw);
     this.offsetPitch = Math.max(-MAX_PITCH_OFFSET, Math.min(MAX_PITCH_OFFSET, this.offsetPitch + dPitch));
     this.persist();
-    if (this.active) this.apply();
+    if (this.active && this.apply()) this.moved = true;
   }
 
   resetOffset() {
     this.pose.setOffset(0);
     this.offsetPitch = 0;
     try { this.store?.removeItem(OFFSET_KEY); } catch { /* storage may be unavailable */ }
-    if (this.active) this.apply();
+    if (this.active && this.apply()) this.moved = true;
   }
 
   /** Asks for motion access (iOS) and starts following the sensors. */
@@ -107,11 +107,16 @@ export class SensorLook {
     this.camera.set({ roll: 0 });
   }
 
-  /** Once per frame; returns whether the camera changed. */
+  /** The camera was set outside the frame's tick (a correction, its reset): the next tick reports it. */
+  private moved = false;
+
+  /** Once per frame; returns whether the camera changed since the last one. */
   tick(now: number): boolean {
     if (!this.active || !this.pose.status.hasOrientation) return false;
     this.pose.sample(now);
-    return this.apply();
+    const changed = this.apply() || this.moved;
+    this.moved = false;
+    return changed;
   }
 
   private apply(): boolean {
