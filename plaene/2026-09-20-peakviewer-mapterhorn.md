@@ -908,6 +908,104 @@ Bild ist; Hochiss, Streichkopf, Seekarlspitze bleiben verdeckt; keine
 Kanten-Nadel innerhalb 150 m eines anderen sichtbaren Ziels. Volle
 E2E-Suite 61/61 grün.
 
+### 8.ac Plan 4, Etappe 1: Tuschelinien, Dunstsaum, Höhennebel, Auflösungs-Deckel (2026-11-12)
+
+Anlass: „Die Berge haben einen sehr schlecht zu erkennenden Umriss“, die
+Darstellung soll schöner werden und auf schwächeren Geräten stufenweise
+abbauen. Plan 4 hat acht Etappen (E1 Linien und Dunst, E2 Standort
+robust, E3 Sichtbarkeit und Labels neu, E4 Geräteklassen, E5 Fläche, E6
+Landbedeckung, E7 Standort-Komfort, E8 Luftbild-Stil); dies ist E1.
+
+**Befund vorher.** Kontur = 5-Tap-Laplace auf der Log-Entfernung, volle
+Linie erst bei 38 % Entfernungssprung, 1 px, nur abdunkelnd: ein Grat
+10 % hinter dem nächsten bekam 13 % einer Linie, und zwar auf beiden
+Graten. Fels begann erst bei 49° Neigung und war bei 66° voll, Schnee
+hielt bis 63–73° (Haidachstellwand = grüner Hügel, Matterhorn ganz weiß).
+Nebel nur nach Entfernung. Kein Deckel für die Auflösung.
+
+**Die Linie (`render/outline.ts`).** Auf vier Achsen eines Achter-Rings
+um das Pixel sind `a` und `b` die Schritte der Log-Entfernung zu den
+beiden Nachbarn eine Linienbreite weiter. `a + b` ist die zweite
+Differenz: positiv, wo das Pixel näher ist als seine Umgebung, also auf
+der nahen Seite einer Silhouette; die Linie liegt damit auf dem Berg
+vorn und nie doppelt. Flach angeschnittener Boden hat auch eine zweite
+Differenz, aber mit einem Schritt auf beiden Seiten; `κ · min(|a|, |b|)`
+(κ = 0,5) abgezogen bleibt die Silhouette übrig. Volle Linie ab 6 %
+Sprung (Beginn 2 %), der Himmel zählt als „hinter der Fernebene“ und ist
+immer eine Kante. Breite 1 CSS-px in der Ferne bis 2,5 in der Nähe
+(800 m bis 25 km), Tusche als dunkles Blaugrau (0,10; 0,12; 0,17)
+eingemischt statt multipliziert, damit sie auf dunklem Wald wie auf
+Schnee liest; fern verblasst sie mit dem Dunst (60 %, 1/e bei 55 km).
+Glättung kommt aus der Abdeckung des Rings, nicht aus MSAA.
+
+**Der Dunstsaum.** Die Fläche direkt hinter einem näheren Grat wird zur
+Dunstfarbe aufgehellt (Beranns Mittel, Schichten zu trennen). Acht
+Nachbarn in 6 CSS-px Abstand; einer zählt, wenn er näher ist, als die
+eigene Fläche mit ihrer eigenen Neigung dort wäre (auf einer Ebene also
+nie). Jeder zählt einmal, wie groß der Sprung auch ist, und die Hälfte
+ist der volle Saum (Stärke 0,32, am Himmel 35 % davon): er fällt zur
+Kante hin ab, und eine Wiesenkante in 100 m blendet nicht stärker als
+ein Grat vor dem nächsten. Der erste Entwurf (mittlerer Überstand,
+Radius 8, Stärke 0,45) ergab im Bild von der Mauritzalm ein
+gleichmäßiges weißes Band hinter jeder nahen Kante; deshalb die Zählung.
+Nur im schattierten Bild (`uRim`): die E2E-Tests mit `shade=0` zahlen 9
+statt 17 Taps.
+
+**Luft und Boden (`render/shading.ts`).** Höhennebel: Dichte
+`e^(−z/3000 m)`, entlang der Sichtlinie geschlossen integriert, also
+Dunst in den Tälern und klare Gipfel; je Kanal `exp(−τ·(1; 1,12; 1,35))`,
+Blau geht zuerst, die Ferne wird blau; Boden 0,12, damit der letzte Grat
+ein Grat bleibt. Fels von 33° bis 45° (unter der Waldgrenze schwächer,
+dort ist Steiles so oft Wald wie Wand), Schnee hält zwischen 40° und 50°
+nicht mehr. `terrainColor` bekommt die Augenhöhe; Flanken- und See-Test
+rechnen damit.
+
+**Eine Quelle für die Zahlen.** `gpu/consts.ts` schreibt die Konstanten
+aus `outline.ts` und `shading.ts` als Deklarationen in GLSL und WGSL;
+`wgsl.test.ts` prüft beide Dialekte dagegen. Dabei gefunden: Babylons
+Präprozessor schneidet eine Uniform-Zeile am Semikolon im Kommentar
+dahinter ab („`uniform float uRim; // …; 0 = off`“ wurde zu einer Zeile
+„`0 = off`“, Composite kompilierte nicht, Bild schwarz). Ein Wächter-Test
+verbietet das Semikolon im Kommentar hinter Code.
+
+**Auflösungs-Deckel (`render/resolution.ts`).** Drei Durchgänge je Pixel:
+ein Handy mit Pixelverhältnis 3 zahlt neun Fragmente je CSS-Pixel.
+Niedrige Qualität rendert mit höchstens 1,5, hohe mit höchstens 2
+Gerätepixeln je CSS-Pixel (`renderer.maxPixelRatio`, über Babylons
+Hardware-Skalierung); die Linienbreite ist in CSS-Pixeln definiert und
+bleibt gleich. E4 ersetzt die Zweiteilung durch Geräteklassen und eine
+Anpassung zur Laufzeit.
+
+**Testlandschaft.** Hintergrat: 22 km nördlich, 2950 m, nur 7 bis 1,5 km
+westlich des Meridians, damit der Blick nach Norden und die Gratspitze
+bleiben, wie sie waren. `skylineRow` kann den Marsch früher beenden
+(Kamm des vorderen Grats).
+
+Tests rot → grün: `outline.test.ts` (neu: 10-%-Stufe volle Linie nur auf
+der nahen Seite, 2 % keine, angeschnittene Ebene keine, Himmelslinie,
+Gerätepixel; Saum hinter dem Grat, zur Kante abfallend, große Sprünge
+nicht stärker, Ebene ohne, Himmel schwächer), `shading.test.ts` („at the
+same range a valley floor is hazier than a summit“, „the distance turns
+blue“, „a 45° face at 2000 m is rock“, „a 55° face at 3500 m is rock, not
+snow“), `wgsl.test.ts` (Konstanten in beiden Dialekten, Semikolon-
+Wächter), `resolution.test.ts` (neu), `app.spec.ts` „two ridges 10 %
+apart are separated by one line, drawn on the near ridge“ (vorher
+Helligkeit 0,91 an der Stelle der Linie), „the ground right behind a
+nearer mountain is lightened towards the haze, as the formula says“ (der
+Saum wird aus dem Entfernungspuffer des Frames mit `rimAt` nachgerechnet
+und mit dem Bild verglichen), „a screen with a pixel ratio of 3 is
+rendered at 1.5“ (vorher 3000 × 1800). Golden einmal neu. Der Foto-Test
+prüfte „Gelände statt Foto“ am Blaustich des Schnees; der Gipfel des
+Testhorns (45°) ist jetzt halb Fels und neutralgrau, die Prüfung
+vergleicht deshalb mit dem Foto-Zustand (0,89 gegen 0,48).
+
+Messung: volle E2E-Suite 64/64 grün in 9,1 min lokal (vorher 61 Tests in
+12 bis 15 min); der ungeschattete Frame kostet in SwiftShader 20 bis 25 ms
+statt 17 ms (9 statt 5 Taps), der Pipeline-Stall je Seite ist nicht
+gewachsen. Vorher/Nachher von der Mauritzalm und vom Gornergrat mit
+echten Kacheln: Grate tragen klare Linien, die Wände am Matterhorn sind
+Fels, die Ferne ist blau statt weiß.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):
