@@ -97,14 +97,14 @@ function shoulder(lon: number, lat: number): number {
 }
 
 /**
- * The Terrassenplatz: a standpoint on the plain 3 km west, with a terrace
- * 3 m high in front of it to the north, from 20 m to 120 m out and 600 m
- * wide: the lakeside road's embankment at Pertisau. From 1.7 m the view
- * north is that terrace; the eye has to come up over it (core/eye.ts).
+ * The Dammplatz: a standpoint on the plain 3 km west, with a bank 4 m high
+ * in front of it to the north, from 14 m to 30 m out and 600 m wide: the
+ * lakeside road's embankment at Pertisau. From 1.7 m the view north is that
+ * bank; the eye has to come up until the ridges show over it (core/eye.ts).
  */
-export const BANK = { lon: STAND.lon - 3000 / M_PER_DEG_LON, lat: STAND.lat, rise: 3, from: 20, to: 120, halfWidth: 300 };
+export const BANK = { lon: STAND.lon - 3000 / M_PER_DEG_LON, lat: STAND.lat, rise: 4, from: 14, to: 30, halfWidth: 300 };
 
-/** The terrace's rise above the plain at a point, metres. */
+/** The bank's rise above the plain at a point, metres. */
 function terrace(lon: number, lat: number): number {
   const x = (lon - BANK.lon) * M_PER_DEG_LON, y = (lat - BANK.lat) * M_PER_DEG_LAT;
   return Math.abs(x) <= BANK.halfWidth && y >= BANK.from && y <= BANK.to ? BANK.rise : 0;
@@ -188,11 +188,12 @@ export function heightAlong(bearingDeg: number, range: number, from: { lon: numb
  * march with the renderer's curvature and refraction), projected with the
  * camera's perspective. This is the reference the rendered range buffer is
  * held against. `maxRange` ends the march early: the crest of whatever
- * stands within that range, as if nothing were behind it.
+ * stands within that range, as if nothing were behind it; `minRange` begins
+ * it late: the skyline of everything beyond, as if nothing stood in front.
  */
 export function skylineRow(
   yawDeg: number, x: number, eye: number, fov: number, width: number, height: number, pitchDeg = 0, maxRange = 275000,
-  from: { lon: number; lat: number } = STAND,
+  from: { lon: number; lat: number } = STAND, minRange = 1,
 ): number {
   const tanV = Math.tan((fov * Math.PI) / 360);
   const tanH = tanV * (width / height);
@@ -200,7 +201,7 @@ export function skylineRow(
   const b = Math.atan(ndcX * tanH);                       // azimuth offset of the column
   const bearing = yawDeg + (b * 180) / Math.PI;
   let maxTan = -Infinity;
-  const steps = 6000, r0 = 1, r1 = maxRange;
+  const steps = 6000, r0 = minRange, r1 = maxRange;
   const k = Math.log(r1 / r0) / (steps - 1);
   for (let i = 0; i < steps; i++) {
     const r = r0 * Math.exp(i * k);

@@ -30,6 +30,8 @@ export interface LabelTarget {
   anchor: { lon: number; lat: number };
   /** The pin was moved onto the visible edge; `range` and the text stay the summit's. */
   atCrest?: boolean;
+  /** Nothing higher stands behind it: the summit is on the skyline (set with `visible`, horizon.ts). */
+  skyline?: boolean;
   /**
    * How big the feature looks from here, radians: the angle its own rise
    * takes up, atan(prominence / range) for a summit, atan(width / range) for

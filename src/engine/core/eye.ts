@@ -9,13 +9,17 @@
  * the standpoint is only known to the accuracy of the fix: the bank may as
  * well be behind you.
  *
- * So the ground around the standpoint is taken as a whole: a plane is
- * fitted through the terrain in a disc as wide as the standpoint is
- * uncertain, and the eye is lifted until it stands as high over the highest
- * point of the disc, measured from that plane, as it stood over its own
- * spot. An even slope has nothing above its plane and lifts nothing: looking
- * uphill there really is nothing to see. A bank or a step of the DEM does.
- * Standing on the highest point, a knoll or a crest, lifts nothing either.
+ * What counts as standing in the way is decided direction by direction:
+ * ground inside a disc as wide as the standpoint is uncertain that rises
+ * above everything beyond the disc that way. The eye is lifted until, in
+ * every direction, the far horizon shows over the near ground with a little
+ * room. So a slope lifts nothing, however uneven: above each hump there is
+ * more of the mountain. A terrace that goes on beyond the disc lifts
+ * nothing: it is the terrain. A bank, the rim of a hollow, a step of the
+ * DEM with open country behind do. (Fitting a plane to the disc and
+ * standing over its highest point, the first attempt, put the eye 6.5 m up
+ * on the Mauritzalm, a meadow at 20°: a ridge 400 m away then stood a
+ * degree off in the camera view.)
  */
 
 export const CLEAR_VIEW = {
@@ -23,14 +27,12 @@ export const CLEAR_VIEW = {
   minRadius: 15,
   maxRadius: 50,
   radius: 30,
-  /**
-   * A lift below this is the DEM's own roughness: none. Heights are whole
-   * metres, so on any slope the highest post of the disc stands up to half
-   * a metre over the plane and the standpoint up to half a metre under it.
-   */
-  deadBand: 1.5,
+  /** Room between the sightline to the far horizon and the near ground it passes over, metres. */
+  margin: 0.5,
   /** The most the eye is lifted, metres: at the foot of a wall it does not go up the wall. */
   cap: 10,
+  /** Directions looked in. */
+  bearings: 64,
 };
 
 /** The radius of the disc for a fix of this accuracy (metres), or for a standpoint without one. */
@@ -40,35 +42,31 @@ export function fitRadius(accuracy: number | null | undefined): number {
 }
 
 /**
- * How far to lift the eye, metres. `height(east, north)` is the terrain
- * around the standpoint in metres from it; it is read on a grid `step`
- * metres wide inside `radius`.
+ * How far to lift an eye at altitude `eye`, metres. `height(east, north)` is
+ * the terrain around the standpoint in metres from it, read every `step`
+ * metres out to `radius`; `far(bearing)` is the tangent of the highest
+ * apparent elevation of all the ground beyond `radius` towards that bearing
+ * (degrees), -Infinity where nothing is known of it.
  */
 export function clearView(
-  height: (east: number, north: number) => number, radius: number, step: number,
+  height: (east: number, north: number) => number,
+  far: (bearing: number) => number,
+  eye: number, radius: number, step: number,
 ): { lift: number } {
-  const n = Math.max(1, Math.floor(radius / step));
-  // The grid is symmetric about the standpoint, so the least-squares plane
-  // comes apart: its level is the mean, each slope its own sum.
-  let count = 0, sum = 0, sxx = 0, sxh = 0, syh = 0;
-  const pts: number[] = [];
-  for (let j = -n; j <= n; j++) {
-    for (let i = -n; i <= n; i++) {
-      const x = i * step, y = j * step;
-      if (x * x + y * y > radius * radius) continue;
-      const h = height(x, y);
-      pts.push(x, y, h);
-      count++; sum += h; sxx += x * x; sxh += x * h; syh += y * h;
+  let needed = -Infinity;
+  for (let i = 0; i < CLEAR_VIEW.bearings; i++) {
+    const bearing = (i * 360) / CLEAR_VIEW.bearings;
+    const beyond = far(bearing);
+    if (!Number.isFinite(beyond)) continue;
+    const b = (bearing * Math.PI) / 180, sin = Math.sin(b), cos = Math.cos(b);
+    // The sightline to the far horizon passes `r * beyond` above the eye at
+    // range r; the eye has to stand so that the ground there is below it.
+    for (let r = step; r <= radius; r += step) {
+      const eyeFor = height(r * sin, r * cos) - r * beyond;
+      if (eyeFor > needed) needed = eyeFor;
     }
   }
-  const level = sum / count, bx = sxx > 0 ? sxh / sxx : 0, by = sxx > 0 ? syh / sxx : 0;
-  let top = -Infinity, own = 0;
-  for (let k = 0; k < pts.length; k += 3) {
-    const over = pts[k + 2] - (level + bx * pts[k] + by * pts[k + 1]);
-    if (over > top) top = over;
-    if (pts[k] === 0 && pts[k + 1] === 0) own = over;
-  }
-  const lift = top - own;
-  if (!(lift >= CLEAR_VIEW.deadBand)) return { lift: 0 };
+  const lift = needed + CLEAR_VIEW.margin - eye;
+  if (!(lift > 0)) return { lift: 0 };
   return { lift: Math.min(CLEAR_VIEW.cap, lift) };
 }

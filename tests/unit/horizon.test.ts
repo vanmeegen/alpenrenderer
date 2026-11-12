@@ -5,9 +5,9 @@
  * that wall. The observer stands on a plain at 1500 m, eye 1.7 m up.
  */
 import { describe, expect, test } from 'bun:test';
-import { latToMercY, lonToMercX, mercResolution, mercYToLat } from '../../src/engine/core/geodesy';
+import { curvatureDrop, latToMercY, localRadius, lonToMercX, mercResolution, mercYToLat } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
-import { computeVisibility } from '../../src/engine/core/horizon';
+import { HorizonTable, computeVisibility } from '../../src/engine/core/horizon';
 import { buildTargets } from '../../src/engine/core/labels';
 import { Peak } from '../../src/engine/core/peaks';
 
@@ -20,6 +20,11 @@ const obs = { lon: LON, lat: LAT, ground: EYE, eye: 0 };
  */
 function field(z: number, size: number, f: (north: number, east: number) => number) {
   const hf = new HeightField(LON, LAT);
+  return { hf, ...level(hf, z, size, f) };
+}
+
+/** Adds such a level to a height field: several of them make a clipmap. */
+function level(hf: HeightField, z: number, size: number, f: (north: number, east: number) => number) {
   const res = mercResolution(LAT, z);
   const cx = lonToMercX(LON, z), cy = latToMercY(LAT, z);
   const px0 = Math.round(cx) - size / 2, py0 = Math.round(cy) - size / 2;
@@ -33,7 +38,7 @@ function field(z: number, size: number, f: (north: number, east: number) => numb
   hf.addLevel({ z, px0, py0, w: size, h: size, quant: 1, bias: -1000 }, raw, true);
   /** Latitude of the post row `k` rows north of the observer's row. */
   const rowLat = (k: number) => mercYToLat(Math.floor(cy) - k + 0.5, z);
-  return { hf, res, rowLat };
+  return { res, rowLat };
 }
 
 describe('a summit the grid flattens', () => {
@@ -136,3 +141,105 @@ describe('a summit behind the visible edge of its own mountain', () => {
   });
 });
 
+
+describe('the horizon table: every post between the eye and the summit counts', () => {
+  const RADIUS = localRadius(LAT);
+  /** A summit block `km` north: two posts deep, a few wide, `h` metres high, on the level with resolution `res`. */
+  const block = (km: number, res: number, h: number) => (north: number, east: number) =>
+    (Math.abs(north - km * 1000) <= res && Math.abs(east) <= 3 * res ? h : PLAIN);
+
+  test('a 3 m bank 20 m ahead hides a summit 20 km out; with the eye over the bank it shows', () => {
+    // The march used to start 80 m out: what stood nearer was the picture's
+    // whole foreground and did not exist for the labels (Pertisau).
+    const hf = new HeightField(LON, LAT);
+    const near = level(hf, 13, 256, (north, east) => (north >= 20 && north <= 60 && Math.abs(east) < 200 ? PLAIN + 3 : PLAIN));
+    const res9 = mercResolution(LAT, 9);
+    const far = level(hf, 9, 256, block(20, res9, 2100));
+    expect(near.res).toBeLessThan(14);
+    const peak: Peak = { id: 'fern', name: 'Fernkopf', lon: LON, lat: far.rowLat(Math.round(20000 / res9)), ele: 2100, prom: 500 };
+    // 570 m above the eye's horizon at 20 km: 1.6° up. The bank's top, 1.3 m over the eye 20 to 33 m out, stands at 2.3° to 3.7°.
+    const from = (eye: number) => {
+      const t = buildTargets([peak], { ...obs, ground: eye }, hf, hf.maxRange);
+      return computeVisibility(t, hf, eye);
+    };
+    expect(from(EYE)).toBe(0);
+    expect(from(PLAIN + 5)).toBe(1);
+  });
+
+  test('a ridge one post wide 88 km out hides the summit behind it', () => {
+    // 96 samples to a summit 100 km away are 6 to 7 km apart out there: a
+    // ridge between two of them did not exist.
+    const res8 = mercResolution(LAT, 8);
+    const kRidge = Math.round(88000 / res8);
+    const { hf, rowLat } = field(8, 640, (north, east) => {
+      if (Math.round(north / res8) === kRidge && Math.abs(east) < 20000) return 3500;
+      return block(100, res8, 3000)(north, east);
+    });
+    const peak: Peak = { id: 'hinten', name: 'Hinterkopf', lon: LON, lat: rowLat(Math.round(100000 / res8)), ele: 3000, prom: 800 };
+    const t = buildTargets([peak], obs, hf, hf.maxRange);
+    expect(t.length).toBe(1);
+    expect(t[0].elevation).toBeLessThan(0.6);                 // 0.47° up; the ridge stands at 0.96°
+    expect(computeVisibility(t, hf, EYE)).toBe(0);
+  });
+
+  test('40 m under the sightline at 100 km is hidden, 10 m under it is seen: the slack is metres, not an angle', () => {
+    // 0.05° was 87 m at 100 km and 0.9 m at 1 km. Now 2 m plus 3 % of the
+    // curvature drop: 22 m at 100 km (what refraction moves a summit by from
+    // day to day), 2 m close by (the DEM's own rounding).
+    const res8 = mercResolution(LAT, 8);
+    const kRidge = Math.round(60000 / res8), kTop = Math.round(100000 / res8);
+    const rRidge = kRidge * res8, rTop = kTop * res8;
+    const tanRidge = (3000 - EYE - curvatureDrop(rRidge, RADIUS)) / rRidge;
+    const sightline = EYE + tanRidge * rTop + curvatureDrop(rTop, RADIUS);     // the height a point at 100 km needs to peep over the ridge
+    const seen = (under: number) => {
+      const h = Math.round(sightline - under);
+      const { hf, rowLat } = field(8, 640, (north, east) => {
+        if (Math.round(north / res8) === kRidge && Math.abs(east) < 20000) return 3000;
+        return block(rTop / 1000, res8, h)(north, east);
+      });
+      const peak: Peak = { id: 'kante', name: 'Kantenkopf', lon: LON, lat: rowLat(kTop), ele: h, prom: 800 };
+      const t = buildTargets([peak], obs, hf, hf.maxRange);
+      return computeVisibility(t, hf, EYE);
+    };
+    expect(seen(40)).toBe(0);
+    expect(seen(10)).toBe(1);
+    expect(seen(-30)).toBe(1);
+  });
+
+  test('a row is marched once, when a summit needs it, and reads about as many posts as the levels are wide', () => {
+    const hf = new HeightField(LON, LAT);
+    for (const z of [13, 12, 11, 10, 9, 8]) level(hf, z, 640, () => PLAIN);
+    const table = new HorizonTable(hf, EYE);
+    expect(table.rowsBuilt).toBe(0);
+    table.before(37.3, 50000);
+    expect(table.rowsBuilt).toBe(2);                           // the two bearings the summit lies between
+    const perRow = table.samples / table.rowsBuilt;
+    expect(perRow).toBeGreaterThan(600);
+    expect(perRow).toBeLessThan(1400);
+    table.before(37.3, 90000);
+    table.before(37.35, 20000);
+    expect(table.rowsBuilt).toBe(2);
+    // On a level plain the horizon is the plain itself, falling away with the curvature: nothing stands above the eye.
+    expect(table.before(37.3, 90000).tan).toBeLessThan(0);
+    expect(table.skyline(37.3)).toBeLessThan(0);
+  });
+
+  test('a summit with nothing higher behind it stands on the skyline; one in front of a higher wall does not', () => {
+    const res9 = mercResolution(LAT, 9);
+    const { hf, rowLat } = field(9, 640, (north, east) => {
+      if (Math.abs(north - 30000) <= res9 && Math.abs(east) < 15000) return 4000;       // a wall 30 km north
+      if (Math.abs(north - 10000) <= res9 && Math.abs(east) <= 3 * res9) return 2200;   // a summit in front of it
+      if (Math.abs(east - 10000) <= res9 && Math.abs(north) <= 3 * res9) return 2200;   // and one to the east, sky behind
+      return PLAIN;
+    });
+    const peaks: Peak[] = [
+      { id: 'vor', name: 'Vorberg', lon: LON, lat: rowLat(Math.round(10000 / res9)), ele: 2200, prom: 600 },
+      { id: 'ost', name: 'Ostberg', lon: LON + 10000 / (111320 * Math.cos((LAT * Math.PI) / 180)), lat: LAT, ele: 2200, prom: 600 },
+    ];
+    const t = buildTargets(peaks, obs, hf, hf.maxRange);
+    expect(computeVisibility(t, hf, EYE)).toBe(2);
+    const by = Object.fromEntries(t.map((x) => [x.peak.id, x]));
+    expect(by.vor.skyline).toBe(false);
+    expect(by.ost.skyline).toBe(true);
+  });
+});

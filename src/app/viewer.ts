@@ -8,7 +8,7 @@
 
 import { AlignResult, DEFAULT_PROFILE, PHOTO_SKYLINE, alignPhoto, extractSkyline, horizonProfile } from '../engine/core/align';
 import { Camera, fovForAspect, longFovOf } from '../engine/core/camera';
-import { VisibilityJob } from '../engine/core/horizon';
+import { DEFAULT_HORIZON, HorizonTable, VisibilityJob } from '../engine/core/horizon';
 import { LabelTarget, PlacedLabel, buildTargets, layoutLabels, pickLabel } from '../engine/core/labels';
 import { Peak } from '../engine/core/peaks';
 import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
@@ -29,8 +29,8 @@ import { LookControls } from './controls';
 import { ExifInfo, fovFromExif, readExif } from './exif';
 import { LabelPainter } from './labelPainter';
 import { SensorLook } from './sensorLook';
-import { AppOptions, EYE_HEIGHT, ViewState, clampEyeHeight, clampOutline, readEyeHeight, readOutline, writeEyeHeight, writeOutline } from './state';
-import { clearView, fitRadius } from '../engine/core/eye';
+import { AppOptions, ViewState, clampEyeHeight, clampOutline, readEyeHeight, readOutline, writeEyeHeight, writeOutline } from './state';
+import { CLEAR_VIEW, clearView, fitRadius } from '../engine/core/eye';
 
 /** Milliseconds of sightline work per frame; the rest of the frame stays for drawing and touch. */
 const VISIBILITY_BUDGET_MS = 4;
@@ -682,11 +682,14 @@ export class Viewer {
     this.eyeLift = 0;
     if (this.view.alt === undefined && hf.resAt(0) > 0) {
       const mLat = 111320, mLon = 111320 * Math.cos(lat * DEG);
-      const { lift } = clearView(
+      const radius = fitRadius(this.fixAccuracy), eye = ground + this.eyeHeight;
+      // The horizon beyond the disc, from the eye as it stands: the same table the labels are held against, begun there.
+      const beyond = new HorizonTable(hf, eye, { ...DEFAULT_HORIZON, bearings: CLEAR_VIEW.bearings, start: radius });
+      this.eyeLift = clearView(
         (e, n) => hf.height(lon + e / mLon, lat + n / mLat, Math.hypot(e, n)),
-        fitRadius(this.fixAccuracy), Math.max(2, hf.resAt(0) / 2),
-      );
-      this.eyeLift = Math.max(0, EYE_HEIGHT.min + lift - this.eyeHeight);
+        (bearing) => beyond.skyline(bearing),
+        eye, radius, Math.max(2, hf.resAt(0) / 2),
+      ).lift;
     }
     const eye = this.view.alt ?? ground + this.eyeHeight + this.eyeLift;
     this.renderer.moveTo(lon, lat, eye);
