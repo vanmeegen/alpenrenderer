@@ -1281,6 +1281,9 @@ settings draws the outline alone…“, „a view that moves too slowly is
 drawn with fewer pixels while it moves, and sharp again once it rests“,
 Gerät im Check-Panel).
 
+Messung: 340 Unit-Tests grün; volle E2E-Suite 75/75 grün in 12,1 min
+(die Maschine ist seit dem Nachmittag langsamer, siehe §8.ae).
+
 Echte Geräte kann ich nicht messen. Bitte auf iPad und Handy ins
 Check-Panel schauen: Gerät, Qualität, Atlas, und nach einigem Schwenken
 die Zeile „In Bewegung: Auflösung ÷ …“.
