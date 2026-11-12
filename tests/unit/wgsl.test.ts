@@ -207,6 +207,29 @@ describe('the height atlas', () => {
   });
 });
 
+describe('the surface atlas', () => {
+  test('both dialects take normal and occlusion from the surface atlas, between its posts, and no longer one normal per cell', async () => {
+    // core/surface.ts works both out per post; the shade pass reads the four
+    // posts round a pixel and blends them, so a face is one surface. The
+    // strength of the occlusion comes from the same constant shading.ts uses.
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { SURFACE } = await import('../../src/engine/core/surface');
+    const { shaderFloat } = await import('../../src/engine/render/gpu/consts');
+    for (const src of [GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_SHADE_FRAGMENT]) {
+      expect(src).toMatch(/fn surfaceAt\(|vec3 surfaceAt\(/);
+      expect(src).not.toMatch(/gradientAt\(|fn gradient\(/);
+      expect(src).toMatch(new RegExp(`const (float )?AO\\b[^;]*= ${shaderFloat(SURFACE.strength).replace('.', '\\.')};`));
+    }
+    // Exact texels in the GLSL, for the reason the heights are fetched so.
+    expect(GL.TERRAIN_SHADE_FRAGMENT_GL).toContain('uniform sampler2D surface;');
+    expect(GL.TERRAIN_SHADE_FRAGMENT_GL).toContain('texelFetch(surface,');
+    expect(S.TERRAIN_SHADE_FRAGMENT).toContain('var surface ');
+    // The range pass and the vertex stage have no use for it.
+    expect(GL.TERRAIN_VERTEX_GL).not.toContain('surface');
+    expect(S.TERRAIN_VERTEX).not.toContain('surface');
+  });
+});
+
 describe('shader text Babylon can take apart', () => {
   test('no comment behind code holds a semicolon: the preprocessor cuts declarations there', async () => {
     // "uniform float uRim;   // …; 0 = off" compiled to a lone "0 = off" and a black screen (WebGL2).

@@ -179,4 +179,30 @@ describe('HeightField', () => {
     expect(hf.summitNear(LON, LAT, 100)).toBe(2000);
     expect(hf.height(LON, LAT)).toBe(2000);
   });
+
+  test('heights held to a quarter of a metre: a top that is flat to the metre is still one top, and the point in it stays', () => {
+    // The search for a summit takes a patch of equal height for a broad
+    // top. With quarter metres every post of that top differs a little: the
+    // comparison stays in whole metres, the height that is returned is exact.
+    const hf = new HeightField(LON, LAT);
+    const z = 13, w = 64, h = 64;
+    const px0 = Math.round(lonToMercX(LON, z)) - w / 2, py0 = Math.round(latToMercY(LAT, z)) - h / 2;
+    const raw = new Uint16Array(w * h);
+    const quart = (m: number) => Math.round((m + 1000) * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const dx = Math.abs(x - 32), dy = Math.abs(y - 32);
+      // A top three posts square at 2000 m and a few quarter metres, slopes falling 20 m a post around it.
+      raw[y * w + x] = dx <= 1 && dy <= 1 ? quart(2000 + 0.25 * ((x + y) % 2)) : quart(2000 - 20 * Math.max(dx - 1, dy - 1));
+    }
+    const l = hf.addLevel({ z, px0, py0, w, h, quant: 0.25, bias: -1000 }, raw, true);
+    // A catalogue point on the top's corner post, which is not its highest by a quarter metre.
+    const lon = mercXToLon(px0 + 31 + 0.4, z), lat = mercYToLat(py0 + 31 + 0.6, z);
+    const top = hf.summitAt(lon, lat, 60);
+    expect(top.lon).toBe(lon);                                    // on the top already: the point stays
+    expect(top.lat).toBe(lat);
+    expect(top.h).toBe(l.raw[31 * w + 31] * 0.25 - 1000);         // exact, not rounded
+    // From down the slope the nearest post of the top is taken.
+    const below = hf.summitAt(mercXToLon(px0 + 35 + 0.5, z), mercYToLat(py0 + 32 + 0.5, z), 60);
+    expect(below.lon).toBeCloseTo(mercXToLon(px0 + 33 + 0.5, z), 9);
+  });
 });

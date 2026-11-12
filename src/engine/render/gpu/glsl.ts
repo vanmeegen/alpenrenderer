@@ -288,29 +288,38 @@ uniform float uRefRadius;
 uniform float uDropScale;
 
 uniform sampler2D heights;
+uniform sampler2D surface;
 
 ${glslConsts(SHADE_CONSTS)}
 
 ${CLIPMAP_SAMPLER}
 
 /**
- * d(height)/d(east), d(height)/d(north) at one level, metres per metre: the
- * central difference on the DEM grid at the cell this point falls in. Taken
- * from exact texels, not from the interpolated field, so the normal is one
- * per cell and turns at the cell boundary: every post becomes a facet, and
- * rock reads as rock. Interpolating first smoothed the facets away.
+ * Normal and occlusion at one level, as the surface atlas packs them
+ * (core/surface.ts): x, y the east and north of the unit normal as c/2 + 1/2,
+ * z the occlusion. Worked out per post on the CPU and blended here between
+ * the four posts round the point, so a face is one surface. The old way, a
+ * central difference at the cell the point falls in, gave one normal per
+ * cell: zoomed in, every post was a square of its own shade. Fetched as
+ * exact texels and blended by hand, for the reason the heights are.
  */
-vec2 gradientAt(int lv, float dLon, float dIso) {
+vec3 surfaceTexel(int lv, float x, float y) {
+  vec2 o = atlasOrigin(lv);
+  float px = clamp(x, 0.0, uLevelPx - 1.0) + o.x;
+  float py = clamp(y, 0.0, uLevelPx - 1.0) + o.y;
+  return texelFetch(surface, ivec2(int(px), int(py)), 0).rgb;
+}
+
+vec3 surfaceAt(int lv, float dLon, float dIso) {
   vec4 A = uLvlA[lv];
-  vec4 B = uLvlB[lv];
-  float mpp = uRadius * uCosLat0 / A.z;       // one pixel, metres
-  float x = floor(A.x + dLon * A.z - 0.5);
-  float y = floor(A.y - dIso * A.z - 0.5);
-  float hE = texel(lv, x + 1.0, y);
-  float hW = texel(lv, x - 1.0, y);
-  float hN = texel(lv, x, y - 1.0);           // rows run south
-  float hS = texel(lv, x, y + 1.0);
-  return vec2((hE - hW) * B.x / (2.0 * mpp), (hN - hS) * B.x / (2.0 * mpp));
+  vec2 f = vec2(A.x + dLon * A.z, A.y - dIso * A.z) - vec2(0.5, 0.5);
+  vec2 p0 = floor(f);
+  vec2 t = f - p0;
+  vec3 s00 = surfaceTexel(lv, p0.x, p0.y);
+  vec3 s10 = surfaceTexel(lv, p0.x + 1.0, p0.y);
+  vec3 s01 = surfaceTexel(lv, p0.x, p0.y + 1.0);
+  vec3 s11 = surfaceTexel(lv, p0.x + 1.0, p0.y + 1.0);
+  return mix(mix(s00, s10, t.x), mix(s01, s11, t.x), t.y);
 }
 
 /**
@@ -357,23 +366,24 @@ void main(void) {
   float h = vH;
 
   int lv = levelFor(r);
-  vec2 g = gradientAt(lv, dLon, dIso);
+  vec3 sf = surfaceAt(lv, dLon, dIso);
   float wet = waterAt(lv, dLon, dIso);
   if (float(lv) + 1.0 < uLevelCount && uLvlA[lv + 1].w > 0.0) {
     float outer = uLvlA[lv].w;
     float fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) {
-      g = mix(g, gradientAt(lv + 1, dLon, dIso), fade);
+      sf = mix(sf, surfaceAt(lv + 1, dLon, dIso), fade);
       wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
     }
   }
   int lk = lookLevel(dLon, dIso);
   if (lk >= 0) {
     float lf = lookFade(lk, dLon, dIso);
-    g = mix(gradientAt(lk, dLon, dIso), g, lf);
+    sf = mix(surfaceAt(lk, dLon, dIso), sf, lf);
     wet = mix(waterAt(lk, dLon, dIso), wet, lf);
   }
-  vec3 n = normalize(vec3(-g.x, -g.y, 1.0));
+  vec2 nh = sf.xy * 2.0 - vec2(1.0, 1.0);
+  vec3 n = normalize(vec3(nh, sqrt(max(1.0e-4, 1.0 - dot(nh, nh)))));
   float slope = 1.0 - n.z;               // 0 flat .. 1 vertical
 
   // Hypsometric tint with slope-dependent rock and snow.
@@ -396,8 +406,9 @@ void main(void) {
 
   // Plain Lambert with a floor: shadow sides keep their shape, lit faces
   // stand out. A sky term that lifted north faces flattened the relief.
+  // Times what the ground around leaves of the sky: gullies darker, ridges lighter.
   float diff = max(dot(n, uSun), 0.0);
-  float shade = 0.28 + 0.72 * diff;
+  float shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0));
   col = col * shade;
   if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 

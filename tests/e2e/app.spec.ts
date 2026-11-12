@@ -524,6 +524,36 @@ test.describe('appearance', () => {
     expect(Math.abs(left.measured / right.measured - left.expected / right.expected)).toBeLessThan(0.03);
   });
 
+  test('through the telescope a face is one surface, not a chequerboard of DEM cells: no step in brightness from one pixel to the next', async ({ page }) => {
+    // Under the summit the cone turns quickly, and zoomed to 8° a DEM cell
+    // is some twenty pixels wide. With one normal per cell each cell had its
+    // own shade: brightness jumped by 0.02 at every cell boundary. Across
+    // the whole face it changes by a quarter over 500 px, 0.0005 a pixel;
+    // the bound is two steps of the 8-bit image.
+    await page.goto(url({ pitch: 25.5, fov: 8 }, { shade: '1' }));   // a colour test
+    await ready(page);
+    const rows = await page.evaluate(async () => {
+      const r = (window as any).alp.renderer;
+      const c = await r.capture(), range = await r.readRange();
+      const lum = (x: number, y: number) => {
+        const o = (y * c.width + x) * 4;
+        return (0.2126 * c.pixels[o] + 0.7152 * c.pixels[o + 1] + 0.0722 * c.pixels[o + 2]) / 255;
+      };
+      const hit = (x: number, y: number) => range.pixels[((range.height - 1 - y) * range.width + x) * 4 + 3] > 128;
+      return [300, 350, 400, 450].map((y) => {
+        let first = -1, last = -1, step = 0;
+        for (let x = 0; x < c.width; x++) if (hit(x, y)) { if (first < 0) first = x; last = x; }
+        // 25 px inside the silhouette: its ink line is not the face.
+        for (let x = first + 25; x < last - 25; x++) step = Math.max(step, Math.abs(lum(x + 1, y) - lum(x, y)));
+        return { width: last - first, step };
+      });
+    });
+    for (const row of rows) {
+      expect(row.width).toBeGreaterThan(150);   // the row crosses the face
+      expect(row.step).toBeLessThan(0.008);
+    }
+  });
+
   test('the Testhorn view matches the golden within tolerance', async ({ page }) => {
     // A page screenshot of a software-rendered WebGL canvas can take well
     // over ten seconds on a slow CI runner, and the matcher needs two of

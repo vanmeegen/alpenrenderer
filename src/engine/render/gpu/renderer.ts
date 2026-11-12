@@ -60,6 +60,7 @@ import { Band, RadialParams, radialParams } from '../mesh';
 import { RedrawGate, frameFingerprint } from '../redraw';
 import { OUTLINE } from '../outline';
 import { atlasLayout } from '../atlas';
+import { levelSurface } from '../../core/surface';
 import { QUALITY_HIGH, QUALITY_LOW, QUALITY_MID, Quality } from '../quality';
 import { renderPixelRatio } from '../resolution';
 import {
@@ -67,7 +68,7 @@ import {
   TERRAIN_SHADE_FRAGMENT_GL, TERRAIN_VERTEX_GL,
 } from './glsl';
 import {
-  COMPOSITE_FRAGMENT, COMPOSITE_UNIFORMS, COMPOSITE_VERTEX, HEIGHT_BIAS,
+  COMPOSITE_FRAGMENT, COMPOSITE_UNIFORMS, COMPOSITE_VERTEX, HEIGHT_BIAS, HEIGHT_QUANT,
   SHADE_UNIFORMS, TERRAIN_FRAGMENT, TERRAIN_SHADE_FRAGMENT, TERRAIN_UNIFORMS,
   TERRAIN_VERTEX,
 } from './wgsl';
@@ -209,6 +210,14 @@ export class GpuRenderer {
   private levelBlock: Uint8Array | null = null;
   private atlasShape = '';
   private atlasLevelPx = 0;
+  /**
+   * Normal and occlusion per post (core/surface.ts), laid out like the
+   * height atlas; `surfaced` holds the version of each level it was built
+   * from. Only the shade pass reads it, so it is only built when shaded.
+   */
+  private surfaceAtlas: RawTexture | null = null;
+  private surfaceBlock: Uint8Array | null = null;
+  private surfaced: string[] = [];
   private blank!: RawTexture;
   private video: VideoTexture | null = null;
   private videoEl: HTMLVideoElement | null = null;
@@ -342,6 +351,7 @@ export class GpuRenderer {
     this.engine.onContextRestoredObservable.add(() => {
       this.atlas?.dispose();
       this.atlas = null;
+      this.dropSurface();
       this.uploaded = this.uploaded.map(() => '');
       if (this.heightField) this.setHeightField(this.heightField);
       this.gate.request(2);
@@ -406,11 +416,12 @@ export class GpuRenderer {
       { vertex: 'shade', fragment: 'shade' }, {
         attributes: ['position'],
         uniforms: [...SHADE_UNIFORMS],
-        samplers: ['heights'],
+        samplers: ['heights', 'surface'],
         shaderLanguage: this.shaderLanguage,
       });
     this.shadeMat.backFaceCulling = false;
     this.shadeMat.setTexture('heights', this.blank);
+    this.shadeMat.setTexture('surface', this.blank);
   }
 
   private buildColorTarget() {
@@ -552,6 +563,7 @@ export class GpuRenderer {
       this.atlasShape = shape;
       this.atlas?.dispose();
       this.atlas = null;
+      this.dropSurface();
     }
     if (!this.atlas) {
       this.atlas = new RawTexture(null, layout.width, layout.height, Constants.TEXTUREFORMAT_RGBA,
@@ -573,9 +585,9 @@ export class GpuRenderer {
       const raw = l.raw;
       const water = l.water && l.water.length === raw.length ? l.water : null;
       for (let p = 0, o = 0; p < raw.length; p++, o += 4) {
-        // The stored value is already quantised; re-express it at one metre so
-        // one packing works for every level.
-        const m = Math.round(raw[p] * l.quant + l.bias) - HEIGHT_BIAS;
+        // The stored value is already quantised; re-express it in the
+        // atlas's own steps so one packing works for every level.
+        const m = Math.round((raw[p] * l.quant + l.bias - HEIGHT_BIAS) / HEIGHT_QUANT);
         const v = m < 0 ? 0 : m > 65535 ? 65535 : m;
         block[o] = v >> 8;
         block[o + 1] = v & 255;
@@ -587,11 +599,53 @@ export class GpuRenderer {
       if (texture) (this.engine as unknown as SubUpload).updateTextureData(texture, block, at.x, at.y, w, h);
       this.uploaded[i] = stamp;
     });
+    if (this.shaded) this.syncSurface();
     if (this.gl2) this.diagnostics.glError = this.gl2.getError();
 
     this.diagnostics.levels = levels.length;
     this.diagnostics.atlas = `${shape} rgba8`;
     this.syncLevels(hf);
+  }
+
+  private dropSurface() {
+    this.surfaceAtlas?.dispose();
+    this.surfaceAtlas = null;
+    this.surfaced = [];
+    this.shadeMat?.setTexture('surface', this.blank);
+  }
+
+  /**
+   * Brings the surface atlas up to the heights: every filled level whose
+   * heights changed since is worked out again (core/surface.ts) and sent
+   * alone. Called when heights arrive and before a shaded frame, so turning
+   * the shading on later finds it built.
+   */
+  private syncSurface() {
+    const hf = this.heightField;
+    if (!hf || !hf.levels.length || !this.atlas) return;
+    const levels = hf.levels;
+    if (!levels.some((l, i) => l.filled && this.surfaced[i] !== String(l.version))) return;
+    const { w, h } = levels[0];
+    const layout = atlasLayout(levels.length, h);
+    if (!this.surfaceAtlas) {
+      this.surfaceAtlas = new RawTexture(null, layout.width, layout.height, Constants.TEXTUREFORMAT_RGBA,
+        this.scene, false, false, Texture.NEAREST_SAMPLINGMODE);
+      this.surfaceAtlas.wrapU = Texture.CLAMP_ADDRESSMODE;
+      this.surfaceAtlas.wrapV = Texture.CLAMP_ADDRESSMODE;
+      this.shadeMat.setTexture('surface', this.surfaceAtlas);
+      this.surfaced = levels.map(() => '');
+    }
+    if (!this.surfaceBlock || this.surfaceBlock.length !== w * h * 4) this.surfaceBlock = new Uint8Array(w * h * 4);
+    const block = this.surfaceBlock;
+    const texture = this.surfaceAtlas.getInternalTexture();
+    levels.forEach((l, i) => {
+      const stamp = String(l.version);
+      if (!l.filled || this.surfaced[i] === stamp) return;
+      levelSurface(l.raw, w, h, l.quant, l.res, block);
+      const at = layout.origin(i);
+      if (texture) (this.engine as unknown as SubUpload).updateTextureData(texture, block, at.x, at.y, w, h);
+      this.surfaced[i] = stamp;
+    });
   }
 
   private syncLevels(hf: HeightField) {
@@ -605,8 +659,8 @@ export class GpuRenderer {
       // A look level (the telescope's window) is flagged -1: the shader takes
       // it wherever the point lies inside its window, not by range.
       this.lvlA.set([l.cx, l.cy, pxPerRad, l.role === 'look' ? (l.filled ? -1 : 0) : (l.filled ? l.maxRange : 0)], i * 4);
-      // Heights were re-expressed at one metre when the atlas was packed.
-      this.lvlB.set([1, HEIGHT_BIAS, l.w, l.h], i * 4);
+      // Heights were re-expressed in the atlas's steps when it was packed.
+      this.lvlB.set([HEIGHT_QUANT, HEIGHT_BIAS, l.w, l.h], i * 4);
     });
     this.camera.far = Math.max(1000, hf.maxRange * 1.15);
   }
@@ -738,6 +792,7 @@ export class GpuRenderer {
     try {
       const { w, h } = this.resize();
       this.camera.update();
+      if (this.shaded) this.syncSurface();
       this.updateTerrainUniforms();
       this.updateCompositeUniforms(w, h);
       this.scene.render();

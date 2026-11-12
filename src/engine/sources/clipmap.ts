@@ -62,7 +62,13 @@ export const LOW_CLIPMAP: ClipmapConfig = {
   look: [{ z: 13 }, { z: 12 }],
 };
 
-const QUANT = 1;
+/**
+ * Heights are held to a quarter of a metre, from 1000 m below the sea to
+ * 15 383 m above it in sixteen bits. Whole metres made terraces of every
+ * gentle slope: a step every 13 m of ground on a 4° meadow, each one a
+ * facet with its own shade. Mapterhorn's LiDAR tiles hold decimetres.
+ */
+const QUANT = 0.25;
 const BIAS = -1000;
 /** A window follows the observer once they are farther than this share of its size from its centre. */
 const RECENTRE = 1 / 8;
@@ -364,7 +370,7 @@ export class ClipmapStreamer {
         const src = (y - originY) * T - originX;
         const dst = (y - py0) * w - px0;
         for (let x = x0; x < x1; x++) {
-          raw[dst + x] = Math.max(0, Math.min(65535, Math.round(heights[src + x] - BIAS)));
+          raw[dst + x] = Math.max(0, Math.min(65535, Math.round((heights[src + x] - BIAS) / QUANT)));
         }
       }
     }

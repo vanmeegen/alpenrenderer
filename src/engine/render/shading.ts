@@ -9,6 +9,7 @@
  * shoulder with a dark floor so shadow sides keep their shape, and aerial
  * perspective: haze that lies in the valleys and turns the distance blue.
  */
+import { SURFACE } from '../core/surface';
 
 /**
  * The light, degrees: 45° up and `behind` degrees from the view direction,
@@ -65,9 +66,14 @@ export function sunVector(yaw = 0): [number, number, number] {
   return [Math.sin(az) * Math.cos(el), Math.cos(az) * Math.cos(el), Math.sin(el)];
 }
 
-/** Lambert with a floor: 0.28 in full shadow, 1 facing the sun. */
-export function shadeFactor(diff: number): number {
-  return 0.28 + 0.72 * Math.max(0, diff);
+/**
+ * Lambert with a floor: 0.28 in full shadow, 1 facing the sun; times what
+ * the ground around the point leaves of the sky (core/surface.ts): a hole
+ * (`occlusion` 0) is darker by SURFACE.strength, a point (1) lighter by as
+ * much, even ground (0.5) as lit.
+ */
+export function shadeFactor(diff: number, occlusion = 0.5): number {
+  return (0.28 + 0.72 * Math.max(0, diff)) * (1 + SURFACE.strength * (2 * occlusion - 1));
 }
 
 const smoothstep = (a: number, b: number, x: number) => {
@@ -117,11 +123,12 @@ export function haze(col: [number, number, number], range: number, h: number, ey
  * `water` where the lake mask marks the post, and with `view` (unit, eye to
  * point) the water shines; `yaw` is the view direction the light turns
  * with; `eyeAlt` is where the eye stands, for the air in between (the
- * point's own height when not given).
+ * point's own height when not given); `occlusion` what core/surface.ts
+ * gives for the point, 0.5 on even ground.
  */
 export function terrainColor(
   h: number, n: [number, number, number], range: number, water = false, view?: [number, number, number], yaw = 0,
-  eyeAlt = h,
+  eyeAlt = h, occlusion = 0.5,
 ): [number, number, number] {
   const slope = 1 - n[2];
   const valley: [number, number, number] = [0.47, 0.60, 0.33];
@@ -141,7 +148,7 @@ export function terrainColor(
   if (water) col = [...WATER_COLOR];
   const s = sunVector(yaw);
   const diff = n[0] * s[0] + n[1] * s[1] + n[2] * s[2];
-  const shade = shadeFactor(diff);
+  const shade = shadeFactor(diff, occlusion);
   col = [col[0] * shade, col[1] * shade, col[2] * shade];
   if (water && view) col = waterShine(col, view, yaw);
   return haze(col, range, h, eyeAlt);

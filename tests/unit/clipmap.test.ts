@@ -13,7 +13,8 @@ import { TileKey, TileSource } from '../../src/engine/sources/types';
 import { latToMercY, lonToMercX } from '../../src/engine/core/geodesy';
 
 const LON = 10.98527, LAT = 47.42111;
-const value = (pz: number, gx: number, gy: number) => (pz * 7919 + gx * 31 + gy * 17) % 50000;
+// Below the 15 383 m that sixteen bits of quarter metres reach.
+const value = (pz: number, gx: number, gy: number) => (pz * 7919 + gx * 31 + gy * 17) % 12000;
 
 function syntheticSource(tileSize: number, asked: TileKey[] = []): TileSource {
   const shift = Math.round(Math.log2(tileSize / 256));
@@ -66,6 +67,32 @@ describe.each([256, 512])('clipmap fill from %i-px tiles', (tileSize) => {
     await streamer.setCenter(LON, LAT);
     const perAxis = Math.ceil(640 / tileSize) + 1;
     expect(asked.length).toBeLessThanOrEqual(perAxis * perAxis);
+  });
+});
+
+describe('how finely heights are held', () => {
+  test('to a quarter of a metre: a LiDAR tile\'s decimetres are not rounded to whole metres', async () => {
+    // Whole metres made terraces of every gentle slope: a step every 13 m
+    // of ground on a 4° meadow, each one a facet with its own shade.
+    const frac = (gx: number, gy: number) => 1500 + ((gx * 7 + gy * 3) % 40) * 0.11;
+    const source: TileSource = {
+      name: 'fine', tileSize: 512, minZoom: 0, maxZoom: 20,
+      async load(k) {
+        const h = new Float32Array(512 * 512);
+        for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) h[y * 512 + x] = frac(k.x * 512 + x, k.y * 512 + y);
+        return h;
+      },
+    };
+    const s = new ClipmapStreamer(source, { size: 640, levels: [{ z: 13 }] }, LON, LAT);
+    await s.setCenter(LON, LAT);
+    const [lv] = s.heightField.levels;
+    expect(lv.quant).toBe(0.25);
+    let worst = 0;
+    for (let y = 0; y < lv.h; y += 7) for (let x = 0; x < lv.w; x += 5) {
+      worst = Math.max(worst, Math.abs(lv.raw[y * lv.w + x] * lv.quant + lv.bias - frac(lv.px0 + x, lv.py0 + y)));
+    }
+    expect(worst).toBeLessThanOrEqual(0.125 + 1e-6);
+    expect(worst).toBeGreaterThan(0.05);                          // and it is a rounding, not a float
   });
 });
 

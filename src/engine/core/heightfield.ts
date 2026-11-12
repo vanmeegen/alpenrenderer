@@ -270,7 +270,10 @@ export class HeightField {
     const { u, v } = this.project(l, lon, lat);
     const n = Math.max(1, Math.round(radius / l.res));
     const x0 = Math.round(u - 0.5), y0 = Math.round(v - 0.5);
-    const H = (x: number, y: number) => l.raw[y * l.w + x] * l.quant + l.bias;
+    // Compared in whole metres: a broad top is a patch of equal height, and
+    // with heights held finer than that every post of it would be a top.
+    const H = (x: number, y: number) => Math.round(l.raw[y * l.w + x] * l.quant + l.bias);
+    const exact = (x: number, y: number) => l.raw[y * l.w + x] * l.quant + l.bias;
     const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < l.w && y < l.h;
     // Only bounds the work: an equal-height patch of more posts than this
     // (0.7 km² at the finest level) is flat ground, not a top.
@@ -321,7 +324,7 @@ export class HeightField {
       const here = this.heightIn(l, lon, lat);
       return { lon, lat, h: Number.isNaN(here) ? this.height(lon, lat) : here };
     }
-    const h = H(best.x, best.y);
+    const h = exact(best.x, best.y);
     if (best.d === 0) return { lon, lat, h };
     return { lon: mercXToLon(l.px0 + best.x + 0.5, l.z), lat: mercYToLat(l.py0 + best.y + 0.5, l.z), h };
   }

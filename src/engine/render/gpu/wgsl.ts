@@ -61,6 +61,8 @@ export const COMPOSITE_UNIFORMS = [
 
 /** Height packing shared by the CPU uploader and both shaders. */
 export const HEIGHT_BIAS = -1000;
+/** Metres per step of the packed sixteen bits: a quarter of a metre, as the clipmap holds them. */
+export const HEIGHT_QUANT = 0.25;
 
 /** Range packing: 24-bit log distance plus a terrain/sky flag in alpha. */
 const RANGE_CODEC = /* wgsl */ `
@@ -313,27 +315,37 @@ uniform uDropScale : f32;
 
 var heightsSampler : sampler;
 var heights        : texture_2d<f32>;
+var surfaceSampler : sampler;
+var surface : texture_2d<f32>;
 
 ${wgslConsts(SHADE_CONSTS)}
 
 ${CLIPMAP_SAMPLER}
 
 /**
- * d(height)/d(east), d(height)/d(north) at one level, metres per metre: the
- * central difference on the DEM grid at the cell this point falls in, from
- * exact texels, so the normal is one per cell (see glsl.ts).
+ * Normal and occlusion at one level, as the surface atlas packs them
+ * (core/surface.ts), blended between the four posts round the point (see
+ * glsl.ts): x, y the east and north of the unit normal as c/2 + 1/2, z the
+ * occlusion.
  */
-fn gradient(lv : i32, dLon : f32, dIso : f32) -> vec2<f32> {
+fn surfaceTexel(lv : i32, x : f32, y : f32) -> vec3<f32> {
+  let o = atlasOrigin(lv);
+  let px = clamp(x, 0.0, uniforms.uLevelPx - 1.0) + o.x;
+  let py = clamp(y, 0.0, uniforms.uLevelPx - 1.0) + o.y;
+  let uv = vec2<f32>((px + 0.5) / uniforms.uTexSize.x, (py + 0.5) / uniforms.uTexSize.y);
+  return textureSampleLevel(surface, surfaceSampler, uv, 0.0).rgb;
+}
+
+fn surfaceAt(lv : i32, dLon : f32, dIso : f32) -> vec3<f32> {
   let A = uniforms.uLvlA[lv];
-  let B = uniforms.uLvlB[lv];
-  let mpp = uniforms.uRadius * uniforms.uCosLat0 / A.z;  // one pixel, metres
-  let x = floor(A.x + dLon * A.z - 0.5);
-  let y = floor(A.y - dIso * A.z - 0.5);
-  let hE = texel(lv, x + 1.0, y);
-  let hW = texel(lv, x - 1.0, y);
-  let hN = texel(lv, x, y - 1.0);                        // rows run south
-  let hS = texel(lv, x, y + 1.0);
-  return vec2<f32>((hE - hW) * B.x / (2.0 * mpp), (hN - hS) * B.x / (2.0 * mpp));
+  let f = vec2<f32>(A.x + dLon * A.z, A.y - dIso * A.z) - vec2<f32>(0.5, 0.5);
+  let p0 = floor(f);
+  let t = f - p0;
+  let s00 = surfaceTexel(lv, p0.x, p0.y);
+  let s10 = surfaceTexel(lv, p0.x + 1.0, p0.y);
+  let s01 = surfaceTexel(lv, p0.x, p0.y + 1.0);
+  let s11 = surfaceTexel(lv, p0.x + 1.0, p0.y + 1.0);
+  return mix(mix(s00, s10, t.x), mix(s01, s11, t.x), t.y);
 }
 
 /** 1 where the lake mask (the atlas's blue channel) marks this DEM post, 0 on dry ground. */
@@ -374,23 +386,24 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   let h = fragmentInputs.vH;
 
   let lv = levelFor(r);
-  var g = gradient(lv, dLon, dIso);
+  var sf = surfaceAt(lv, dLon, dIso);
   var wet = waterAt(lv, dLon, dIso);
   if (f32(lv) + 1.0 < uniforms.uLevelCount && uniforms.uLvlA[lv + 1].w > 0.0) {
     let outer = uniforms.uLvlA[lv].w;
     let fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) {
-      g = mix(g, gradient(lv + 1, dLon, dIso), fade);
+      sf = mix(sf, surfaceAt(lv + 1, dLon, dIso), fade);
       wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
     }
   }
   let lk = lookLevel(dLon, dIso);
   if (lk >= 0) {
     let lf = lookFade(lk, dLon, dIso);
-    g = mix(gradient(lk, dLon, dIso), g, lf);
+    sf = mix(surfaceAt(lk, dLon, dIso), sf, lf);
     wet = mix(waterAt(lk, dLon, dIso), wet, lf);
   }
-  let n = normalize(vec3<f32>(-g.x, -g.y, 1.0));
+  let nh = sf.xy * 2.0 - vec2<f32>(1.0, 1.0);
+  let n = normalize(vec3<f32>(nh, sqrt(max(1.0e-4, 1.0 - dot(nh, nh)))));
   let slope = 1.0 - n.z;                 // 0 flat .. 1 vertical
 
   // Hypsometric tint with slope-dependent rock and snow.
@@ -413,8 +426,9 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
 
   // Plain Lambert with a floor: shadow sides keep their shape, lit faces
   // stand out. A sky term that lifted north faces flattened the relief.
+  // Times what the ground around leaves of the sky: gullies darker, ridges lighter.
   let diff = max(dot(n, uniforms.uSun), 0.0);
-  let shade = 0.28 + 0.72 * diff;
+  let shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0));
   col = col * shade;
   if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 

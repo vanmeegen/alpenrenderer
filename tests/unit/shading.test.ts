@@ -144,3 +144,21 @@ describe('what the ground is made of, from height and slope alone', () => {
   });
 });
 
+
+describe('occlusion: gullies darker, ridges lighter', () => {
+  const n: [number, number, number] = [0, 0, 1];
+
+  test('neutral occlusion is the plain light; a hole is darker and a point lighter by SURFACE.strength', async () => {
+    const { SURFACE } = await import('../../src/engine/core/surface');
+    const plain = terrainColor(2000, n, 3000, false, undefined, 0, 2000);
+    const neutral = terrainColor(2000, n, 3000, false, undefined, 0, 2000, 0.5);
+    for (let i = 0; i < 3; i++) expect(neutral[i]).toBeCloseTo(plain[i], 9);
+    // Unhazed, the light alone: the factor is 1 ± strength.
+    expect(shadeFactor(0.5, 0) / shadeFactor(0.5)).toBeCloseTo(1 - SURFACE.strength, 9);
+    expect(shadeFactor(0.5, 1) / shadeFactor(0.5)).toBeCloseTo(1 + SURFACE.strength, 9);
+    const gully = terrainColor(2000, n, 3000, false, undefined, 0, 2000, 0.2);
+    const ridge = terrainColor(2000, n, 3000, false, undefined, 0, 2000, 0.8);
+    expect(luminance(gully)).toBeLessThan(luminance(plain) - 0.02);
+    expect(luminance(ridge)).toBeGreaterThan(luminance(plain) + 0.02);
+  });
+});
