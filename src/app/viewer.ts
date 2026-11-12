@@ -17,19 +17,17 @@ import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
 import { bandFor, lookRange, meshTopNear } from '../engine/render/mesh';
 import { DEG, destination, localRadius } from '../engine/core/geodesy';
-import { ClipmapStreamer, ClipmapConfig, DEFAULT_CLIPMAP, LOW_CLIPMAP } from '../engine/sources/clipmap';
+import { ClipmapStreamer } from '../engine/sources/clipmap';
 import { TerrariumSource } from '../engine/sources/terrarium';
 import { TileStore } from '../engine/sources/tilestore';
-import {
-  Backend, GpuRenderer, QUALITY_HIGH, QUALITY_LOW, RendererDiagnostics,
-} from '../engine/render/gpu/renderer';
-import { PIXEL_RATIO_CAP } from '../engine/render/resolution';
+import { Backend, GpuRenderer, RendererDiagnostics } from '../engine/render/gpu/renderer';
+import { Profile, Tier, deviceTier, profileFor, thisDevice } from './device';
 import { CameraFeed, DEFAULT_LENS_FOV, captureFilename, composeCapture, coverFovY, saveImage, SaveOutcome } from './cameraFeed';
 import { LookControls } from './controls';
 import { ExifInfo, fovFromExif, readExif } from './exif';
 import { LabelPainter } from './labelPainter';
 import { SensorLook } from './sensorLook';
-import { AppOptions, ViewState, clampEyeHeight, clampOutline, readEyeHeight, readOutline, writeEyeHeight, writeOutline } from './state';
+import { AppOptions, Style, ViewState, readStyle, writeStyle, clampEyeHeight, clampOutline, readEyeHeight, readOutline, writeEyeHeight, writeOutline } from './state';
 import { CLEAR_VIEW, clearView, fitRadius } from '../engine/core/eye';
 
 /** Milliseconds of sightline work per frame; the rest of the frame stays for drawing and touch. */
@@ -91,7 +89,9 @@ export interface ViewerStatus {
   /** What the tile decoder probe found: "exakt (bitmap)" or why not. */
   decoder: string;
   backend: Backend;
-  quality: 'high' | 'low';
+  quality: 'high' | 'mid' | 'low';
+  /** The device class the settings were chosen for. */
+  tier: Tier;
   surveys: SurveyCredit[];
   diagnostics: RendererDiagnostics;
   sensors: { active: boolean; offsetYaw: number; offsetPitch: number };
@@ -127,7 +127,7 @@ export class Viewer {
   readonly controls: LookControls;
   readonly sensors: SensorLook;
   readonly source: TerrariumSource;
-  readonly quality: 'high' | 'low';
+  readonly quality: 'high' | 'mid' | 'low';
   readonly catalog: PeakCatalog;
   readonly lakeCatalog: LakeCatalog;
   readonly feed = new CameraFeed();
@@ -170,19 +170,23 @@ export class Viewer {
 
   private constructor(
     readonly canvas: HTMLCanvasElement, renderer: GpuRenderer, opt: AppOptions, view: ViewState,
-    quality: 'high' | 'low', clipmap: ClipmapConfig, overlay: HTMLCanvasElement | null,
+    readonly profile: Profile, overlay: HTMLCanvasElement | null,
   ) {
     this.renderer = renderer;
     renderer.outline = readOutline();
-    // The lit shade pass as the URL asks (state.ts AppOptions.shade); the
-    // camera and photo modes switch it off while they run and restore this.
-    this.shadeView = opt.shade;
-    renderer.shaded = opt.shade;
+    // The lit shade pass when the style is the relief and the URL does not
+    // switch it off (state.ts AppOptions.shade); the camera and photo modes
+    // switch it off while they run and restore this.
+    this.shadeAllowed = opt.shade;
+    this.style = readStyle();
+    this.shadeView = opt.shade && this.style === 'relief';
+    renderer.shaded = this.shadeView;
     this.camera = renderer.camera;
-    this.quality = quality;
+    this.quality = profile.quality;
     this.view = view;
     this.source = new TerrariumSource({ url: opt.tiles, store: new TileStore() });
-    this.streamer = new ClipmapStreamer(this.source, clipmap, view.lon, view.lat);
+    this.source.decoded.limit = profile.tiles;
+    this.streamer = new ClipmapStreamer(this.source, profile.clipmap, view.lon, view.lat);
     this.streamer.onUpdate = () => this.onLevel();
     this.controls = new LookControls(canvas, this.camera);
     this.controls.onChange = () => this.viewChanged();
@@ -197,14 +201,10 @@ export class Viewer {
   static async create(
     canvas: HTMLCanvasElement, opt: AppOptions, view: ViewState, overlay: HTMLCanvasElement | null = null,
   ): Promise<Viewer> {
-    const phone = Math.min(innerWidth, innerHeight) < 600
-      || (navigator.hardwareConcurrency ?? 8) <= 4;
-    const quality = opt.quality === 'auto' ? (phone ? 'low' : 'high') : opt.quality;
-    const renderer = await GpuRenderer.create(canvas,
-      quality === 'low' ? QUALITY_LOW : QUALITY_HIGH, opt.backend);
-    renderer.maxPixelRatio = PIXEL_RATIO_CAP[quality];
-    return new Viewer(canvas, renderer, opt, view, quality,
-      quality === 'low' ? LOW_CLIPMAP : DEFAULT_CLIPMAP, overlay);
+    const profile = profileFor(deviceTier(thisDevice()), opt.quality);
+    const renderer = await GpuRenderer.create(canvas, profile.mesh, opt.backend);
+    renderer.maxPixelRatio = profile.pixelRatio;
+    return new Viewer(canvas, renderer, opt, view, profile, overlay);
   }
 
   start() {
@@ -387,7 +387,17 @@ export class Viewer {
   }
 
   /** Whether the view is drawn lit when no camera image or photo is behind it (AppOptions.shade). */
-  private readonly shadeView: boolean;
+  private shadeView: boolean;
+  private readonly shadeAllowed: boolean;
+  /** How the terrain is drawn (state.ts Style); kept on the device. */
+  style: Style;
+
+  setStyle(style: Style) {
+    this.style = style;
+    writeStyle(style);
+    this.shadeView = this.shadeAllowed && style === 'relief';
+    if (!this.feed.status.active && !this.photo) this.renderer.shaded = this.shadeView;
+  }
 
   private lastAspect = 0;
 
@@ -737,6 +747,7 @@ export class Viewer {
       decoder: this.source.decoderReport,
       backend: this.renderer.backend,
       quality: this.quality,
+      tier: this.profile.tier,
       surveys: this.surveys,
       diagnostics: this.renderer.diagnostics,
       sensors: {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
 import {
-  EYE_HEIGHT, OUTLINE, StandSource, ViewState, coarseFixNote, eyeHeightFromSlider, formatHash, PLACES,
+  EYE_HEIGHT, OUTLINE, STYLES, StandSource, Style, ViewState, coarseFixNote, eyeHeightFromSlider, formatHash, PLACES,
   readOptions, sliderFromEyeHeight, startView, trailing, viewFromHash, writeLastView, writeStandSource,
 } from './state';
 import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
@@ -45,6 +45,7 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(true);
   const [eyeHeight, setEyeHeight] = useState(EYE_HEIGHT.initial);
   const [outline, setOutline] = useState(OUTLINE.initial);
+  const [style, setStyle] = useState<Style>('relief');
   const [locating, setLocating] = useState(false);
   const [locNote, setLocNote] = useState<{ message: string; help: LocationHelp } | null>(null);
   const [positionSource, setPositionSource] = useState<StandSource>('url');
@@ -103,6 +104,7 @@ export function App() {
       };
       setEyeHeight(v.eyeHeight);
       setOutline(v.outline);
+      setStyle(v.style);
       v.start();
       if (start.locate) void locateHere(true);
       // Debug handle for the console and for headless checks.
@@ -278,6 +280,10 @@ export function App() {
     setEyeHeight(m);
     viewerRef.current?.setEyeHeight(m);
   };
+  const styleTo = (s: Style) => {
+    setStyle(s);
+    viewerRef.current?.setStyle(s);
+  };
   const outlineTo = (v: number) => {
     setOutline(v);
     viewerRef.current?.setOutline(v);
@@ -426,6 +432,18 @@ export function App() {
             <div className="mt-0.5 text-neutral-500">
               Über dem Boden am Standpunkt: 1,7 m = stehend; mehr, um über Wald und nahe Kuppen zu schauen.
             </div>
+            <div className="mt-2 flex items-center gap-3" role="radiogroup" aria-label="Darstellung">
+              <span className="shrink-0">Darstellung</span>
+              {STYLES.map((s) => (
+                <label key={s.id} className="flex items-center gap-1">
+                  <input type="radio" name="style" checked={style === s.id} onChange={() => styleTo(s.id)} />
+                  {s.name}
+                </label>
+              ))}
+            </div>
+            <div className="mt-0.5 text-neutral-500">
+              Relief: beleuchtetes Gelände. Linien: nur die Umrisse, wie ein gezeichnetes Panorama; schont schwache Geräte.
+            </div>
             <label className="mt-2 flex items-center gap-2">
               <span className="shrink-0 whitespace-nowrap tabular-nums">Konturen {Math.round(outline * 100)} %</span>
               <input type="range" min={0} max={100} step={1} value={Math.round(outline * 100)} aria-label="Konturen"
@@ -464,7 +482,7 @@ export function App() {
         {panel === 'check' && d && (
           <div className={`${PANEL} font-mono text-[11px]`} role="region" aria-label="Check">
             <div>{d.engine} · {d.adapter} · Build {__BUILD__}</div>
-            <div>Qualität {status?.quality} · Mesh {d.vertices.toLocaleString('de')} Vertices · Sektoren {d.sectorsDrawn}/32 · {d.size}</div>
+            <div>Gerät {status?.tier} · Qualität {status?.quality} · Mesh {d.vertices.toLocaleString('de')} Vertices · Sektoren {d.sectorsDrawn}/32 · {d.size}</div>
             <div>Atlas {d.atlas} · Level {d.levels} · Frame {d.frameMs.toFixed(1)} ms · Frames {d.framesDrawn}</div>
             <div>Pipelines: terrain {d.terrainReady ? 'ok' : '…'} · shade {d.shadeReady ? 'ok' : '…'} · composite {d.compositeReady ? 'ok' : '…'}</div>
             <div>Fehler: {d.frameErrors} Frames · Device lost {d.deviceLost}</div>

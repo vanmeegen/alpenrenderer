@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { DEFAULT_VIEW, EYE_HEIGHT, OUTLINE, PLACES, eyeHeightFromSlider, formatHash, hasStandpoint, readEyeHeight, readHash, readLastView, readOptions, readOutline, sliderFromEyeHeight, startView, writeEyeHeight, writeLastView, writeOutline,
-  coarseFixNote, readStandSource, trailing, viewFromHash, writeStandSource } from '../../src/app/state';
+  coarseFixNote, readStandSource, readStyle, trailing, viewFromHash, writeStandSource, writeStyle } from '../../src/app/state';
 
 describe('readHash', () => {
   test('empty hash is the default view', () => {
@@ -312,5 +312,30 @@ describe('trailing: the latest value, at most every so often, and always in the 
     write.cancel();
     c.run(1000);
     expect(seen).toEqual([]);
+  });
+});
+
+describe('the style of the picture', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); } } as unknown as Storage;
+  };
+
+  test('the relief by default; lines when chosen, and the device keeps the choice', () => {
+    const s = mem();
+    expect(readStyle(s)).toBe('relief');
+    writeStyle('lines', s);
+    expect(readStyle(s)).toBe('lines');
+    writeStyle('relief', s);
+    expect(readStyle(s)).toBe('relief');
+  });
+
+  test('something unknown in the store, or a store that throws, is the relief', () => {
+    const s = mem();
+    s.setItem('alp.style', 'neon');
+    expect(readStyle(s)).toBe('relief');
+    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(readStyle(broken)).toBe('relief');
+    expect(() => writeStyle('lines', broken)).not.toThrow();
   });
 });

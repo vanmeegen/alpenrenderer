@@ -477,6 +477,8 @@ test.describe('panels', () => {
     await ready(page);
     await page.getByRole('button', { name: 'Check' }).click();
     await expect(page.getByText('Pipelines: terrain ok · shade ok · composite ok')).toBeVisible();
+    // What the device was taken for, and the setting the URL asks for.
+    await expect(page.getByText(/Gerät (phone|tablet|desktop) · Qualität low/)).toBeVisible();
     await expect(page.getByText(/Fehler: 0 Frames/)).toBeVisible();
     // Which build is this? The commit, so a report from a phone can be matched to the code.
     await expect(page.getByText(/Build [0-9a-f]{7,}( |$)/)).toBeVisible();
@@ -610,6 +612,31 @@ test.describe('device pixels', () => {
     expect(size).toEqual({ width: W * 1.5, height: H * 1.5 });
     const expected = summitScreenY(s.eyeAltitude, 60) * H;
     expect(Math.abs((await skyRows(page, (W * 1.5) / 2)) / 1.5 - expected)).toBeLessThan(H * 0.02);
+  });
+});
+
+test.describe('the style of the picture', () => {
+  test('"Linien" in the settings draws the outline alone, the device keeps it, "Relief" brings the lit terrain back', async ({ page }) => {
+    // The line drawing is a style of its own (PeakFinder's look) and what a
+    // weak GPU falls back to: range pass and composite, no lit pass.
+    await page.goto(url({}, { shade: '1' }));   // a colour test: the lit shade pass is what it measures
+    await ready(page);
+    const sky = () => luminance(page, 100, 100, 40, 20);
+    expect(await sky()).toBeLessThan(235);                       // blue sky
+    await page.getByRole('button', { name: 'Einstellungen' }).click();
+    const style = page.getByRole('radiogroup', { name: 'Darstellung' });
+    await expect(style.getByRole('radio', { name: 'Relief' })).toBeChecked();
+    await style.getByRole('radio', { name: 'Linien' }).click();
+    await expect.poll(sky, { timeout: 30_000 }).toBeGreaterThan(250);   // white paper
+    expect(await page.evaluate(() => (window as any).alp.renderer.shaded)).toBe(false);
+    await page.reload();
+    await ready(page);
+    expect(await page.evaluate(() => (window as any).alp.renderer.shaded)).toBe(false);
+    expect(await sky()).toBeGreaterThan(250);
+    await page.getByRole('button', { name: 'Einstellungen' }).click();
+    await expect(page.getByRole('radio', { name: 'Linien' })).toBeChecked();
+    await page.getByRole('radio', { name: 'Relief' }).click();
+    await expect.poll(sky, { timeout: 60_000 }).toBeLessThan(235);
   });
 });
 

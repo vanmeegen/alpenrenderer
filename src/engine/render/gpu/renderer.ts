@@ -59,6 +59,7 @@ import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, WATER_COLOR, sunVector } from '../
 import { Band, RadialParams, radialParams } from '../mesh';
 import { RedrawGate, frameFingerprint } from '../redraw';
 import { OUTLINE } from '../outline';
+import { QUALITY_HIGH, QUALITY_LOW, QUALITY_MID, Quality } from '../quality';
 import { renderPixelRatio } from '../resolution';
 import {
   COMPOSITE_FRAGMENT_GL, COMPOSITE_VERTEX_GL, TERRAIN_FRAGMENT_GL,
@@ -85,20 +86,8 @@ const VIEW_MASK = 0x2;
  */
 export type Backend = 'webgpu' | 'webgl2';
 
-export interface Quality {
-  /** Rays around the full circle. 2048 gives ~0.18 deg of azimuth. */
-  azimuths: number;
-  /** Samples along each ray. */
-  rows: number;
-  /** Azimuth sectors; only those in front of the camera are drawn. */
-  sectors: number;
-}
-
-// The mesh is a wedge over the view (mesh.ts `wedge`), all of it drawn: the
-// columns are shared out over the field of view, the rows over the range at a
-// constant fraction (1/190 high, 1/120 low). 1.6 M and 0.58 M vertices.
-export const QUALITY_HIGH: Quality = { azimuths: 1024, rows: 1600, sectors: 32 };
-export const QUALITY_LOW: Quality = { azimuths: 640, rows: 900, sectors: 32 };
+export { QUALITY_HIGH, QUALITY_LOW, QUALITY_MID };
+export type { Quality };
 
 export interface RendererDiagnostics {
   webgpu: boolean;

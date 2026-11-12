@@ -305,6 +305,31 @@ export function writeOutline(v: number, storage = defaultStorage()) {
 }
 
 /**
+ * How the terrain is drawn. `relief`: lit and coloured, lines over it.
+ * `lines`: the outline alone on white, the look of a drawn panorama, and
+ * what is left when the lit pass is too much for a GPU.
+ */
+export type Style = 'relief' | 'lines';
+export const STYLES: { id: Style; name: string }[] = [
+  { id: 'relief', name: 'Relief' },
+  { id: 'lines', name: 'Linien' },
+];
+const STYLE_KEY = 'alp.style';
+
+export function readStyle(storage = defaultStorage()): Style {
+  try {
+    const v = storage?.getItem(STYLE_KEY);
+    return STYLES.some((s) => s.id === v) ? (v as Style) : 'relief';
+  } catch {
+    return 'relief';
+  }
+}
+
+export function writeStyle(style: Style, storage = defaultStorage()) {
+  try { storage?.setItem(STYLE_KEY, style); } catch { /* private mode: not remembered */ }
+}
+
+/**
  * The slider runs 0..100 and is logarithmic: the first metres matter (1.7 m
  * standing, 3 m on a rock, 10 m up a tower) and the last hundred hardly do.
  */
