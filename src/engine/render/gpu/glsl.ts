@@ -25,6 +25,7 @@
  */
 
 import { WATER_SHINE } from '../shading';
+import { OUTLINE_CONSTS, SHADE_CONSTS, glslConsts } from './consts';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -278,6 +279,8 @@ uniform float uDropScale;
 
 uniform sampler2D heights;
 
+${glslConsts(SHADE_CONSTS)}
+
 ${CLIPMAP_SAMPLER}
 
 /**
@@ -371,9 +374,12 @@ void main(void) {
   vec3 col = mix(valley, forest, smoothstep(700.0, 1100.0, h));
   col = mix(col, meadow, smoothstep(1500.0, 1900.0, h));
   col = mix(col, rock, smoothstep(1950.0, 2350.0, h));
-  col = mix(col, rock, smoothstep(0.35, 0.6, slope) * 0.85);
+  // Rock from 33° to 45°, weaker below the tree line; snow gone between 40° and 50° (shading.ts GROUND).
+  float rocky = smoothstep(ROCK_LOW, ROCK_HIGH, slope)
+              * mix(ROCK_BELOW, ROCK_ABOVE, smoothstep(ROCK_FROM, ROCK_TO, h));
+  col = mix(col, rock, rocky);
   float snowy = smoothstep(uSnowLine - 350.0, uSnowLine + 50.0, h)
-              * (1.0 - smoothstep(0.45, 0.7, slope));
+              * (1.0 - smoothstep(SNOW_LOW, SNOW_HIGH, slope));
   col = mix(col, snow, snowy);
   col = mix(col, uWaterColor, wet);
 
@@ -384,10 +390,13 @@ void main(void) {
   col = col * shade;
   if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 
-  // Aerial perspective: distant ridges recede into the horizon colour but
-  // never vanish into it, so the skyline stays a skyline.
-  float fog = 1.0 - exp(-r / uFogRange);
-  col = mix(col, uHorizonColor, fog * 0.88);
+  // Aerial perspective (shading.ts FOG): the air thins with altitude, so haze
+  // lies in the valleys; blue goes first, so the distance turns blue; and a
+  // floor is kept, so the farthest ridge is still a ridge.
+  float dz = (h - uEyeAlt) / FOG_H;
+  float air = abs(dz) < 1.0e-3 ? exp(-uEyeAlt / FOG_H) : (exp(-uEyeAlt / FOG_H) - exp(-h / FOG_H)) / dz;
+  vec3 through = max(vec3(FOG_FLOOR), exp(-(r / uFogRange) * air * FOG_BETA));
+  col = uHorizonColor + (col - uHorizonColor) * through;
 
   gl_FragColor = vec4(col, 1.0);
 }
@@ -410,9 +419,8 @@ precision highp sampler2D;
 varying vec2 vUV;
 
 uniform vec2  uTexel;
-uniform float uEdgeLow;
-uniform float uEdgeHigh;
-uniform float uEdgeWidth;
+uniform float uEdgeWidth;   // device pixels per CSS pixel
+uniform float uRim;         // strength of the haze rim behind ridges, 0 = off
 uniform float uWhiten;   // how far the camera image is washed towards white
 uniform float uDesat;
 uniform float uHasVideo;
@@ -433,28 +441,44 @@ uniform sampler2D videoTex;
 
 ${RANGE_CODEC}
 
-const float LOG_SKY = 13.5;   // "beyond the far plane", so the skyline is an edge too
+// The ink line and the haze rim: outline.ts, where the reasoning is.
+${glslConsts(OUTLINE_CONSTS)}
 
+/** Log range at a pixel; LOG_SKY ("beyond the far plane") where nothing is drawn, so the skyline is an edge too. */
 float logAt(vec2 uv) {
   vec4 p = texture2D(rangeTex, uv);
   if (p.a > 0.5) { return unpackLogRange(p); }
   return LOG_SKY;
 }
 
+/** One axis of the ring: the second difference less a share of the smaller step. */
+float sil(float a, float b) {
+  return smoothstep(SIL_LOW, SIL_HIGH, a + b - KAPPA * min(abs(a), abs(b)));
+}
+
+/** One neighbour of the rim: how far it counts as standing in front, given its range less the surface continued to it. */
+float inFront(float rho) {
+  return smoothstep(RIM_LOW, RIM_HIGH, -rho);
+}
+
 void main(void) {
   vec2 uv = vUV;
 
   // --- silhouette ------------------------------------------------------
-  vec2 e = uTexel * uEdgeWidth;
   float lc = logAt(uv);
-  float lL = logAt(uv - vec2(e.x, 0.0));
-  float lR = logAt(uv + vec2(e.x, 0.0));
-  float lD = logAt(uv - vec2(0.0, e.y));
-  float lU = logAt(uv + vec2(0.0, e.y));
-  // Second difference: an even slope cancels, one ridge in front of another
-  // does not. The outline therefore comes from the geometry, not the lighting.
-  float lap = abs(lL + lR - 2.0 * lc) + abs(lU + lD - 2.0 * lc);
-  float edge = smoothstep(uEdgeLow, uEdgeHigh, lap);
+  float nearby = 1.0 - smoothstep(LOG_NEAR, LOG_FAR, lc);
+  float wpx = uEdgeWidth * mix(W_FAR, W_NEAR, nearby);   // line width, device pixels
+  vec2 w = uTexel * wpx;
+  vec2 wd = w * RING_S;
+  float ax = logAt(uv + vec2(w.x, 0.0)) - lc;
+  float bx = logAt(uv - vec2(w.x, 0.0)) - lc;
+  float ay = logAt(uv + vec2(0.0, w.y)) - lc;
+  float by = logAt(uv - vec2(0.0, w.y)) - lc;
+  float ad = logAt(uv + wd) - lc;
+  float bd = logAt(uv - wd) - lc;
+  float ae = logAt(uv + vec2(wd.x, -wd.y)) - lc;
+  float be = logAt(uv - vec2(wd.x, -wd.y)) - lc;
+  float edge = clamp((sil(ax, bx) + sil(ay, by) + sil(ad, bd) + sil(ae, be)) * 0.5, 0.0, 1.0);
 
   if (uShade > 0.5) {
     // --- the shaded view ------------------------------------------------
@@ -467,8 +491,30 @@ void main(void) {
     // Below the horizon with nothing drawn (past the far plane): dim ground.
     sky = mix(sky, uHorizonColor * 0.72, smoothstep(0.0, -0.15, elev));
     vec3 ground = mix(sky, c.rgb, c.a);
-    vec3 ink = ground * (1.0 - 0.7 * uOutline);
-    ground = mix(ground, ink, edge * uOutline);
+
+    // The haze rim: lighter right behind a nearer ridge, so the layers come apart.
+    if (uRim > 0.0) {
+      vec2 g = vec2(abs(ax) < abs(bx) ? ax : -bx, abs(ay) < abs(by) ? ay : -by) / wpx;
+      float R = RIM_R * uEdgeWidth;
+      vec2 r = uTexel * R;
+      vec2 rd = r * RING_S;
+      float gd = (g.x + g.y) * RING_S;
+      float ge = (g.x - g.y) * RING_S;
+      float count = inFront(logAt(uv + vec2(r.x, 0.0)) - (lc + R * g.x))
+                  + inFront(logAt(uv - vec2(r.x, 0.0)) - (lc - R * g.x))
+                  + inFront(logAt(uv + vec2(0.0, r.y)) - (lc + R * g.y))
+                  + inFront(logAt(uv - vec2(0.0, r.y)) - (lc - R * g.y))
+                  + inFront(logAt(uv + rd) - (lc + R * gd))
+                  + inFront(logAt(uv - rd) - (lc - R * gd))
+                  + inFront(logAt(uv + vec2(rd.x, -rd.y)) - (lc + R * ge))
+                  + inFront(logAt(uv - vec2(rd.x, -rd.y)) - (lc - R * ge));
+      float rim = uRim * min(1.0, count / RIM_TAPS) * mix(RIM_SKY, 1.0, c.a);
+      ground = mix(ground, uHorizonColor, rim);
+    }
+
+    // The ink: mixed in, paling into the haze with distance, stronger close by.
+    vec3 ink = mix(INK, uHorizonColor, INK_HAZE * (1.0 - exp(-exp(lc) / INK_FOG)));
+    ground = mix(ground, ink, edge * uOutline * mix(STRENGTH_FAR, 1.0, nearby));
     gl_FragColor = vec4(ground, 1.0);
     return;
   }

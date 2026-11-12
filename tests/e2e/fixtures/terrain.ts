@@ -5,14 +5,23 @@
  *
  * The standpoint is on a flat plain at 1500 m. Due east, 5 km away, stands the
  * Testhorn, a cone 4000 m high; due north, 20 km away, a long east-west ridge
- * at 2600 m; everything else is the plain with a gentle deterministic ripple
- * so that shading has something to show.
+ * at 2600 m, and 2 km behind it, west of the meridian only, a second one at
+ * 2950 m; everything else is the plain with a gentle deterministic ripple so
+ * that shading has something to show.
  */
 
 export const STAND = { lon: 10.0, lat: 47.0 };
 export const PLAIN_M = 1500;
 export const TESTHORN = { lon: 10.0 + 5000 / (111320 * Math.cos(47 * Math.PI / 180)), lat: 47.0, summit: 4000, radius: 2500 };
 export const RIDGE = { lat: 47.0 + 20000 / 111320, height: 2600, halfWidth: 800 };
+/**
+ * The Hintergrat: a second ridge 22 km north, 10 % farther than the first
+ * and 350 m higher, so it looks over it; a staffing of ridges as the far
+ * Alps show them. It runs from 7 km to 1.5 km west of the standpoint's
+ * meridian only (`west`, `east`: metres east of it), so the view due north
+ * and the Gratspitze are as they were.
+ */
+export const BACK_RIDGE = { lat: 47.0 + 22000 / 111320, height: 2950, halfWidth: 900, west: -7000, east: -1500, range: 22000 };
 
 const M_PER_DEG_LAT = 111320;
 const M_PER_DEG_LON = 111320 * Math.cos(STAND.lat * Math.PI / 180);
@@ -95,7 +104,12 @@ export function heightAt(lon: number, lat: number): number {
   const rT = Math.hypot(dxT, dyT);
   const cone = Math.max(0, 1 - rT / TESTHORN.radius) * (TESTHORN.summit - PLAIN_M);
   const dyR = Math.abs(lat - RIDGE.lat) * M_PER_DEG_LAT;
-  const ridge = Math.max(0, 1 - dyR / RIDGE.halfWidth) * (RIDGE.height - PLAIN_M);
+  let ridge = Math.max(0, 1 - dyR / RIDGE.halfWidth) * (RIDGE.height - PLAIN_M);
+  const xB = (lon - STAND.lon) * M_PER_DEG_LON;
+  if (xB >= BACK_RIDGE.west && xB <= BACK_RIDGE.east) {
+    const dyB = Math.abs(lat - BACK_RIDGE.lat) * M_PER_DEG_LAT;
+    ridge = Math.max(ridge, Math.max(0, 1 - dyB / BACK_RIDGE.halfWidth) * (BACK_RIDGE.height - PLAIN_M));
+  }
   const ripple = 8 * Math.sin((lon - STAND.lon) * M_PER_DEG_LON / 400) * Math.cos((lat - STAND.lat) * M_PER_DEG_LAT / 400);
   return PLAIN_M + Math.max(cone, ridge, shoulder(lon, lat)) + ripple;
 }
@@ -159,16 +173,17 @@ export function heightAlong(bearingDeg: number, range: number): number {
  * apparent elevation along the sightline at that column's bearing (a DEM
  * march with the renderer's curvature and refraction), projected with the
  * camera's perspective. This is the reference the rendered range buffer is
- * held against.
+ * held against. `maxRange` ends the march early: the crest of whatever
+ * stands within that range, as if nothing were behind it.
  */
-export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, width: number, height: number, pitchDeg = 0): number {
+export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, width: number, height: number, pitchDeg = 0, maxRange = 275000): number {
   const tanV = Math.tan((fov * Math.PI) / 360);
   const tanH = tanV * (width / height);
   const ndcX = (x + 0.5) / width * 2 - 1;
   const b = Math.atan(ndcX * tanH);                       // azimuth offset of the column
   const bearing = yawDeg + (b * 180) / Math.PI;
   let maxTan = -Infinity;
-  const steps = 6000, r0 = 1, r1 = 275000;
+  const steps = 6000, r0 = 1, r1 = maxRange;
   const k = Math.log(r1 / r0) / (steps - 1);
   for (let i = 0; i < steps; i++) {
     const r = r0 * Math.exp(i * k);

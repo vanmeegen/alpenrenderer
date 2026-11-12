@@ -23,6 +23,7 @@ import { TileStore } from '../engine/sources/tilestore';
 import {
   Backend, GpuRenderer, QUALITY_HIGH, QUALITY_LOW, RendererDiagnostics,
 } from '../engine/render/gpu/renderer';
+import { PIXEL_RATIO_CAP } from '../engine/render/resolution';
 import { CameraFeed, DEFAULT_LENS_FOV, captureFilename, composeCapture, coverFovY, saveImage, SaveOutcome } from './cameraFeed';
 import { LookControls } from './controls';
 import { ExifInfo, fovFromExif, readExif } from './exif';
@@ -187,6 +188,7 @@ export class Viewer {
     const quality = opt.quality === 'auto' ? (phone ? 'low' : 'high') : opt.quality;
     const renderer = await GpuRenderer.create(canvas,
       quality === 'low' ? QUALITY_LOW : QUALITY_HIGH, opt.backend);
+    renderer.maxPixelRatio = PIXEL_RATIO_CAP[quality];
     return new Viewer(canvas, renderer, opt, view, quality,
       quality === 'low' ? LOW_CLIPMAP : DEFAULT_CLIPMAP, overlay);
   }

@@ -25,6 +25,7 @@
  */
 
 import { WATER_SHINE } from '../shading';
+import { OUTLINE_CONSTS, SHADE_CONSTS, wgslConsts } from './consts';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -51,7 +52,7 @@ export const SHADE_UNIFORMS = [
 ] as const;
 
 export const COMPOSITE_UNIFORMS = [
-  'uTexel', 'uEdgeLow', 'uEdgeHigh', 'uEdgeWidth', 'uWhiten',
+  'uTexel', 'uEdgeWidth', 'uRim', 'uWhiten',
   'uDesat', 'uHasVideo', 'uVideoScale', 'uLineDark',
   'uShade', 'uOutline', 'uCamFwd', 'uCamRight', 'uCamUp', 'uTanHalf',
   'uSkyTop', 'uHorizonColor',
@@ -303,6 +304,8 @@ uniform uDropScale : f32;
 var heightsSampler : sampler;
 var heights        : texture_2d<f32>;
 
+${wgslConsts(SHADE_CONSTS)}
+
 ${CLIPMAP_SAMPLER}
 
 /**
@@ -388,9 +391,12 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   var col = mix(valley, forest, smoothstep(700.0, 1100.0, h));
   col = mix(col, meadow, smoothstep(1500.0, 1900.0, h));
   col = mix(col, rock, smoothstep(1950.0, 2350.0, h));
-  col = mix(col, rock, smoothstep(0.35, 0.6, slope) * 0.85);
+  // Rock from 33° to 45°, weaker below the tree line; snow gone between 40° and 50° (shading.ts GROUND).
+  let rocky = smoothstep(ROCK_LOW, ROCK_HIGH, slope)
+            * mix(ROCK_BELOW, ROCK_ABOVE, smoothstep(ROCK_FROM, ROCK_TO, h));
+  col = mix(col, rock, rocky);
   let snowy = smoothstep(uniforms.uSnowLine - 350.0, uniforms.uSnowLine + 50.0, h)
-            * (1.0 - smoothstep(0.45, 0.7, slope));
+            * (1.0 - smoothstep(SNOW_LOW, SNOW_HIGH, slope));
   col = mix(col, snow, snowy);
   col = mix(col, uniforms.uWaterColor, wet);
 
@@ -401,10 +407,14 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   col = col * shade;
   if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 
-  // Aerial perspective: distant ridges recede into the horizon colour but
-  // never vanish into it, so the skyline stays a skyline.
-  let fog = 1.0 - exp(-r / uniforms.uFogRange);
-  col = mix(col, uniforms.uHorizonColor, fog * 0.88);
+  // Aerial perspective (shading.ts FOG): the air thins with altitude, so haze
+  // lies in the valleys; blue goes first, so the distance turns blue; and a
+  // floor is kept, so the farthest ridge is still a ridge.
+  let dz = (h - uniforms.uEyeAlt) / FOG_H;
+  var air = exp(-uniforms.uEyeAlt / FOG_H);
+  if (abs(dz) >= 1.0e-3) { air = (exp(-uniforms.uEyeAlt / FOG_H) - exp(-h / FOG_H)) / dz; }
+  let through = max(vec3<f32>(FOG_FLOOR), exp(-(r / uniforms.uFogRange) * air * FOG_BETA));
+  col = uniforms.uHorizonColor + (col - uniforms.uHorizonColor) * through;
 
   fragmentOutputs.color = vec4<f32>(col, 1.0);
 }
@@ -426,9 +436,8 @@ export const COMPOSITE_FRAGMENT = /* wgsl */ `
 varying vUV : vec2<f32>;
 
 uniform uTexel     : vec2<f32>;
-uniform uEdgeLow   : f32;
-uniform uEdgeHigh  : f32;
-uniform uEdgeWidth : f32;
+uniform uEdgeWidth : f32;   // device pixels per CSS pixel
+uniform uRim       : f32;   // strength of the haze rim behind ridges, 0 = off
 uniform uWhiten    : f32;   // how far the camera image is washed towards white
 uniform uDesat     : f32;
 uniform uHasVideo  : f32;
@@ -452,12 +461,24 @@ var videoTex        : texture_2d<f32>;
 
 ${RANGE_CODEC}
 
-const LOG_SKY : f32 = 13.5;   // "beyond the far plane", so the skyline is an edge too
+// The ink line and the haze rim: outline.ts, where the reasoning is.
+${wgslConsts(OUTLINE_CONSTS)}
 
+/** Log range at a pixel; LOG_SKY ("beyond the far plane") where nothing is drawn, so the skyline is an edge too. */
 fn logAt(uv : vec2<f32>) -> f32 {
-  let p = textureSample(rangeTex, rangeTexSampler, uv);
+  let p = textureSampleLevel(rangeTex, rangeTexSampler, uv, 0.0);
   if (p.a > 0.5) { return unpackLogRange(p); }
   return LOG_SKY;
+}
+
+/** One axis of the ring: the second difference less a share of the smaller step. */
+fn sil(a : f32, b : f32) -> f32 {
+  return smoothstep(SIL_LOW, SIL_HIGH, a + b - KAPPA * min(abs(a), abs(b)));
+}
+
+/** One neighbour of the rim: how far it counts as standing in front, given its range less the surface continued to it. */
+fn inFront(rho : f32) -> f32 {
+  return smoothstep(RIM_LOW, RIM_HIGH, -rho);
 }
 
 @fragment
@@ -465,16 +486,20 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   let uv = fragmentInputs.vUV;
 
   // --- silhouette ------------------------------------------------------
-  let e = uniforms.uTexel * uniforms.uEdgeWidth;
   let lc = logAt(uv);
-  let lL = logAt(uv - vec2<f32>(e.x, 0.0));
-  let lR = logAt(uv + vec2<f32>(e.x, 0.0));
-  let lD = logAt(uv - vec2<f32>(0.0, e.y));
-  let lU = logAt(uv + vec2<f32>(0.0, e.y));
-  // Second difference: an even slope cancels, one ridge in front of another
-  // does not. The outline therefore comes from the geometry, not the lighting.
-  let lap = abs(lL + lR - 2.0 * lc) + abs(lU + lD - 2.0 * lc);
-  let edge = smoothstep(uniforms.uEdgeLow, uniforms.uEdgeHigh, lap);
+  let nearby = 1.0 - smoothstep(LOG_NEAR, LOG_FAR, lc);
+  let wpx = uniforms.uEdgeWidth * mix(W_FAR, W_NEAR, nearby);   // line width, device pixels
+  let w = uniforms.uTexel * wpx;
+  let wd = w * RING_S;
+  let ax = logAt(uv + vec2<f32>(w.x, 0.0)) - lc;
+  let bx = logAt(uv - vec2<f32>(w.x, 0.0)) - lc;
+  let ay = logAt(uv + vec2<f32>(0.0, w.y)) - lc;
+  let by = logAt(uv - vec2<f32>(0.0, w.y)) - lc;
+  let ad = logAt(uv + wd) - lc;
+  let bd = logAt(uv - wd) - lc;
+  let ae = logAt(uv + vec2<f32>(wd.x, -wd.y)) - lc;
+  let be = logAt(uv - vec2<f32>(wd.x, -wd.y)) - lc;
+  let edge = clamp((sil(ax, bx) + sil(ay, by) + sil(ad, bd) + sil(ae, be)) * 0.5, 0.0, 1.0);
 
   if (uniforms.uShade > 0.5) {
     // --- the shaded view ------------------------------------------------
@@ -488,8 +513,33 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
     // Below the horizon with nothing drawn (past the far plane): dim ground.
     sky = mix(sky, uniforms.uHorizonColor * 0.72, smoothstep(0.0, -0.15, elev));
     var ground = mix(sky, c.rgb, c.a);
-    let ink = ground * (1.0 - 0.7 * uniforms.uOutline);
-    ground = mix(ground, ink, edge * uniforms.uOutline);
+
+    // The haze rim: lighter right behind a nearer ridge, so the layers come apart.
+    if (uniforms.uRim > 0.0) {
+      var g = vec2<f32>(-bx, -by);
+      if (abs(ax) < abs(bx)) { g.x = ax; }
+      if (abs(ay) < abs(by)) { g.y = ay; }
+      g = g / wpx;
+      let R = RIM_R * uniforms.uEdgeWidth;
+      let r = uniforms.uTexel * R;
+      let rd = r * RING_S;
+      let gd = (g.x + g.y) * RING_S;
+      let ge = (g.x - g.y) * RING_S;
+      let count = inFront(logAt(uv + vec2<f32>(r.x, 0.0)) - (lc + R * g.x))
+                + inFront(logAt(uv - vec2<f32>(r.x, 0.0)) - (lc - R * g.x))
+                + inFront(logAt(uv + vec2<f32>(0.0, r.y)) - (lc + R * g.y))
+                + inFront(logAt(uv - vec2<f32>(0.0, r.y)) - (lc - R * g.y))
+                + inFront(logAt(uv + rd) - (lc + R * gd))
+                + inFront(logAt(uv - rd) - (lc - R * gd))
+                + inFront(logAt(uv + vec2<f32>(rd.x, -rd.y)) - (lc + R * ge))
+                + inFront(logAt(uv - vec2<f32>(rd.x, -rd.y)) - (lc - R * ge));
+      let rim = uniforms.uRim * min(1.0, count / RIM_TAPS) * mix(RIM_SKY, 1.0, c.a);
+      ground = mix(ground, uniforms.uHorizonColor, rim);
+    }
+
+    // The ink: mixed in, paling into the haze with distance, stronger close by.
+    let ink = mix(INK, uniforms.uHorizonColor, INK_HAZE * (1.0 - exp(-exp(lc) / INK_FOG)));
+    ground = mix(ground, ink, edge * uniforms.uOutline * mix(STRENGTH_FAR, 1.0, nearby));
     fragmentOutputs.color = vec4<f32>(ground, 1.0);
     return fragmentOutputs;
   }

@@ -3,15 +3,14 @@
  * pixel tests share.
  */
 import { describe, expect, test } from 'bun:test';
-import { FOG_RANGE, HORIZON_COLOR, SUN, WATER_COLOR, luminance, shadeFactor, sunAzimuth, sunVector, terrainColor } from '../../src/engine/render/shading';
+import { FOG, HORIZON_COLOR, SUN, WATER_COLOR, haze, luminance, shadeFactor, sunAzimuth, sunVector, terrainColor, transmittance } from '../../src/engine/render/shading';
 
 describe('terrainColor', () => {
   test('water takes the lake colour under the same sun and the same haze as the ground', () => {
     const up: [number, number, number] = [0, 0, 1];
     const range = 2000;
     const shade = shadeFactor(sunVector()[2]);
-    const fog = (1 - Math.exp(-range / FOG_RANGE)) * 0.88;
-    const want = WATER_COLOR.map((c, i) => c * shade + (HORIZON_COLOR[i] - c * shade) * fog);
+    const want = haze(WATER_COLOR.map((c) => c * shade) as [number, number, number], range, 1500, 1500);
     const got = terrainColor(1500, up, range, true);
     for (let i = 0; i < 3; i++) expect(got[i]).toBeCloseTo(want[i], 6);
     // Blue, and clearly not the meadow the same flat would be.
@@ -56,7 +55,7 @@ describe('water shine: a little sky reflection and a sun glint, nothing that cos
   });
 
   test('dry ground ignores the view', () => {
-    expect(terrainColor(1500, up, 2000, false, look(SUN.azimuth, SUN.elevation))).toEqual(terrainColor(1500, up, 2000));
+    expect(terrainColor(1500, up, 2000, false, look(sunAzimuth(0), SUN.elevation))).toEqual(terrainColor(1500, up, 2000));
   });
 
   test('the light stands behind the viewer\'s left shoulder, 45° up, wherever they look (Imhof\'s convention, turned with the view)', () => {
@@ -78,3 +77,70 @@ describe('water shine: a little sky reflection and a sun glint, nothing that cos
     expect(luminance(terrainColor(2500, sw, 5000, false, undefined, 0))).toBeGreaterThan(luminance(terrainColor(2500, nw, 5000, false, undefined, 0)));
   });
 });
+
+describe('aerial perspective: haze that lies in the valleys and turns the distance blue', () => {
+  const up: [number, number, number] = [0, 0, 1];
+  /** How far a colour has gone towards the haze, per channel, 0..1. */
+  const towards = (lit: [number, number, number], seen: [number, number, number]) =>
+    lit.map((c, i) => (seen[i] - c) / (HORIZON_COLOR[i] - c));
+
+  test('at the same range a valley floor is hazier than a summit: the air is thicker low down', () => {
+    const eye = 2000, range = 30000;
+    const low = transmittance(range, 600, eye), high = transmittance(range, 3500, eye);
+    for (let i = 0; i < 3; i++) expect(low[i]).toBeLessThan(high[i]);
+    // Looking along at one's own height, the air is that of the height: e^(-h/H) of sea level's.
+    const level = transmittance(range, eye, eye);
+    expect(level[0]).toBeCloseTo(Math.exp(-(range / FOG.range) * Math.exp(-eye / FOG.height)), 6);
+  });
+
+  test('the distance turns blue: blue goes to the haze first, red last', () => {
+    const lit: [number, number, number] = [0.3, 0.3, 0.3];
+    const t = towards(lit, haze(lit, 25000, 2000, 2000));
+    expect(t[2]).toBeGreaterThan(t[1]);
+    expect(t[1]).toBeGreaterThan(t[0]);
+    expect(t[2] - t[0]).toBeGreaterThan(0.05);
+  });
+
+  test('nothing vanishes into the haze: far ridges keep a floor of their own colour, so the skyline stays a skyline', () => {
+    const t = transmittance(400000, 1000, 1000);
+    for (const c of t) expect(c).toBe(FOG.floor);
+    const near = transmittance(100, 1500, 1500);
+    for (const c of near) expect(c).toBeGreaterThan(0.99);
+  });
+
+  test('terrainColor takes the eye\'s altitude for the haze; without one the point\'s own', () => {
+    const a = terrainColor(1500, up, 20000, false, undefined, 0, 3000);
+    const b = terrainColor(1500, up, 20000, false, undefined, 0, 600);
+    expect(luminance(a)).toBeLessThan(luminance(b));        // from high up there is less air on the way
+    expect(terrainColor(1500, up, 20000)).toEqual(terrainColor(1500, up, 20000, false, undefined, 0, 1500));
+  });
+});
+
+describe('what the ground is made of, from height and slope alone', () => {
+  const DEG = Math.PI / 180;
+  /** Unit normal of a face tilted `deg` from the horizontal, facing the light when looking north. */
+  const face = (deg: number): [number, number, number] => {
+    const s = sunVector(0), hz = Math.hypot(s[0], s[1]);
+    return [(s[0] / hz) * Math.sin(deg * DEG), (s[1] / hz) * Math.sin(deg * DEG), Math.cos(deg * DEG)];
+  };
+  const greenness = (c: [number, number, number]) => c[1] - Math.max(c[0], c[2]);
+  const spread = (c: [number, number, number]) => Math.max(...c) - Math.min(...c);
+
+  test('a 45° face at 2000 m is rock, not meadow; a 20° slope there is meadow', () => {
+    // The Haidachstellwand read as a green hill: rock only began at 49° and was full at 66°.
+    const wall = terrainColor(2000, face(45), 100);
+    const slope = terrainColor(2000, face(20), 100);
+    expect(greenness(wall)).toBeLessThan(0);
+    expect(greenness(slope)).toBeGreaterThan(0.01);
+  });
+
+  test('a 55° face at 3500 m is rock, not snow; a 25° slope there is snow', () => {
+    // The Matterhorn read as all white: snow only left faces steeper than 63–73°.
+    const wall = terrainColor(3500, face(55), 100);
+    const field = terrainColor(3500, face(25), 100);
+    expect(luminance(field)).toBeGreaterThan(0.8);
+    expect(luminance(wall)).toBeLessThan(0.62);
+    expect(spread(wall)).toBeLessThan(0.08);
+  });
+});
+

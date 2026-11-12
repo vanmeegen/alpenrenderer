@@ -3,8 +3,9 @@
  * here is derived from tests/e2e/fixtures/terrain.ts, not read off a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { EYE_HEIGHT, FLANK, PLAIN_M, STAND, heightAt, skylineRow, summitScreenY, terrainHit } from './fixtures/terrain';
-import { luminance as lumOf, terrainColor } from '../../src/engine/render/shading';
+import { BACK_RIDGE, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, heightAt, skylineRow, summitScreenY, terrainHit } from './fixtures/terrain';
+import { HORIZON_COLOR, luminance as lumOf, terrainColor } from '../../src/engine/render/shading';
+import { LogField, OUTLINE, rimAt } from '../../src/engine/render/outline';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
 const R_EFF_M = 6371008.8 / (1 - 0.13);
@@ -62,6 +63,43 @@ async function luminance(page: Page, x0: number, y0: number, w: number, h: numbe
     }
     return sum / (w * h);
   }, [x0, y0, w, h]);
+}
+
+/** Luminance 0..1 of every row of the composited image in one column, top-down, averaged over `halfWidth` columns each side. */
+async function columnLuminance(page: Page, x: number, halfWidth = 1): Promise<number[]> {
+  return page.evaluate(async ([x, hw]) => {
+    const c = await (window as any).alp.renderer.capture();
+    const out: number[] = [];
+    for (let y = 0; y < c.height; y++) {
+      let sum = 0;
+      for (let xx = x - hw; xx <= x + hw; xx++) {
+        const o = (y * c.width + xx) * 4;
+        sum += 0.2126 * c.pixels[o] + 0.7152 * c.pixels[o + 1] + 0.0722 * c.pixels[o + 2];
+      }
+      out.push(sum / (2 * hw + 1) / 255);
+    }
+    return out;
+  }, [x, halfWidth]);
+}
+
+/**
+ * The range buffer as the composite pass reads it: the log of the ground
+ * range per pixel, top-down, OUTLINE.logSky where nothing is drawn (the
+ * packing of the range pass: 24 bits over ln 8 m .. ln 400 km).
+ */
+async function logField(page: Page): Promise<LogField> {
+  const r = await page.evaluate(async () => {
+    const b = await (window as any).alp.renderer.readRange();
+    return { width: b.width as number, height: b.height as number, pixels: Array.from(b.pixels as Uint8Array) };
+  });
+  const LOG_MIN = Math.log(8), LOG_SPAN = Math.log(4e5) - Math.log(8);
+  return (x, y) => {
+    const px = Math.min(r.width - 1, Math.max(0, Math.floor(x)));
+    const py = Math.min(r.height - 1, Math.max(0, Math.floor(y)));
+    const o = ((r.height - 1 - py) * r.width + px) * 4;          // render targets read back bottom-up
+    if (r.pixels[o + 3] < 128) return OUTLINE.logSky;
+    return LOG_MIN + ((r.pixels[o] * 65536 + r.pixels[o + 1] * 256 + r.pixels[o + 2]) / 16777215) * LOG_SPAN;
+  };
 }
 
 const hashOf = (page: Page) => page.evaluate(() => location.hash);
@@ -353,7 +391,7 @@ test.describe('appearance', () => {
     const probe = async (x: number, y: number) => {
       const hit = terrainHit(90, x, y, s.eyeAltitude, 60, W, H)!;
       expect(hit.range).toBeGreaterThan(2500);            // on the cone, not the plain
-      const expected = lumOf(terrainColor(hit.h, hit.normal, hit.range, false, undefined, 90));
+      const expected = lumOf(terrainColor(hit.h, hit.normal, hit.range, false, undefined, 90, s.eyeAltitude));
       const measured = (await luminance(page, x - 6, y - 6, 12, 12)) / 255;
       return { expected, measured };
     };
@@ -385,6 +423,84 @@ test.describe('appearance', () => {
       maxDiffPixelRatio: 0.05,
       timeout: 150_000,
     });
+  });
+});
+
+test.describe('ink lines and haze', () => {
+  test('two ridges 10 % apart are separated by one line, drawn on the near ridge', async ({ page }) => {
+    // The Hintergrat looks over the ridge in front of it from 22 km against
+    // 20: a staffing as the far Alps show it. The old detector (a Laplacian
+    // that wanted a 38 % jump for a full line) left 13 % of a line there, on
+    // both ridges; now the near ridge carries one full line and the far one none.
+    const YAW = 350, FOV = 10;
+    await page.goto(url({ yaw: YAW, fov: FOV }));
+    const s = await ready(page);
+    const x = W / 2;
+    const back = skylineRow(YAW, x, s.eyeAltitude, FOV, W, H);                              // the Hintergrat's crest: the skyline
+    const front = skylineRow(YAW, x, s.eyeAltitude, FOV, W, H, 0, (RIDGE_RANGE + BACK_RIDGE.range) / 2);   // the near ridge's crest
+    expect(front - back).toBeGreaterThan(25);                                              // the far ridge shows a good band
+    const lum = await columnLuminance(page, x);
+    // The line: the darkest row near the computed crest.
+    let line = Math.round(front) - 8;
+    for (let y = line; y <= Math.round(front) + 8; y++) if (lum[y] < lum[line]) line = y;
+    expect(lum[line]).toBeLessThan(0.2);                                                    // full ink (0.04 over white)
+    // On the far ridge right above it: white. No second line, no halo.
+    for (let y = line - 10; y <= line - 3; y++) expect(lum[y], `row ${y}, above the line`).toBeGreaterThan(0.9);
+    // Between the skyline and the near ridge's face the line is the only ink, one or two pixels of it.
+    const inked = lum.slice(Math.round(back) + 8, line + 20).filter((v) => v < 0.5).length;
+    expect(inked).toBeGreaterThanOrEqual(1);
+    expect(inked).toBeLessThanOrEqual(2);
+    // The skyline itself is a line too, on the Hintergrat's crest.
+    expect(Math.min(...lum.slice(Math.round(back) - 8, Math.round(back) + 9))).toBeLessThan(0.2);
+  });
+
+  test('the ground right behind a nearer mountain is lightened towards the haze, as the formula says; away from it, not', async ({ page }) => {
+    // From 3000 m the Testhorn's flank stands 5 km away in front of the plain
+    // 15 km out. The plain right next to the silhouette gets the haze rim
+    // (outline.ts, computed here from the frame's own range buffer); 40 px
+    // away it is the shading formula's colour and nothing else.
+    await page.goto(url({ alt: 3000 }, { shade: '1' }));   // a colour test: the lit shade pass is what it measures
+    const s = await ready(page);
+    const L = await logField(page);
+    const y = 352;                                         // 5.7° down: the plain 15 km out
+    // The silhouette in this row, from the left: where the range falls from the plain's to the cone's.
+    let edge = 100;
+    while (edge < W / 2 && L(edge + 0.5, y + 0.5) - L(edge - 0.5, y + 0.5) > -0.3) edge++;
+    expect(edge).toBeGreaterThan(200);
+    expect(edge).toBeLessThan(W / 2 - 50);
+    const probe = async (x: number) => {
+      const hit = terrainHit(90, x, y, s.eyeAltitude, 60, W, H)!;
+      expect(hit.range).toBeGreaterThan(9000);            // on the plain behind the cone
+      const lit = terrainColor(hit.h, hit.normal, hit.range, false, undefined, 90, s.eyeAltitude);
+      const rim = rimAt(L, x + 0.5, y + 0.5);
+      const expected = lumOf(lit.map((c, i) => c + (HORIZON_COLOR[i] - c) * rim) as [number, number, number]);
+      const measured = (await luminance(page, x, y - 2, 1, 5)) / 255;
+      return { rim, expected, measured };
+    };
+    const near = await probe(edge - 3), far = await probe(edge - 40);
+    expect(far.rim).toBe(0);
+    expect(near.rim).toBeGreaterThan(0.2);
+    expect(Math.abs(far.measured - far.expected)).toBeLessThan(0.02);
+    expect(Math.abs(near.measured - near.expected)).toBeLessThan(0.03);
+    expect(near.measured - far.measured).toBeGreaterThan(0.05);
+  });
+});
+
+test.describe('device pixels', () => {
+  test.use({ deviceScaleFactor: 3 });
+
+  test('a screen with a pixel ratio of 3 is rendered at 1.5: a quarter of the fragments, the summit on the same spot', async ({ page }) => {
+    // Three passes per pixel: a phone at its full ratio of 3 pays nine
+    // fragments per CSS pixel. Low quality caps the ratio at 1.5.
+    await page.goto(url());
+    const s = await ready(page);
+    const size = await page.evaluate(async () => {
+      const r = await (window as any).alp.renderer.readRange();
+      return { width: r.width as number, height: r.height as number };
+    });
+    expect(size).toEqual({ width: W * 1.5, height: H * 1.5 });
+    const expected = summitScreenY(s.eyeAltitude, 60) * H;
+    expect(Math.abs((await skyRows(page, (W * 1.5) / 2)) / 1.5 - expected)).toBeLessThan(H * 0.02);
   });
 });
 

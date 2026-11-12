@@ -140,6 +140,46 @@ describe('shader dialect parity', () => {
     }
   });
 
+  test('both dialects draw the ink line and the haze rim with the constants from outline.ts', async () => {
+    // One operator, three places: outline.ts (the mirror the unit tests
+    // compute with) and the composite pass in each dialect.
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { OUTLINE } = await import('../../src/engine/render/outline');
+    const { shaderFloat } = await import('../../src/engine/render/gpu/consts');
+    expect(S.COMPOSITE_UNIFORMS).toContain('uRim');
+    expect(S.COMPOSITE_UNIFORMS).not.toContain('uEdgeLow');
+    for (const src of [GL.COMPOSITE_FRAGMENT_GL, S.COMPOSITE_FRAGMENT]) {
+      for (const [name, value] of [
+        ['SIL_LOW', OUTLINE.silLow], ['SIL_HIGH', OUTLINE.silHigh], ['KAPPA', OUTLINE.kappa],
+        ['W_FAR', OUTLINE.widthFar], ['W_NEAR', OUTLINE.widthNear], ['LOG_NEAR', OUTLINE.logNear], ['LOG_FAR', OUTLINE.logFar],
+        ['INK_HAZE', OUTLINE.inkHaze], ['INK_FOG', OUTLINE.inkFog], ['STRENGTH_FAR', OUTLINE.strengthFar],
+        ['RIM_R', OUTLINE.rimRadius], ['RIM_LOW', OUTLINE.rimLow], ['RIM_HIGH', OUTLINE.rimHigh], ['RIM_TAPS', OUTLINE.rimTaps], ['RIM_SKY', OUTLINE.rimSky],
+        ['LOG_SKY', OUTLINE.logSky],
+      ] as [string, number][]) {
+        expect(src).toMatch(new RegExp(`const (float )?${name}\\b[^;]*= ${shaderFloat(value).replace('.', '\\.')};`));
+      }
+      expect(src).toContain(OUTLINE.ink.map(shaderFloat).join(', '));
+      expect(src).toMatch(/fn sil\(|float sil\(/);
+    }
+  });
+
+  test('both dialects haze and colour the ground with the constants from shading.ts', async () => {
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { FOG, GROUND } = await import('../../src/engine/render/shading');
+    const { shaderFloat } = await import('../../src/engine/render/gpu/consts');
+    for (const src of [GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_SHADE_FRAGMENT]) {
+      for (const [name, value] of [
+        ['FOG_H', FOG.height], ['FOG_FLOOR', FOG.floor],
+        ['ROCK_LOW', GROUND.rockLow], ['ROCK_HIGH', GROUND.rockHigh], ['ROCK_BELOW', GROUND.rockBelow], ['ROCK_ABOVE', GROUND.rockAbove],
+        ['ROCK_FROM', GROUND.rockFrom], ['ROCK_TO', GROUND.rockTo], ['SNOW_LOW', GROUND.snowLow], ['SNOW_HIGH', GROUND.snowHigh],
+      ] as [string, number][]) {
+        expect(src).toMatch(new RegExp(`const (float )?${name}\\b[^;]*= ${shaderFloat(value).replace('.', '\\.')};`));
+      }
+      expect(src).toContain(FOG.beta.map(shaderFloat).join(', '));
+      expect(src).toContain('uEyeAlt');
+    }
+  });
+
   test('the GLSL file declares the same uniform names as the WGSL lists', async () => {
     const GL = await import('../../src/engine/render/gpu/glsl');
     const declared = (src: string) => new Set([...src.matchAll(/uniform\s+\w+\s+(\w+)/g)].map((m) => m[1]));
@@ -149,5 +189,25 @@ describe('shader dialect parity', () => {
     for (const u of S.SHADE_UNIFORMS) expect(shade.has(u)).toBe(true);
     const composite = declared(GL.COMPOSITE_FRAGMENT_GL);
     for (const u of S.COMPOSITE_UNIFORMS) expect(composite.has(u)).toBe(true);
+  });
+});
+
+describe('shader text Babylon can take apart', () => {
+  test('no comment behind code holds a semicolon: the preprocessor cuts declarations there', async () => {
+    // "uniform float uRim;   // …; 0 = off" compiled to a lone "0 = off" and a black screen (WebGL2).
+    const G = await import('../../src/engine/render/gpu/glsl');
+    const sources: Record<string, string> = {
+      ...Object.fromEntries(Object.entries(G).filter(([, v]) => typeof v === 'string')) as Record<string, string>,
+      ...Object.fromEntries(Object.entries(S).filter(([, v]) => typeof v === 'string')) as Record<string, string>,
+    };
+    expect(Object.keys(sources).length).toBeGreaterThanOrEqual(10);
+    const bad: string[] = [];
+    for (const [name, src] of Object.entries(sources)) {
+      for (const line of src.split('\n')) {
+        const at = line.indexOf('//');
+        if (at > 0 && line.slice(0, at).trim() !== '' && line.slice(at).includes(';')) bad.push(`${name}: ${line.trim()}`);
+      }
+    }
+    expect(bad).toEqual([]);
   });
 });

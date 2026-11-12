@@ -4,10 +4,10 @@
  * must have from the terrain alone. The shaders are the same formula in
  * their own dialect and must stay so.
  *
- * The look is the one from the Zugspitze spike: a hypsometric tint, rock
- * where it is steep, snow where it is high and not too steep, a plain
- * Lambert light from the south-south-east with a dark floor so shadow sides
- * keep their shape, and aerial perspective toward the horizon colour.
+ * The look: a hypsometric tint, rock where it is steep, snow where it is
+ * high and not too steep, a plain Lambert light over the viewer's left
+ * shoulder with a dark floor so shadow sides keep their shape, and aerial
+ * perspective: haze that lies in the valleys and turns the distance blue.
  */
 
 /**
@@ -22,8 +22,24 @@
 export const SUN = { elevation: 45, behind: 135 };
 /** Metres: full snow above, none 350 m below. */
 export const SNOW_LINE = 2900;
-/** Metres to 1/e of the terrain colour. */
-export const FOG_RANGE = 55000;
+/**
+ * The air. Its density falls off with altitude as e^(-z/height), so haze
+ * lies in the valleys and the summits stand clear of it; `range` is the
+ * distance in metres to 1/e of a colour in air of sea-level density (at
+ * 2000 m that is 55 km). Blue is scattered out first (`beta` per channel),
+ * which is what turns distant ridges blue; and no colour goes below `floor`
+ * of itself, so the farthest ridge is still a ridge and not sky.
+ */
+export const FOG = { range: 28000, height: 3000, beta: [1, 1.12, 1.35] as [number, number, number], floor: 0.12 };
+/** Metres to 1/e of the terrain colour at sea-level air density; the renderer's default for its fogRange. */
+export const FOG_RANGE = FOG.range;
+/**
+ * Where the ground turns to rock and where snow no longer holds, as
+ * `slope` = 1 − cos(angle): rock from 33° to 45° (weaker below the tree
+ * line, where steep ground is forest as often as crag), snow gone between
+ * 40° and 50°.
+ */
+export const GROUND = { rockLow: 0.16, rockHigh: 0.30, rockBelow: 0.45, rockAbove: 0.92, rockFrom: 1200, rockTo: 1800, snowLow: 0.23, snowHigh: 0.36 };
 export const HORIZON_COLOR: [number, number, number] = [0.80, 0.87, 0.95];
 /** Lakes: a mountain-lake blue, lit and hazed like the ground around it. */
 export const WATER_COLOR: [number, number, number] = [0.17, 0.33, 0.50];
@@ -77,13 +93,35 @@ export function waterShine(col: [number, number, number], view: [number, number,
 }
 
 /**
+ * What is left of a colour after `range` metres of air between an eye at
+ * `eyeAlt` and a point at `h` metres, per channel: the density integrated
+ * along the sightline (closed form for an exponential atmosphere), blue
+ * fading fastest, never below FOG.floor. `fogRange` is the renderer's knob.
+ */
+export function transmittance(range: number, h: number, eyeAlt: number, fogRange = FOG.range): [number, number, number] {
+  const H = FOG.height, dz = (h - eyeAlt) / H;
+  const density = Math.abs(dz) < 1e-3 ? Math.exp(-eyeAlt / H) : (Math.exp(-eyeAlt / H) - Math.exp(-h / H)) / dz;
+  const tau = (range / fogRange) * density;
+  return FOG.beta.map((b) => Math.max(FOG.floor, Math.exp(-tau * b))) as [number, number, number];
+}
+
+/** A lit colour seen through the air: towards the horizon colour by what the air takes. */
+export function haze(col: [number, number, number], range: number, h: number, eyeAlt: number, fogRange = FOG.range): [number, number, number] {
+  const t = transmittance(range, h, eyeAlt, fogRange);
+  return [0, 1, 2].map((i) => HORIZON_COLOR[i] + (col[i] - HORIZON_COLOR[i]) * t[i]) as [number, number, number];
+}
+
+/**
  * Linear RGB of a terrain pixel at altitude `h` metres, with the surface
  * normal `n` (east, north, up; unit) and ground range `range` metres;
  * `water` where the lake mask marks the post, and with `view` (unit, eye to
- * point) the water shines; `yaw` is the view direction the light turns with.
+ * point) the water shines; `yaw` is the view direction the light turns
+ * with; `eyeAlt` is where the eye stands, for the air in between (the
+ * point's own height when not given).
  */
 export function terrainColor(
   h: number, n: [number, number, number], range: number, water = false, view?: [number, number, number], yaw = 0,
+  eyeAlt = h,
 ): [number, number, number] {
   const slope = 1 - n[2];
   const valley: [number, number, number] = [0.47, 0.60, 0.33];
@@ -94,8 +132,11 @@ export function terrainColor(
   let col = mix(valley, forest, smoothstep(700, 1100, h));
   col = mix(col, meadow, smoothstep(1500, 1900, h));
   col = mix(col, rock, smoothstep(1950, 2350, h));
-  col = mix(col, rock, smoothstep(0.35, 0.6, slope) * 0.85);
-  const snowy = smoothstep(SNOW_LINE - 350, SNOW_LINE + 50, h) * (1 - smoothstep(0.45, 0.7, slope));
+  const G = GROUND;
+  const rocky = smoothstep(G.rockLow, G.rockHigh, slope)
+    * (G.rockBelow + (G.rockAbove - G.rockBelow) * smoothstep(G.rockFrom, G.rockTo, h));
+  col = mix(col, rock, rocky);
+  const snowy = smoothstep(SNOW_LINE - 350, SNOW_LINE + 50, h) * (1 - smoothstep(G.snowLow, G.snowHigh, slope));
   col = mix(col, snow, snowy);
   if (water) col = [...WATER_COLOR];
   const s = sunVector(yaw);
@@ -103,8 +144,7 @@ export function terrainColor(
   const shade = shadeFactor(diff);
   col = [col[0] * shade, col[1] * shade, col[2] * shade];
   if (water && view) col = waterShine(col, view, yaw);
-  const fog = 1 - Math.exp(-range / FOG_RANGE);
-  return mix(col, HORIZON_COLOR, fog * 0.88);
+  return haze(col, range, h, eyeAlt);
 }
 
 /** Rec. 709 luminance of linear RGB, as the E2E tests measure it. */

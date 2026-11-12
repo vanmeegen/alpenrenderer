@@ -58,6 +58,8 @@ import { HeightField, Observer } from '../../core/heightfield';
 import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, WATER_COLOR, sunVector } from '../shading';
 import { Band, RadialParams, radialParams } from '../mesh';
 import { RedrawGate, frameFingerprint } from '../redraw';
+import { OUTLINE } from '../outline';
+import { renderPixelRatio } from '../resolution';
 import {
   COMPOSITE_FRAGMENT_GL, COMPOSITE_VERTEX_GL, TERRAIN_FRAGMENT_GL,
   TERRAIN_SHADE_FRAGMENT_GL, TERRAIN_VERTEX_GL,
@@ -163,10 +165,16 @@ export class GpuRenderer {
   /** How far the camera image is washed towards white, 0..1. */
   whiten = 0.62;
   desaturate = 0.55;
-  edgeLow = 0.030;
-  edgeHigh = 0.320;
-  /** Ridge-line width in CSS pixels: the same line on a phone and a desktop. */
+  /** Scale of the ink line's width (outline.ts gives it in CSS pixels): the same line on a phone and a desktop. */
   edgeWidth = 1.0;
+  /** Strength of the haze rim behind ridges in the shaded view; 0 saves its eight taps. */
+  rim = OUTLINE.rim;
+  /**
+   * The most device pixels per CSS pixel the frame is rendered at. A phone
+   * with a ratio of 3 pays nine fragments per CSS pixel in three passes;
+   * capped at 1.5 it pays a quarter of that and the lines stay as wide.
+   */
+  maxPixelRatio = Infinity;
   lineDark = 0.04;
   refractionK = REFRACTION_K;
   curvature = true;
@@ -675,7 +683,7 @@ export class GpuRenderer {
       knobs: {
         shaded: this.shaded, outline: this.outline, snowLine: this.snowLine, fogRange: this.fogRange,
         skyTop: this.skyTop, horizonColor: this.horizonColor, waterColor: this.waterColor,
-        whiten: this.whiten, desaturate: this.desaturate, edgeLow: this.edgeLow, edgeHigh: this.edgeHigh,
+        whiten: this.whiten, desaturate: this.desaturate, rim: this.rim, maxPixelRatio: this.maxPixelRatio,
         edgeWidth: this.edgeWidth, lineDark: this.lineDark, refractionK: this.refractionK, curvature: this.curvature,
         band: this.band ? [this.band.r1, this.band.r2] : null, frame: this.frameVersion,
       },
@@ -701,6 +709,8 @@ export class GpuRenderer {
   resize(): { w: number; h: number } {
     const cssW = this.canvas.clientWidth || 640;
     const cssH = this.canvas.clientHeight || 360;
+    const scaling = 1 / renderPixelRatio(globalThis.devicePixelRatio ?? 1, this.maxPixelRatio);
+    if (Math.abs(this.engine.getHardwareScalingLevel() - scaling) > 1e-6) this.engine.setHardwareScalingLevel(scaling);
     this.engine.resize();
     const w = this.engine.getRenderWidth();
     const h = this.engine.getRenderHeight();
@@ -786,9 +796,8 @@ export class GpuRenderer {
   private updateCompositeUniforms(w: number, h: number) {
     const m = this.compositeMat;
     m.setVector2('uTexel', new Vector2(1 / w, 1 / h));
-    m.setFloat('uEdgeLow', this.edgeLow);
-    m.setFloat('uEdgeHigh', this.edgeHigh);
     m.setFloat('uEdgeWidth', this.edgeWidth / this.engine.getHardwareScalingLevel());
+    m.setFloat('uRim', this.shaded ? this.rim : 0);
     m.setFloat('uWhiten', this.whiten);
     m.setFloat('uDesat', this.desaturate);
     m.setFloat('uLineDark', this.lineDark);
