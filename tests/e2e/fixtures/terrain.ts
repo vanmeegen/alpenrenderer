@@ -96,6 +96,20 @@ function shoulder(lon: number, lat: number): number {
   return rise * lateral;
 }
 
+/**
+ * The Terrassenplatz: a standpoint on the plain 3 km west, with a terrace
+ * 3 m high in front of it to the north, from 20 m to 120 m out and 600 m
+ * wide: the lakeside road's embankment at Pertisau. From 1.7 m the view
+ * north is that terrace; the eye has to come up over it (core/eye.ts).
+ */
+export const BANK = { lon: STAND.lon - 3000 / M_PER_DEG_LON, lat: STAND.lat, rise: 3, from: 20, to: 120, halfWidth: 300 };
+
+/** The terrace's rise above the plain at a point, metres. */
+function terrace(lon: number, lat: number): number {
+  const x = (lon - BANK.lon) * M_PER_DEG_LON, y = (lat - BANK.lat) * M_PER_DEG_LAT;
+  return Math.abs(x) <= BANK.halfWidth && y >= BANK.from && y <= BANK.to ? BANK.rise : 0;
+}
+
 /** Height in metres at a geodetic point. */
 export function heightAt(lon: number, lat: number): number {
   if (inLake(lon, lat)) return LAKE.surface;
@@ -111,7 +125,7 @@ export function heightAt(lon: number, lat: number): number {
     ridge = Math.max(ridge, Math.max(0, 1 - dyB / BACK_RIDGE.halfWidth) * (BACK_RIDGE.height - PLAIN_M));
   }
   const ripple = 8 * Math.sin((lon - STAND.lon) * M_PER_DEG_LON / 400) * Math.cos((lat - STAND.lat) * M_PER_DEG_LAT / 400);
-  return PLAIN_M + Math.max(cone, ridge, shoulder(lon, lat)) + ripple;
+  return PLAIN_M + Math.max(cone, ridge, shoulder(lon, lat), terrace(lon, lat)) + ripple;
 }
 
 /**
@@ -160,11 +174,11 @@ export function summitScreenY(eye: number, fov: number): number {
 
 const R_EFF = 6371008.8 / (1 - 0.13);   // the renderer's refracted earth radius
 
-/** Height at a bearing and ground range from the standpoint, metres. */
-export function heightAlong(bearingDeg: number, range: number): number {
+/** Height at a bearing and ground range from a standpoint (the standpoint of the range unless given), metres. */
+export function heightAlong(bearingDeg: number, range: number, from: { lon: number; lat: number } = STAND): number {
   const b = (bearingDeg * Math.PI) / 180;
-  const lon = STAND.lon + (range * Math.sin(b)) / M_PER_DEG_LON;
-  const lat = STAND.lat + (range * Math.cos(b)) / M_PER_DEG_LAT;
+  const lon = from.lon + (range * Math.sin(b)) / M_PER_DEG_LON;
+  const lat = from.lat + (range * Math.cos(b)) / M_PER_DEG_LAT;
   return heightAt(lon, lat);
 }
 
@@ -176,7 +190,10 @@ export function heightAlong(bearingDeg: number, range: number): number {
  * held against. `maxRange` ends the march early: the crest of whatever
  * stands within that range, as if nothing were behind it.
  */
-export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, width: number, height: number, pitchDeg = 0, maxRange = 275000): number {
+export function skylineRow(
+  yawDeg: number, x: number, eye: number, fov: number, width: number, height: number, pitchDeg = 0, maxRange = 275000,
+  from: { lon: number; lat: number } = STAND,
+): number {
   const tanV = Math.tan((fov * Math.PI) / 360);
   const tanH = tanV * (width / height);
   const ndcX = (x + 0.5) / width * 2 - 1;
@@ -187,7 +204,7 @@ export function skylineRow(yawDeg: number, x: number, eye: number, fov: number, 
   const k = Math.log(r1 / r0) / (steps - 1);
   for (let i = 0; i < steps; i++) {
     const r = r0 * Math.exp(i * k);
-    const up = heightAlong(bearing, r) - eye - (r * r) / (2 * R_EFF);
+    const up = heightAlong(bearing, r, from) - eye - (r * r) / (2 * R_EFF);
     maxTan = Math.max(maxTan, up / r);
   }
   // The column's elevation angle, less the camera's pitch, projected.

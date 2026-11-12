@@ -170,7 +170,7 @@ function tiff({ lon, lat, focal35, taken }) {
 let written = 0, kept = 0;
 // The telescope's look windows (z14 and z13; z13 and z12 on the low quality the
 // E2E tests run at) are cut around what is looked at: the Testhorn and the ridge crest.
-const CENTRES = [[T.STAND, LEVELS], [T.FLANK, LEVELS], [T.TESTHORN, [14, 13, 12]], [T.RIDGE_CREST, [14, 13, 12]]];
+const CENTRES = [[T.STAND, LEVELS], [T.FLANK, LEVELS], [T.BANK, LEVELS], [T.TESTHORN, [14, 13, 12]], [T.RIDGE_CREST, [14, 13, 12]]];
 for (const [centre, zooms] of CENTRES) for (const z of zooms) {
   const tz = z - 1;
   const px0 = Math.round(mercX(centre.lon, z)) - SIZE / 2;

@@ -3,7 +3,7 @@
  * here is derived from tests/e2e/fixtures/terrain.ts, not read off a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { BACK_RIDGE, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, heightAt, skylineRow, summitScreenY, terrainHit } from './fixtures/terrain';
+import { BACK_RIDGE, BANK, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, heightAt, skylineRow, summitScreenY, terrainHit } from './fixtures/terrain';
 import { HORIZON_COLOR, luminance as lumOf, terrainColor } from '../../src/engine/render/shading';
 import { LogField, OUTLINE, rimAt } from '../../src/engine/render/outline';
 
@@ -149,6 +149,31 @@ test.describe('loading', () => {
     // The ground is the formula's, within the bilinear sampling of 6 m posts on a 45° slope.
     expect(Math.abs(s.ground - heightAt(FLANK.lon, FLANK.lat))).toBeLessThan(3);
     await expect(page.getByText('(Boden + 1,7 m)')).toBeVisible();
+  });
+
+  test('with a terrace 20 m in front of the standpoint the eye comes up over it: the view north is the ridge, not the terrace', async ({ page }) => {
+    // The DEM holds what stands right around a standpoint (an embankment, a
+    // step between two posts) and the standpoint is only good to some
+    // metres. A person looks over it; the eye, 1.7 m over one post, did not.
+    await page.goto(url({ lon: BANK.lon, lat: BANK.lat, yaw: 0, fov: 20 }));
+    const s = await ready(page);
+    const above = s.eyeAltitude - s.ground;
+    expect(above).toBeGreaterThan(EYE_HEIGHT + 1.5);           // lifted…
+    expect(above).toBeLessThan(EYE_HEIGHT + BANK.rise + 0.5);  // …by about the terrace, not onto a tower
+    expect(s.eyeAltitude).toBeGreaterThan(heightAt(BANK.lon, BANK.lat + 50 / 111320));   // over the terrace's top
+    await expect(page.getByText(/\(Boden \+ [34],\d m, freier Blick\)/)).toBeVisible();
+    // The picture is drawn from the lifted eye: the skyline is the ridges 20 and 22 km out
+    // (the Hintergrat ends right of the middle), where the march from that eye puts them.
+    for (const x of [300, 500, 700]) {
+      const expected = skylineRow(0, x, s.eyeAltitude, 20, W, H, 0, 275000, BANK);
+      expect(expected).toBeLessThan(H / 2 - 80);               // a ridge, 3° up and more: far above the terrace's edge
+      expect(expected).toBeGreaterThan(0);
+      expect(Math.abs((await skyRows(page, x)) - expected), `column ${x}`).toBeLessThan(H * 0.02);
+    }
+    // An altitude given in the URL is the altitude: no lift.
+    const ground = s.ground;
+    await page.evaluate((h) => { location.hash = h; }, `#lon=${BANK.lon}&lat=${BANK.lat}&alt=${Math.round(ground + 2)}&yaw=0&pitch=0&fov=20`);
+    await expect.poll(async () => (await status(page)).eyeAltitude, { timeout: 30_000 }).toBe(Math.round(ground + 2));
   });
 
   test('the eye height is a logarithmic slider, 1.7 m to 500 m, and the device keeps it', async ({ page }) => {

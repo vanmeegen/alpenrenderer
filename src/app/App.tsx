@@ -114,8 +114,10 @@ export function App() {
       if (!viewer) return;
       const here = viewer.current;
       const to = readHash(location.hash, here);
+      const moved = to.lon !== here.lon || to.lat !== here.lat;
+      if (moved) viewer.fixAccuracy = null;
       void viewer.relocate(to);
-      if (to.lon !== here.lon || to.lat !== here.lat) { chosen('url'); setGpsAccuracy(null); }
+      if (moved) { chosen('url'); setGpsAccuracy(null); }
     };
     window.addEventListener('hashchange', onHash);
     return () => {
@@ -135,6 +137,7 @@ export function App() {
   const go = (id: string) => {
     const p = PLACES.find((x) => x.id === id);
     if (!p) return;
+    if (viewerRef.current) viewerRef.current.fixAccuracy = null;
     void viewerRef.current?.relocate({ lon: p.lon, lat: p.lat, alt: undefined, yaw: p.yaw, pitch: 0, fov: 60 });
     chosen('place');
     setGpsAccuracy(null);
@@ -144,7 +147,9 @@ export function App() {
 
   /** From the map or the GPS: stand there on the ground, keep looking the same way. */
   const pick = (p: PickedPosition) => {
-    void viewerRef.current?.relocate({ lon: p.lon, lat: p.lat, alt: undefined });
+    const v = viewerRef.current;
+    if (v) v.fixAccuracy = p.source === 'gps' ? p.accuracy ?? null : null;
+    void v?.relocate({ lon: p.lon, lat: p.lat, alt: undefined });
     chosen(p.source);
     setGpsAccuracy(p.source === 'gps' ? p.accuracy ?? null : null);
     // A fix good to a kilometre is a guess at where one stands, and the whole view hangs on it.
@@ -326,7 +331,7 @@ export function App() {
             {photo && <span> · Foto</span>}
             {status && (
               <span> · Auge {Math.round(status.eyeAltitude)} m
-                {status.altitudeSource === 'dem' ? ` (Boden + ${aboveGround(status.eyeAltitude - status.ground)})` : ''}</span>
+                {status.altitudeSource === 'dem' ? ` (Boden + ${aboveGround(status.eyeAltitude - status.ground)}${status.eyeLift > 0 ? ', freier Blick' : ''})` : ''}</span>
             )}
           </div>
           <div className="text-neutral-600">

@@ -16,7 +16,7 @@ import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
 import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
 import { bandFor, lookRange, meshTopNear } from '../engine/render/mesh';
-import { destination, localRadius } from '../engine/core/geodesy';
+import { DEG, destination, localRadius } from '../engine/core/geodesy';
 import { ClipmapStreamer, ClipmapConfig, DEFAULT_CLIPMAP, LOW_CLIPMAP } from '../engine/sources/clipmap';
 import { TerrariumSource } from '../engine/sources/terrarium';
 import { TileStore } from '../engine/sources/tilestore';
@@ -29,7 +29,8 @@ import { LookControls } from './controls';
 import { ExifInfo, fovFromExif, readExif } from './exif';
 import { LabelPainter } from './labelPainter';
 import { SensorLook } from './sensorLook';
-import { AppOptions, ViewState, clampEyeHeight, clampOutline, readEyeHeight, readOutline, writeEyeHeight, writeOutline } from './state';
+import { AppOptions, EYE_HEIGHT, ViewState, clampEyeHeight, clampOutline, readEyeHeight, readOutline, writeEyeHeight, writeOutline } from './state';
+import { clearView, fitRadius } from '../engine/core/eye';
 
 /** Milliseconds of sightline work per frame; the rest of the frame stays for drawing and touch. */
 const VISIBILITY_BUDGET_MS = 4;
@@ -81,6 +82,8 @@ export interface ViewerStatus {
   /** DEM ground under the eye, metres. */
   ground: number;
   eyeAltitude: number;
+  /** Metres the eye is lifted over what stands right around the standpoint (the clear view); 0 when nothing does. */
+  eyeLift: number;
   altitudeSource: 'dem' | 'given';
   fps: number;
   bytes: number;
@@ -301,7 +304,10 @@ export class Viewer {
     };
     this.renderer.attachStill(pixels, w, h);
     this.renderer.shaded = false;
-    if (positioned) await this.relocate({ lon: exif.lon!, lat: exif.lat!, alt: undefined });
+    if (positioned) {
+      this.fixAccuracy = null;
+      await this.relocate({ lon: exif.lon!, lat: exif.lat!, alt: undefined });
+    }
     this.applyPhotoFov();
     return this.photoStatus()!;
   }
@@ -657,11 +663,33 @@ export class Viewer {
     writeOutline(this.renderer.outline);
   }
 
+  /** Accuracy of the fix the standpoint came from, metres; null when it was chosen (map, place, URL). */
+  fixAccuracy: number | null = null;
+  /** How far the eye is lifted over what stands right around the standpoint, metres (core/eye.ts). */
+  private eyeLift = 0;
+
+  /**
+   * Puts the eye where it belongs: at the altitude the URL gives, or over
+   * the ground at the standpoint by the eye height, and by more where
+   * something right around the standpoint would otherwise be the whole view
+   * (the clear view, core/eye.ts). An eye height set above that already
+   * looks over it.
+   */
   private applyAltitude() {
     const hf = this.streamer.heightField;
-    const ground = hf.groundAt(this.view.lon, this.view.lat);
-    const eye = this.view.alt ?? ground + this.eyeHeight;
-    this.renderer.moveTo(this.view.lon, this.view.lat, eye);
+    const { lon, lat } = this.view;
+    const ground = hf.groundAt(lon, lat);
+    this.eyeLift = 0;
+    if (this.view.alt === undefined && hf.resAt(0) > 0) {
+      const mLat = 111320, mLon = 111320 * Math.cos(lat * DEG);
+      const { lift } = clearView(
+        (e, n) => hf.height(lon + e / mLon, lat + n / mLat, Math.hypot(e, n)),
+        fitRadius(this.fixAccuracy), Math.max(2, hf.resAt(0) / 2),
+      );
+      this.eyeLift = Math.max(0, EYE_HEIGHT.min + lift - this.eyeHeight);
+    }
+    const eye = this.view.alt ?? ground + this.eyeHeight + this.eyeLift;
+    this.renderer.moveTo(lon, lat, eye);
   }
 
   private viewChanged() {
@@ -681,6 +709,7 @@ export class Viewer {
       pending: p.pending, missing: p.failed, levelsEmpty: p.empty,
       ground: hf.groundAt(this.view.lon, this.view.lat),
       eyeAltitude: this.renderer.eyeAltitude,
+      eyeLift: this.eyeLift,
       altitudeSource: this.view.alt === undefined ? 'dem' : 'given',
       fps: this.fps,
       bytes: this.source.stats.bytes,
