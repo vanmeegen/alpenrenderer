@@ -76,6 +76,56 @@ export class LabelPainter {
     this.ctx.clearRect(0, 0, cssW, cssH);
   }
 
+  /**
+   * The summit being sought, where it stands in the picture: a ring round
+   * the spot and its name over it. For one that has no label of its own,
+   * because it is hidden or lost its place.
+   */
+  drawMark(x: number, y: number, text: string): void {
+    const c = this.ctx, s = this.style;
+    c.strokeStyle = s.halo;
+    c.lineWidth = 5;
+    c.beginPath();
+    c.arc(x, y, 9, 0, Math.PI * 2);
+    c.stroke();
+    c.strokeStyle = s.accent;
+    c.lineWidth = 2;
+    c.beginPath();
+    c.arc(x, y, 9, 0, Math.PI * 2);
+    c.stroke();
+    c.font = this.font(true);
+    haloText(c, s, text, x, y - 14 - s.nameSize);
+  }
+
+  /**
+   * The summit being sought is out of the picture: an arrow at (x, y)
+   * pointing along (dx, dy) toward it, with a line of text beside it.
+   */
+  drawPointer(x: number, y: number, dx: number, dy: number, text: string): void {
+    const c = this.ctx, s = this.style;
+    const px = -dy, py = dx;                              // across the arrow
+    const tip = { x: x + dx * 16, y: y + dy * 16 };
+    const shape = () => {
+      c.beginPath();
+      c.moveTo(tip.x, tip.y);
+      c.lineTo(x - dx * 8 + px * 11, y - dy * 8 + py * 11);
+      c.lineTo(x - dx * 2, y - dy * 2);
+      c.lineTo(x - dx * 8 - px * 11, y - dy * 8 - py * 11);
+      c.closePath();
+    };
+    c.lineJoin = 'round';
+    c.strokeStyle = s.halo;
+    c.lineWidth = 4;
+    shape();
+    c.stroke();
+    c.fillStyle = s.accent;
+    shape();
+    c.fill();
+    c.font = this.font(true);
+    // The text on the side away from the tip, so the arrow points out of it.
+    haloText(c, s, text, x - dx * 20 - (Math.abs(dx) > 0.5 ? Math.sign(dx) * this.ctx.measureText(text).width / 2 : 0), y - dy * 30 - s.nameSize / 2);
+  }
+
   draw(labels: PlacedLabel[], selected: PlacedLabel | null): void {
     const c = this.ctx;
     const s = this.style;
@@ -121,6 +171,18 @@ export class LabelPainter {
       });
     }
   }
+}
+
+/** A line of text with the labels' halo, centred on x, its top at y. */
+function haloText(c: CanvasRenderingContext2D, s: LabelStyle, text: string, x: number, y: number) {
+  c.textAlign = 'center';
+  c.textBaseline = 'top';
+  c.lineJoin = 'round';
+  c.strokeStyle = s.halo;
+  c.lineWidth = 3;
+  c.strokeText(text, x, y);
+  c.fillStyle = s.accent;
+  c.fillText(text, x, y);
 }
 
 function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

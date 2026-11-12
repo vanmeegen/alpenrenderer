@@ -4,7 +4,7 @@ import {
   EYE_HEIGHT, OUTLINE, STYLES, StandSource, Style, ViewState, coarseFixNote, eyeHeightFromSlider, formatHash, PLACES,
   readOptions, sliderFromEyeHeight, startView, trailing, viewFromHash, writeLastView, writeStandSource,
 } from './state';
-import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
+import { FoundPeak, PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
 import { LocationHelp, PickedPosition, locateChecked, sitePermission } from './mapPicker';
@@ -41,7 +41,10 @@ export function App() {
   const [start] = useState(() => startView(location.hash, undefined, window.innerWidth / Math.max(1, window.innerHeight)));
   const [view, setView] = useState<ViewState>(start.view);
   const [error, setError] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'settings' | 'map'>('none');
+  const [panel, setPanel] = useState<'none' | 'places' | 'credits' | 'check' | 'settings' | 'map' | 'find'>('none');
+  // The find panel: what is typed, and what the viewer finds for it.
+  const [query, setQuery] = useState('');
+  const [found, setFound] = useState<FoundPeak[]>([]);
   const [menuOpen, setMenuOpen] = useState(true);
   const [eyeHeight, setEyeHeight] = useState(EYE_HEIGHT.initial);
   const [outline, setOutline] = useState(OUTLINE.initial);
@@ -153,6 +156,15 @@ export function App() {
     });
     v.setBlocked(rects);
   });
+
+  // While the find panel is open its list follows the query, and the sightlines as they are decided.
+  useEffect(() => {
+    if (panel !== 'find') return;
+    const refresh = () => setFound(viewerRef.current?.find(query) ?? []);
+    refresh();
+    const timer = setInterval(refresh, 1000);
+    return () => clearInterval(timer);
+  }, [panel, query]);
 
   const go = (id: string) => {
     const p = PLACES.find((x) => x.id === id);
@@ -328,6 +340,7 @@ export function App() {
             <RailButton icon="photo" label="Foto laden" pressed={!!photo} onClick={() => fileRef.current?.click()} />
             {corrected && <RailButton icon="reset" label="Korrektur zurücksetzen" onClick={() => viewerRef.current?.sensors.resetOffset()} />}
             <RailButton icon="peaks" label={labelsOn ? 'Gipfel aus' : 'Gipfel an'} pressed={labelsOn} onClick={() => setLabelsOn(!labelsOn)} />
+            <RailButton icon="search" label="Gipfel suchen" pressed={panel === 'find'} onClick={() => toggle('find')} />
             <RailButton icon="settings" label="Einstellungen" pressed={panel === 'settings'} onClick={() => toggle('settings')} />
             <RailButton icon="info" label="Quellen" pressed={panel === 'credits'} onClick={() => toggle('credits')} />
             <RailButton icon="check" label="Check" pressed={panel === 'check'} onClick={() => toggle('check')} />
@@ -401,6 +414,30 @@ export function App() {
             <div className="mt-0.5 text-neutral-500">
               {photo ? '1 Finger: Grate aufs Foto schieben, oder „Ausrichten“.' : 'Regler schieben, bis die gezeichneten Grate auf den echten liegen.'}
             </div>
+          </div>
+        )}
+
+        {panel === 'find' && (
+          <div className={PANEL} role="region" aria-label="Gipfel und Seen finden">
+            <input type="search" aria-label="Gipfel suchen" autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="Name eines Gipfels oder Sees"
+              className="w-full rounded border border-neutral-300 bg-white px-2 py-1 text-[14px] outline-none focus:border-blue-600" />
+            <div className="mt-1 text-neutral-500">{query.trim() ? 'Im Umkreis, auch verdeckte:' : 'Von hier zu sehen:'}</div>
+            <ul aria-label="Gipfel" className="mt-0.5">
+              {found.map((f) => (
+                <li key={f.id}>
+                  <button className="w-full rounded px-1 py-0.5 text-left hover:bg-blue-100 active:bg-blue-200 touch-manipulation"
+                    onClick={() => { viewerRef.current?.seek(f.id); setPanel('none'); }}>
+                    <span className={f.kind === 'lake' ? 'font-semibold italic text-blue-700' : 'font-semibold'}>{f.name}</span>
+                    <span className="ml-2 tabular-nums text-neutral-600">
+                      {f.ele !== undefined ? `${Math.round(f.ele)} m · ` : ''}{fmtRange(f.range)} · {f.compass} {f.bearing.toFixed(0)}°
+                      {!f.decided ? ' · wird geprüft' : !f.visible ? ' · verdeckt' : ''}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {!found.length && <div className="text-neutral-500">{query.trim() ? 'Kein Gipfel oder See dieses Namens im Umkreis.' : 'Noch nichts entschieden, einen Moment.'}</div>}
           </div>
         )}
 
@@ -533,6 +570,7 @@ export function App() {
             <b className="text-[15px] font-semibold">{peak.name}</b>
             <span className="tabular-nums text-neutral-600">
               {peak.kind === 'lake' ? 'See · ' : ''}{peak.ele !== undefined ? `${Math.round(peak.ele)} m · ` : ''}{fmtRange(peak.range)} · {peak.compass} {peak.bearing.toFixed(0)}°
+              {peak.hidden ? ' · von hier verdeckt' : ''}
             </span>
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3">

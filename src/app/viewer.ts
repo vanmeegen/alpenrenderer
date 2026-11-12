@@ -10,6 +10,7 @@ import { AlignResult, DEFAULT_PROFILE, PHOTO_SKYLINE, alignPhoto, extractSkyline
 import { Camera, fovForAspect, longFovOf } from '../engine/core/camera';
 import { DEFAULT_HORIZON, HorizonTable, VisibilityJob } from '../engine/core/horizon';
 import { LabelTarget, PlacedLabel, buildTargets, layout, pickLabel } from '../engine/core/labels';
+import { pointerSpot, pointerTo, searchTargets } from '../engine/core/find';
 import { Peak } from '../engine/core/peaks';
 import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
 import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
@@ -56,6 +57,8 @@ export interface PeakInfo {
   ele?: number;
   /** A summit or a lake (the card says "See" for a lake). */
   kind: 'peak' | 'lake';
+  /** Sought by name and not in sight from here (the card says so). */
+  hidden?: boolean;
   /** Ground range, metres, and true bearing, degrees. */
   range: number;
   bearing: number;
@@ -110,6 +113,8 @@ export interface ViewerStatus {
    * their sightlines are decided, so the labels stand where they will stay.
    */
   peaks: { total: number; visible: number; placed: number; unnamed: number; settled: boolean; layouts: number };
+  /** The summit being sought (seek): whether it is in sight and in the frame, and how far to turn for it, degrees. */
+  sought: { id: string; name: string; visible: boolean; inFrame: boolean; turn: number } | null;
   camera: { active: boolean; fovY: number; fovSource: 'default' | 'reported' | 'manual'; width: number; height: number };
   photo: PhotoStatus | null;
 }
@@ -160,6 +165,8 @@ export class Viewer {
   private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
   private placed: PlacedLabel[] = [];
   private selected: PlacedLabel | null = null;
+  /** The summit or lake being sought (the find panel), by id: it survives a rebuild of the targets. */
+  private soughtId: string | null = null;
   private visibleCount = 0;
   private peakGeneration = 0;
   /** Labels are drawn while this is on. */
@@ -679,6 +686,7 @@ export class Viewer {
     const stamp = [
       cssW, cssH, globalThis.devicePixelRatio ?? 1, this.showLabels, this.targetsVersion, this.visibility?.decided ?? -1,
       c.yaw, c.pitch, c.roll, c.fov, c.aspect, drawnKey ?? '', this.selected?.target.peak.id ?? '', this.blockedKey,
+      this.soughtId ?? '',
     ].join('|');
     if (stamp === this.labelStamp) return;
     this.labelStamp = stamp;
@@ -697,6 +705,62 @@ export class Viewer {
       this.selected = this.placed.find((p) => p.target.peak.id === id) ?? this.selected;
     }
     painter.draw(this.placed, this.selected);
+    this.drawSought(painter, cssW, cssH);
+  }
+
+  /** The main spot of the summit being sought, if it is within range from here. */
+  private soughtTarget(): LabelTarget | null {
+    const id = this.soughtId;
+    return id ? this.targets.find((t) => t.peak.id === id && t.spot === 0) ?? null : null;
+  }
+
+  private pointer(t: LabelTarget) {
+    const c = this.camera;
+    return pointerTo({ yaw: c.yaw, pitch: c.pitch, fov: c.fov, aspect: c.aspect }, t);
+  }
+
+  /**
+   * The summit being sought: an arrow toward it while it is out of the
+   * frame; in the frame, a ring where it stands unless it has a label there
+   * (then the label is the selected one).
+   */
+  private drawSought(painter: LabelPainter, cssW: number, cssH: number) {
+    const t = this.soughtTarget();
+    if (!t) return;
+    const p = this.pointer(t);
+    if (p) {
+      const at = pointerSpot(p, cssW, cssH);
+      const turn = Math.round(Math.abs(p.turn));
+      const way = turn < 3 ? (p.lift > 0 ? 'oben' : 'unten') : `${turn}° ${p.turn < 0 ? 'links' : 'rechts'}`;
+      painter.drawPointer(at.x, at.y, p.dx, p.dy, `${t.peak.name} · ${way}`);
+      return;
+    }
+    if (this.placed.some((l) => l.target.peak.id === t.peak.id)) return;
+    const ndc = new Float32Array(3);
+    if (this.camera.project(t.east, t.north, t.up, ndc) <= 0) return;
+    painter.drawMark((ndc[0] * 0.5 + 0.5) * cssW, (0.5 - ndc[1] * 0.5) * cssH, t.decided && !t.visible ? `${t.peak.name} (verdeckt)` : t.peak.name);
+  }
+
+  /** Summits and lakes for the find panel: what is in sight, or everything within range whose name holds the query. */
+  find(query: string): FoundPeak[] {
+    return searchTargets(this.targets, query).map((f) => ({ ...describeTarget(f.target), visible: f.visible, decided: f.decided }));
+  }
+
+  /**
+   * Seeks a summit by id (from find): it is marked in the picture, pointed
+   * at when out of the frame, and described on the card. The view turns to
+   * it unless the device's sensors are steering. Null ends the search.
+   */
+  seek(id: string | null) {
+    this.soughtId = id;
+    const t = this.soughtTarget();
+    if (!t) { this.soughtId = null; this.select(null); return; }
+    if (!this.sensors.active) {
+      this.camera.set({ yaw: t.bearing, pitch: Math.max(-80, Math.min(80, t.elevation)) });
+      this.viewChanged();
+    }
+    this.selected = this.placed.find((l) => l.target.peak.id === id) ?? null;
+    this.onSelect?.({ ...describeTarget(t), ...(t.decided && !t.visible ? { hidden: true } : {}) });
   }
 
   /** The labels on screen right now, in CSS pixels. */
@@ -712,7 +776,9 @@ export class Viewer {
   }
 
   select(label: PlacedLabel | null) {
-    if (label === this.selected && !label) return;
+    if (label === this.selected && !label && !this.soughtId) return;
+    // A tap elsewhere, or the card closed: whatever was sought is no longer.
+    if (!label || label.target.peak.id !== this.soughtId) this.soughtId = null;
     this.selected = label;
     this.onSelect?.(label ? describe(label) : null);
   }
@@ -820,6 +886,12 @@ export class Viewer {
         total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length, unnamed: this.unnamed, layouts: this.layouts,
         settled: this.rebuildTimer === null && (this.visibility?.done ?? false),
       },
+      sought: (() => {
+        const t = this.soughtTarget();
+        if (!t) return null;
+        const p = this.pointer(t);
+        return { id: t.peak.id, name: t.peak.name, visible: t.decided && t.visible, inFrame: !p, turn: p ? p.turn : 0 };
+      })(),
       camera: {
         active: this.feed.status.active, fovY: this.feed.status.fovY, fovSource: this.feed.status.fovSource,
         width: this.feed.status.width, height: this.feed.status.height,
@@ -840,7 +912,16 @@ export class Viewer {
   }
 }
 
-function describe(l: PlacedLabel): PeakInfo {
+/** A found summit or lake as the find panel lists it. */
+export interface FoundPeak extends PeakInfo {
+  visible: boolean;
+  decided: boolean;
+}
+
+const describe = (l: PlacedLabel): PeakInfo => describeTarget(l.target);
+
+function describeTarget(target: LabelTarget): PeakInfo {
+  const l = { target };
   const p = l.target.peak;
   const wp = p.tags?.wikipedia;
   const m = wp ? /^([a-z\-]+):(.+)$/.exec(wp) : null;

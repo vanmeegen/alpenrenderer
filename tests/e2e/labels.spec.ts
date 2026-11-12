@@ -286,3 +286,49 @@ test.describe('summit labels', () => {
     await expect.poll(() => labels(page).then((l) => l.length)).toBe(1);
   });
 });
+
+test.describe('finding a summit', () => {
+  test('the panel lists what is in sight; a hidden summit is found by name and marked hidden; a tap looks at it, and once the view has turned away an arrow points back', async ({ page }) => {
+    await page.goto(url({ yaw: 0 }));                       // looking north, the Testhorn out of the frame to the right
+    await ready(page);
+    await page.getByRole('button', { name: 'Gipfel suchen' }).click();
+    const list = page.getByRole('list', { name: 'Gipfel' });
+    // In sight from here: the Testhorn and the Gratspitze on the northern ridge. Not the Hinterhorn, behind the Testhorn.
+    await expect(list.getByRole('button', { name: /Testhorn/ })).toBeVisible({ timeout: 30_000 });
+    await expect(list.getByRole('button', { name: /Gratspitze/ })).toBeVisible();
+    await expect(list.getByRole('button', { name: /Hinterhorn/ })).toHaveCount(0);
+
+    // By name it is found, whatever case, and marked as hidden; the others are gone from the list.
+    await page.getByRole('searchbox', { name: 'Gipfel suchen' }).fill('HINTER');
+    const hit = list.getByRole('button', { name: /Hinterhorn/ });
+    await expect(hit).toContainText('verdeckt');
+    await expect(list.getByRole('button', { name: /Testhorn/ })).toHaveCount(0);
+
+    // A tap looks at it: the view turns east, onto its bearing and elevation, and the card says what it is.
+    await hit.click();
+    const sought = () => page.evaluate(() => (window as any).alp.status().sought as { name: string; visible: boolean; inFrame: boolean; turn: number } | null);
+    await expect.poll(async () => (await sought())?.inFrame, { timeout: 15_000 }).toBe(true);
+    const hash = async () => new URLSearchParams((await page.evaluate(() => location.hash)).slice(1));
+    await expect.poll(async () => Number((await hash()).get('yaw')), { timeout: 15_000 }).toBeCloseTo(90, 0);
+    expect((await sought())!.name).toBe('Hinterhorn');
+    expect((await sought())!.visible).toBe(false);
+    await expect(page.locator('.alp-peak-card')).toContainText('Hinterhorn');
+    await expect(page.locator('.alp-peak-card')).toContainText('verdeckt');
+    // It has no label (it is hidden), but it is marked where it stands: in the middle of the picture.
+    expect((await labels(page)).some((l) => l.name === 'Hinterhorn')).toBe(false);
+    await expect.poll(() => inkIn(page, { bx: 440, by: 240, bw: 120, bh: 100 })).toBeGreaterThan(50);
+
+    // Turned to the south, it is a quarter turn to the left: the arrow stands left of the middle.
+    await page.evaluate(() => { const h = new URLSearchParams(location.hash.slice(1)); h.set('yaw', '180'); h.set('pitch', '0'); location.hash = h.toString(); });
+    await expect.poll(async () => (await sought())?.inFrame, { timeout: 15_000 }).toBe(false);
+    expect((await sought())!.turn).toBeCloseTo(-90, 0);
+    // (The overlay is painted with the next frame: polled, not read at once.)
+    await expect.poll(() => inkIn(page, { bx: 200, by: 250, bw: 110, bh: 100 })).toBeGreaterThan(50);
+    expect(await inkIn(page, { bx: 700, by: 250, bw: 110, bh: 100 })).toBe(0);
+
+    // Closing the card ends the search.
+    await page.locator('.alp-peak-card').getByRole('button', { name: 'Schließen' }).click();
+    await expect.poll(sought).toBeNull();
+    await expect.poll(() => inkIn(page, { bx: 200, by: 250, bw: 110, bh: 100 })).toBe(0);
+  });
+});
