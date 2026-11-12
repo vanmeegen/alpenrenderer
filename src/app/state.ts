@@ -232,6 +232,11 @@ export interface AppOptions {
    * that the AR view shows without a camera. For tests and weak GPUs.
    */
   shade: boolean;
+  /**
+   * Forces the adaptation to slow frames on (`adapt=1`) or off (`adapt=0`);
+   * without it the device class decides, and an explicit `q` switches it off.
+   */
+  adapt?: boolean;
 }
 
 export function readOptions(search = location.search): AppOptions {
@@ -248,6 +253,7 @@ export function readOptions(search = location.search): AppOptions {
     peaks: (peaks.endsWith('/') ? peaks : peaks + '/') + '{x}_{y}.json',
     lakes: (lakes.endsWith('/') ? lakes : lakes + '/') + '{x}_{y}.json',
     shade: q.get('shade') !== '0',
+    ...(q.get('adapt') === '1' ? { adapt: true } : q.get('adapt') === '0' ? { adapt: false } : {}),
   };
 }
 

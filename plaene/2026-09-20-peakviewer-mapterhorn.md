@@ -1215,6 +1215,76 @@ Zeit gemessen sind E2- und E3-Build gleich schnell (Seite fertig in 4,0
 gegen 3,6 s, zwanzig Schwenks mit Rücklesen 13,0 gegen 13,3 s, die beiden
 langsamsten Tests 32 und 24 s gegen 30 und 27 s).
 
+### 8.af Plan 4, Etappe 4: Geräteklassen, Anpassung zur Laufzeit, Stil (2026-11-12)
+
+**Befund vorher.** Zwei Einstellungen, gewählt nach „kurze Seite < 600 px
+oder höchstens vier Kerne“: ein iPad, das vier Kerne meldet, bekam die
+Handy-Einstellung. Nichts passte sich an, wenn die Frames langsam waren.
+Der Höhen-Atlas lag in einer Spalte: acht bis zehn Ebenen à 640 px sind
+5120 bis 6400 px, sicher nimmt jedes Handy nur 4096; und bei jeder
+Ebene, die ankam, ging der ganze Atlas neu zur GPU (bis 16 MB).
+
+**Geräteklassen (`app/device.ts`).** Handy, Tablet, Desktop aus
+User-Agent, Touch und kurzer Bildschirmseite: iPhone und Android mit
+„Mobile“ sind Handys; ein iPad ist ein Tablet, auch wenn es sich als Mac
+ausgibt (ein Mac hat keinen Touchscreen); ein Desktop mit höchstens vier
+Kernen bekommt, was ein Tablet bekommt.
+
+| Klasse | Netz | Ebenen | Pixel je CSS-Pixel | dekodierte Kacheln |
+|---|---|---|---|---|
+| Handy | 640 × 900 | 6 (13 m bis 420 m) | ≤ 1,5 | 48 |
+| Tablet | 800 × 1200 (neu) | 8 (6,6 m bis 850 m) | ≤ 2 | 110 |
+| Desktop | 1024 × 1600 | 8 | ≤ 2 | 220 |
+
+`?q=low` und `?q=high` gelten auf jedem Gerät unverändert und ohne
+Anpassung: die E2E-Tests und ein Vergleich sehen genau diese Einstellung.
+Das Check-Panel zeigt „Gerät … · Qualität …“.
+
+**Anpassung an langsame Frames (`render/adapt.ts`).** Die Klasse ist ein
+Startwert. Solange sich die Ansicht bewegt, misst der Viewer die Zeit
+zwischen gezeichneten Frames; liegt der Median von 20 Frames über 38 ms
+(Budget 33 ms = 30 Bilder je Sekunde, 15 % Spiel), wird der bewegte
+Frame gröber gezeichnet: ÷ 1,25, ÷ 1,5, ÷ 2 je Richtung, danach fällt
+der Dunstsaum weg (8 Taps im Composite). Eine Pause über 250 ms ist
+Ruhe, keine Frame-Zeit. Ruht die Ansicht 300 ms, wird sie einmal mit
+allen Pixeln gezeichnet: scharf ist, was man ansieht, unscharf nur, was
+sich bewegt. Sind die Frames wieder schnell (Median unter 23 ms), wird
+nach 3 s eine Stufe zurück versucht; misslingt der Versuch, verdoppelt
+sich die Wartezeit (bis 60 s), hält er, gilt wieder die kurze. Die
+Klasse `Adaptation` bekommt nur Frame-Zeiten, keine Uhr und keine GPU,
+und ist so getestet. `?adapt=1` / `?adapt=0` erzwingt sie an oder aus.
+Check-Panel: „In Bewegung: Auflösung ÷ 1,5“.
+
+**Atlas (`render/atlas.ts`).** Die Ebenen liegen zu zweit nebeneinander:
+1280 × 3200 für zehn, 1280 × 2560 in der niedrigen Qualität. Beide
+Shader-Dialekte finden die Ecke einer Ebene über `atlasOrigin()`, die
+Spaltenzahl kommt aus `atlas.ts`. Eine geänderte Ebene wird in ihren
+eigenen Block gepackt und allein geschickt (`updateTextureData`); die
+Kopie des ganzen Atlas im Speicher entfällt.
+
+**Stil (`app/state.ts Style`).** „Relief“ (beleuchtet) oder „Linien“
+(nur die Umrisse auf Weiß), in den Einstellungen, auf dem Gerät gemerkt.
+Linien ist der bisherige Pfad von `shade=0` mit den neuen Tuschelinien
+und zugleich, was ein schwaches Gerät noch zeichnet. „Luftbild“ kommt mit
+E8 dazu.
+
+Nicht automatisch: der Wechsel auf „Linien“, wenn auch ÷ 2 nicht reicht.
+Den Stil ändert nur der Benutzer.
+
+Tests rot → grün: `device.test.ts` (neu), `adapt.test.ts` (neu: im
+Budget nichts, Stufe je Fenster bis zum Dunstsaum, ein Ausreißer zählt
+nicht, Pause, Versuch zurück mit wachsender Wartezeit, aus),
+`atlas.test.ts` (neu), `wgsl.test.ts` („both dialects find a level by
+column and row…“), `state.test.ts` (Stil, `adapt`), `app.spec.ts`
+(„renders the fixture terrain…“ mit Atlas 1280×2560, „"Linien" in the
+settings draws the outline alone…“, „a view that moves too slowly is
+drawn with fewer pixels while it moves, and sharp again once it rests“,
+Gerät im Check-Panel).
+
+Echte Geräte kann ich nicht messen. Bitte auf iPad und Handy ins
+Check-Panel schauen: Gerät, Qualität, Atlas, und nach einigem Schwenken
+die Zeile „In Bewegung: Auflösung ÷ …“.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

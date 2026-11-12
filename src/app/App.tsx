@@ -482,6 +482,11 @@ export function App() {
         {panel === 'check' && d && (
           <div className={`${PANEL} font-mono text-[11px]`} role="region" aria-label="Check">
             <div>{d.engine} · {d.adapter} · Build {__BUILD__}</div>
+            {status && (
+              <div>{status.adaptation.on
+                ? `In Bewegung: Auflösung ÷ ${String(status.adaptation.scale).replace('.', ',')}${status.adaptation.rim ? '' : ' · ohne Dunstsaum'}`
+                : 'Anpassung an langsame Frames: aus'}</div>
+            )}
             <div>Gerät {status?.tier} · Qualität {status?.quality} · Mesh {d.vertices.toLocaleString('de')} Vertices · Sektoren {d.sectorsDrawn}/32 · {d.size}</div>
             <div>Atlas {d.atlas} · Level {d.levels} · Frame {d.frameMs.toFixed(1)} ms · Frames {d.framesDrawn}</div>
             <div>Pipelines: terrain {d.terrainReady ? 'ok' : '…'} · shade {d.shadeReady ? 'ok' : '…'} · composite {d.compositeReady ? 'ok' : '…'}</div>

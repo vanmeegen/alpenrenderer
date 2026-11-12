@@ -644,6 +644,45 @@ test.describe('the style of the picture', () => {
   });
 });
 
+test.describe('slow frames', () => {
+  test('a view that moves too slowly is drawn with fewer pixels while it moves, and sharp again once it rests', async ({ page }) => {
+    // ?adapt=1 switches the adaptation on under the fixed low quality the
+    // tests run at (it is off there otherwise, so that tests see one
+    // setting). The slow frames are told to it directly: two windows of 60 ms.
+    await page.goto(url({}, { adapt: '1' }));
+    await ready(page);
+    const width = () => page.evaluate(async () => (await (window as any).alp.renderer.readRange()).width as number);
+    expect(await width()).toBe(W);
+    const scale = await page.evaluate(() => {
+      const a = (window as any).alp.adaptation;
+      let t = performance.now();
+      for (let i = 0; i < 40; i++) { t += 60; a.frame(60, t); }
+      return a.scale as number;
+    });
+    expect(scale).toBe(1.5);
+    // Turned, and read back before the next animation frame: the moving frame.
+    const moving = await page.evaluate(async () => {
+      const v = (window as any).alp;
+      void v.relocate({ yaw: 95 });
+      return (await v.renderer.readRange()).width as number;
+    });
+    expect(Math.abs(moving - W / 1.5)).toBeLessThan(2);
+    // At rest the frame is drawn once more, at every pixel.
+    await expect.poll(width, { timeout: 15_000 }).toBe(W);
+    await page.getByRole('button', { name: 'Check' }).click();
+    await expect(page.getByText(/In Bewegung: Auflösung ÷ 1,5/)).toBeVisible();
+    // Without ?adapt=1 the same slow frames change nothing.
+    await page.goto(url());
+    await ready(page);
+    expect(await page.evaluate(() => {
+      const a = (window as any).alp.adaptation;
+      let t = performance.now();
+      for (let i = 0; i < 80; i++) { t += 60; a.frame(60, t); }
+      return a.scale as number;
+    })).toBe(1);
+  });
+});
+
 test.describe('without the shade pass', () => {
   test('shade=0 leaves the lit pass out: outline over a white sky, every pipeline still compiled, the Testhorn where the formula puts it', async ({ page }) => {
     // SwiftShader spends ~10 s compiling the shade pipeline and ~1 s per

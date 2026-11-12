@@ -91,6 +91,13 @@ describe('readOptions', () => {
     expect(readOptions('?lakes=/tests/e2e/fixtures/lakes').lakes).toBe('/tests/e2e/fixtures/lakes/{x}_{y}.json');
   });
 
+  test('adapt=1 or adapt=0 forces the adaptation to slow frames on or off; without it the device class decides', () => {
+    expect(readOptions('').adapt).toBeUndefined();
+    expect(readOptions('?adapt=1').adapt).toBe(true);
+    expect(readOptions('?adapt=0').adapt).toBe(false);
+    expect(readOptions('?adapt=yes').adapt).toBeUndefined();
+  });
+
   test('backend and quality overrides', () => {
     expect(readOptions('?backend=webgpu&q=low')).toMatchObject({ backend: 'webgpu', quality: 'low' });
     expect(readOptions('?backend=foo&q=bar')).toMatchObject({ backend: 'webgl2', quality: 'auto' });

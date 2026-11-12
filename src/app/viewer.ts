@@ -29,6 +29,11 @@ import { LabelPainter } from './labelPainter';
 import { SensorLook } from './sensorLook';
 import { AppOptions, Style, ViewState, readStyle, writeStyle, clampEyeHeight, clampOutline, readEyeHeight, readOutline, writeEyeHeight, writeOutline } from './state';
 import { CLEAR_VIEW, clearView, fitRadius } from '../engine/core/eye';
+import { Adaptation } from '../engine/render/adapt';
+import { OUTLINE } from '../engine/render/outline';
+
+/** Milliseconds without a change of the view after which it counts as resting (longer than adapt.ts takes for a pause). */
+const REST_MS = 300;
 
 /** Milliseconds of sightline work per frame; the rest of the frame stays for drawing and touch. */
 const VISIBILITY_BUDGET_MS = 4;
@@ -92,6 +97,8 @@ export interface ViewerStatus {
   quality: 'high' | 'mid' | 'low';
   /** The device class the settings were chosen for. */
   tier: Tier;
+  /** The adaptation to slow frames: whether it runs, how much coarser the moving frame is drawn, whether the haze rim is on. */
+  adaptation: { on: boolean; scale: number; rim: boolean };
   surveys: SurveyCredit[];
   diagnostics: RendererDiagnostics;
   sensors: { active: boolean; offsetYaw: number; offsetPitch: number };
@@ -186,6 +193,7 @@ export class Viewer {
     this.view = view;
     this.source = new TerrariumSource({ url: opt.tiles, store: new TileStore() });
     this.source.decoded.limit = profile.tiles;
+    this.adaptation = new Adaptation(opt.adapt ?? profile.adapt);
     this.streamer = new ClipmapStreamer(this.source, profile.clipmap, view.lon, view.lat);
     this.streamer.onUpdate = () => this.onLevel();
     this.controls = new LookControls(canvas, this.camera);
@@ -223,9 +231,17 @@ export class Viewer {
         this.visibleCount = this.visibility.visible;
       }
       // Drawn only when something changed (renderer gate); the fps counts drawn frames.
-      if (this.renderer.render()) this.frames++;
-      this.drawLabels();
       const now = performance.now();
+      // A view that has rested a moment is drawn at every pixel; one that
+      // moves, as coarse as its frame times ask for (render/adapt.ts).
+      this.renderer.resolutionScale = now - this.movedAt < REST_MS ? this.adaptation.scale : 1;
+      this.renderer.rim = this.adaptation.rim ? OUTLINE.rim : 0;
+      if (this.renderer.render()) {
+        this.frames++;
+        if (this.drawnAt) this.adaptation.frame(now - this.drawnAt, now);
+        this.drawnAt = now;
+      }
+      this.drawLabels();
       if (now - this.fpsAt >= 1000) {
         this.fps = Math.round((this.frames * 1000) / (now - this.fpsAt));
         this.frames = 0;
@@ -470,6 +486,18 @@ export class Viewer {
     return saveImage(blob, captureFilename(this.view.lon, this.view.lat, this.view.yaw));
   }
 
+  /** The answer to slow frames: fewer pixels while the view moves (render/adapt.ts). */
+  readonly adaptation: Adaptation;
+  /** When the view last changed, and when the last frame was drawn (performance.now). */
+  private movedAt = -Infinity;
+  private drawnAt = 0;
+
+  /** The view changed just now: the frames that follow are moving frames. */
+  private moving() {
+    this.movedAt = performance.now();
+    this.renderer.resolutionScale = this.adaptation.scale;
+  }
+
   /** Where the catalogues and the label targets were last asked for; null before the first standpoint. */
   private standAt: { lon: number; lat: number } | null = null;
 
@@ -485,6 +513,7 @@ export class Viewer {
     const moved = !this.standAt || this.standAt.lon !== this.view.lon || this.standAt.lat !== this.view.lat;
     if (v.yaw !== undefined || v.pitch !== undefined || v.fov !== undefined) {
       this.camera.set({ yaw: this.view.yaw, pitch: this.view.pitch, fov: this.view.fov });
+      this.moving();
     }
     this.applyAltitude();
     if (moved) {
@@ -723,6 +752,7 @@ export class Viewer {
   }
 
   private viewChanged() {
+    this.moving();
     this.view = {
       ...this.view, yaw: this.camera.yaw, pitch: this.camera.pitch, fov: this.camera.fov,
     };
@@ -748,6 +778,7 @@ export class Viewer {
       backend: this.renderer.backend,
       quality: this.quality,
       tier: this.profile.tier,
+      adaptation: { on: this.adaptation.enabled, scale: this.adaptation.scale, rim: this.adaptation.rim },
       surveys: this.surveys,
       diagnostics: this.renderer.diagnostics,
       sensors: {

@@ -170,6 +170,12 @@ export class GpuRenderer {
    * capped at 1.5 it pays a quarter of that and the lines stay as wide.
    */
   maxPixelRatio = Infinity;
+  /**
+   * Draws the frame this much coarser than `maxPixelRatio` allows, each way:
+   * what the adaptation to slow frames asks for while the view moves
+   * (render/adapt.ts); 1 at rest.
+   */
+  resolutionScale = 1;
   lineDark = 0.04;
   refractionK = REFRACTION_K;
   curvature = true;
@@ -684,6 +690,7 @@ export class GpuRenderer {
         shaded: this.shaded, outline: this.outline, snowLine: this.snowLine, fogRange: this.fogRange,
         skyTop: this.skyTop, horizonColor: this.horizonColor, waterColor: this.waterColor,
         whiten: this.whiten, desaturate: this.desaturate, rim: this.rim, maxPixelRatio: this.maxPixelRatio,
+        resolutionScale: this.resolutionScale,
         edgeWidth: this.edgeWidth, lineDark: this.lineDark, refractionK: this.refractionK, curvature: this.curvature,
         band: this.band ? [this.band.r1, this.band.r2] : null, frame: this.frameVersion,
       },
@@ -709,7 +716,7 @@ export class GpuRenderer {
   resize(): { w: number; h: number } {
     const cssW = this.canvas.clientWidth || 640;
     const cssH = this.canvas.clientHeight || 360;
-    const scaling = 1 / renderPixelRatio(globalThis.devicePixelRatio ?? 1, this.maxPixelRatio);
+    const scaling = Math.max(1, this.resolutionScale) / renderPixelRatio(globalThis.devicePixelRatio ?? 1, this.maxPixelRatio);
     if (Math.abs(this.engine.getHardwareScalingLevel() - scaling) > 1e-6) this.engine.setHardwareScalingLevel(scaling);
     this.engine.resize();
     const w = this.engine.getRenderWidth();
