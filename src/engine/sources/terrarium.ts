@@ -140,6 +140,9 @@ export interface TerrariumOptions {
   concurrency?: number;
 }
 
+/** HTTP answers that mean the server has no tile there. */
+const ABSENT = new Set([204, 403, 404, 410]);
+
 export class TerrariumSource implements TileSource {
   readonly name: string;
   readonly tileSize: number;
@@ -156,7 +159,7 @@ export class TerrariumSource implements TileSource {
   private concurrency: number;
 
   /** Counters the UI reports. */
-  stats = { fromMemory: 0, fromStore: 0, fromNetwork: 0, failed: 0, bytes: 0 };
+  stats = { fromMemory: 0, fromStore: 0, fromNetwork: 0, failed: 0, absent: 0, bytes: 0 };
   /** Which decoder reads bytes back untouched in this browser, decided on the probe tile before the first tile. */
   decoder: Decoder = 'bitmap';
   decoderReport = '';
@@ -232,18 +235,22 @@ export class TerrariumSource implements TileSource {
       return this.slot(async () => {
         try {
           const res = await fetch(this.tileUrl(key), { signal, mode: 'cors' });
-          if (!res.ok) { this.stats.failed++; return null; }
+          // The server's answer is "no such tile" (outside the coverage; S3
+          // says 403 for a missing key): no data there, and asking again
+          // brings the same. Anything else that is not a tile may pass.
+          if (ABSENT.has(res.status)) { this.stats.absent++; return null; }
+          if (!res.ok) throw new Error(`tile ${tileId(key)}: HTTP ${res.status}`);
           const bytes = await res.arrayBuffer();
           const h = await bytesToHeights(bytes, this.tileSize, this.decoder);
-          if (!h) { this.stats.failed++; return null; }
+          if (!h) throw new Error(`tile ${tileId(key)}: not decodable`);
           this.stats.fromNetwork++;
           this.stats.bytes += bytes.byteLength;
           this.decoded.set(id, h);
           void this.store.put(id, bytes);
           return h;
-        } catch {
-          this.stats.failed++;
-          return null;
+        } catch (e) {
+          if (!signal?.aborted) this.stats.failed++;
+          throw e;
         }
       });
     })().finally(() => this.inflight.delete(id));

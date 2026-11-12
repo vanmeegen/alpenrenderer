@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_VIEW, EYE_HEIGHT, OUTLINE, PLACES, eyeHeightFromSlider, formatHash, hasStandpoint, readEyeHeight, readHash, readLastView, readOptions, readOutline, sliderFromEyeHeight, startView, writeEyeHeight, writeLastView, writeOutline } from '../../src/app/state';
+import { DEFAULT_VIEW, EYE_HEIGHT, OUTLINE, PLACES, eyeHeightFromSlider, formatHash, hasStandpoint, readEyeHeight, readHash, readLastView, readOptions, readOutline, sliderFromEyeHeight, startView, writeEyeHeight, writeLastView, writeOutline,
+  coarseFixNote, readStandSource, trailing, writeStandSource } from '../../src/app/state';
 
 describe('readHash', () => {
   test('empty hash is the default view', () => {
@@ -163,6 +164,28 @@ describe('where the app starts', () => {
     expect(startView('#yaw=10&fov=30', s)).toEqual({ view: { ...last, yaw: 10, fov: 30 }, locate: true });
   });
 
+  test('a reload after a start from the device asks the device again; a map pick, a place or a shared link stand', () => {
+    // The app writes the standpoint into the URL itself, so a reload always
+    // found one there and "start where I am" only ever worked once.
+    const s = mem(), session = mem();
+    const here = { lon: 11.76411, lat: 47.44379 };
+    expect(readStandSource(session)).toBeNull();
+    writeStandSource('gps', here, session);
+    expect(readStandSource(session)).toEqual({ source: 'gps', lon: here.lon, lat: here.lat });
+    const own = '#lon=11.76411&lat=47.44379&yaw=250.0&pitch=0.0&fov=60';
+    expect(startView(own, s, 1, session)).toMatchObject({ view: { lon: 11.76411, lat: 47.44379, yaw: 250 }, locate: true });
+    // Another standpoint in the same tab, a link somebody shared: it stands.
+    expect(startView('#lon=7.78472&lat=45.98333&yaw=232', s, 1, session).locate).toBe(false);
+    // The standpoint was chosen on the map, or is a named place: it stands.
+    writeStandSource('map', here, session);
+    expect(startView(own, s, 1, session).locate).toBe(false);
+    // A new tab knows nothing of it; storage that throws is no storage.
+    expect(startView(own, s, 1, mem()).locate).toBe(false);
+    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(startView(own, s, 1, broken).locate).toBe(false);
+    expect(() => writeStandSource('gps', here, broken)).not.toThrow();
+  });
+
   test('without a field of view anywhere, the screen\'s long side gets 60°: a sideways phone 60° across, an upright one 60° high', () => {
     expect(startView('', mem(), 0.5).view.fov).toBe(60);
     expect(startView('', mem(), 2).view.fov).toBeCloseTo(2 * Math.atan(Math.tan(Math.PI / 6) / 2) * 180 / Math.PI, 9);
@@ -198,5 +221,73 @@ describe('places', () => {
     for (const summit of [{ lon: 11.60514, lat: 47.41238 }, { lon: 11.59119, lat: 47.38268 }]) {
       expect(Math.abs(local(summit).bearing - p.yaw)).toBeLessThan(30);
     }
+  });
+});
+
+describe('a fix too coarse to stand on', () => {
+  test('beyond 100 m the standpoint is a guess and the user is told, with the figure; a good fix says nothing', () => {
+    expect(coarseFixNote(12)).toBeNull();
+    expect(coarseFixNote(100)).toBeNull();
+    expect(coarseFixNote(null)).toBeNull();
+    expect(coarseFixNote(undefined)).toBeNull();
+    expect(coarseFixNote(850)).toMatch(/± 850 m/);
+    expect(coarseFixNote(2400)).toMatch(/± 2,4 km/);
+    expect(coarseFixNote(850)).toMatch(/Karte/);
+  });
+});
+
+describe('trailing: the latest value, at most every so often, and always in the end', () => {
+  /** Timers by hand: `run(ms)` lets that much time pass. */
+  function clock() {
+    let now = 0, next = 1;
+    const timers = new Map<number, { at: number; fn: () => void }>();
+    return {
+      set: (fn: () => void, ms: number) => { timers.set(next, { at: now + ms, fn }); return next++; },
+      clear: (id: number) => { timers.delete(id); },
+      run(ms: number) {
+        const end = now + ms;
+        for (;;) {
+          const due = [...timers.entries()].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+          if (!due) break;
+          timers.delete(due[0]);
+          now = due[1].at;
+          due[1].fn();
+        }
+        now = end;
+      },
+    };
+  }
+
+  test('a stream of values is written every interval, not held back until it stops (sensor mode: the view changes every frame)', () => {
+    const c = clock(), seen: number[] = [];
+    const write = trailing((v: number) => seen.push(v), 400, c);
+    for (let i = 1; i <= 100; i++) { write(i); c.run(16); }       // 1.6 s of frames
+    expect(seen.length).toBe(4);                                   // at 400, 800, 1200, 1600 ms
+    expect(seen[0]).toBe(25);                                      // the latest at the time, not the first
+    expect(seen.at(-1)).toBe(100);
+  });
+
+  test('a single value is written once, an interval later; the last one is never lost', () => {
+    const c = clock(), seen: string[] = [];
+    const write = trailing((v: string) => seen.push(v), 400, c);
+    write('a');
+    c.run(399);
+    expect(seen).toEqual([]);
+    c.run(1);
+    expect(seen).toEqual(['a']);
+    c.run(5000);
+    expect(seen).toEqual(['a']);
+    write('b'); write('c');
+    c.run(400);
+    expect(seen).toEqual(['a', 'c']);
+  });
+
+  test('cancel drops what is pending', () => {
+    const c = clock(), seen: number[] = [];
+    const write = trailing((v: number) => seen.push(v), 400, c);
+    write(1);
+    write.cancel();
+    c.run(1000);
+    expect(seen).toEqual([]);
   });
 });

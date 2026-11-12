@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { FIXED_CREDITS } from '../engine/core/attribution';
-import { EYE_HEIGHT, OUTLINE, eyeHeightFromSlider, formatHash, PLACES, readHash, readOptions, sliderFromEyeHeight, startView, ViewState, writeLastView } from './state';
+import {
+  EYE_HEIGHT, OUTLINE, StandSource, ViewState, coarseFixNote, eyeHeightFromSlider, formatHash, PLACES, readHash,
+  readOptions, sliderFromEyeHeight, startView, trailing, writeLastView, writeStandSource,
+} from './state';
 import { PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
@@ -44,7 +47,21 @@ export function App() {
   const [outline, setOutline] = useState(OUTLINE.initial);
   const [locating, setLocating] = useState(false);
   const [locNote, setLocNote] = useState<{ message: string; help: LocationHelp } | null>(null);
-  const [positionSource, setPositionSource] = useState<'url' | 'map' | 'gps' | 'place' | 'photo'>('url');
+  const [positionSource, setPositionSource] = useState<StandSource>('url');
+  // What this tab notes for its next reload (state.ts startView). A start
+  // that asks the device counts as the device's even while the answer is
+  // out or was refused: reloaded outdoors, it is asked again.
+  const sourceRef = useRef<StandSource>(start.locate ? 'gps' : 'url');
+  /** Counts the standpoints chosen: a fix that was asked for before the latest one is dropped when it lands. */
+  const standChoice = useRef(0);
+  /** The standpoint was chosen this way: shown in the HUD and noted for this tab, for the next reload. */
+  const chosen = (source: StandSource) => {
+    standChoice.current++;
+    sourceRef.current = source;
+    setPositionSource(source);
+    const v = viewerRef.current?.current;
+    if (v) writeStandSource(source, v);
+  };
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [sensors, setSensors] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -60,7 +77,13 @@ export function App() {
     const canvas = canvasRef.current!;
     let viewer: Viewer | null = null;
     let cancelled = false;
-    let hashTimer = 0;
+    // The URL follows the view at most every 400 ms, and always in the end
+    // (state.ts trailing); the tab's note of where the standpoint came from
+    // goes with it, so the two never name different places.
+    const writeHash = trailing((nv: ViewState) => {
+      history.replaceState(null, '', formatHash(nv));
+      writeStandSource(sourceRef.current, nv);
+    }, 400);
     const opt = readOptions();
 
     Viewer.create(canvas, opt, start.view, overlayRef.current).then((v) => {
@@ -76,10 +99,7 @@ export function App() {
       v.onView = (nv) => {
         setView(nv);
         writeLastView(nv);
-        clearTimeout(hashTimer);
-        hashTimer = window.setTimeout(() => {
-          history.replaceState(null, '', formatHash(nv));
-        }, 300);
+        writeHash(nv);
       };
       setEyeHeight(v.eyeHeight);
       setOutline(v.outline);
@@ -89,10 +109,18 @@ export function App() {
       (window as unknown as Record<string, unknown>).alp = v;
     }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
-    const onHash = () => { void viewer?.relocate(readHash()); };
+    // What the hash leaves out stays as it is: "#yaw=180" turns the view, it does not move the standpoint.
+    const onHash = () => {
+      if (!viewer) return;
+      const here = viewer.current;
+      const to = readHash(location.hash, here);
+      void viewer.relocate(to);
+      if (to.lon !== here.lon || to.lat !== here.lat) { chosen('url'); setGpsAccuracy(null); }
+    };
     window.addEventListener('hashchange', onHash);
     return () => {
       cancelled = true;
+      writeHash.cancel();
       window.removeEventListener('hashchange', onHash);
       viewer?.dispose();
       viewerRef.current = null;
@@ -108,15 +136,19 @@ export function App() {
     const p = PLACES.find((x) => x.id === id);
     if (!p) return;
     void viewerRef.current?.relocate({ lon: p.lon, lat: p.lat, alt: undefined, yaw: p.yaw, pitch: 0, fov: 60 });
-    setPositionSource('place');
+    chosen('place');
+    setGpsAccuracy(null);
+    setNote(null);
     setPanel('none');
   };
 
   /** From the map or the GPS: stand there on the ground, keep looking the same way. */
   const pick = (p: PickedPosition) => {
     void viewerRef.current?.relocate({ lon: p.lon, lat: p.lat, alt: undefined });
-    setPositionSource(p.source);
+    chosen(p.source);
     setGpsAccuracy(p.source === 'gps' ? p.accuracy ?? null : null);
+    // A fix good to a kilometre is a guess at where one stands, and the whole view hangs on it.
+    setNote(p.source === 'gps' ? coarseFixNote(p.accuracy) : null);
     setPanel('none');
   };
 
@@ -128,8 +160,11 @@ export function App() {
   const locateHere = async (openOnFail = false) => {
     setLocating(true);
     setLocNote(null);
+    const asked = standChoice.current;
     try {
       const r = await locateChecked({ secure: window.isSecureContext, permission: sitePermission });
+      // A fix can take ten seconds: whoever chose a standpoint meanwhile is not carried off by it.
+      if (asked !== standChoice.current) return;
       if (r.ok) pick(r.position);
       else {
         setLocNote({ message: r.message, help: r.help });
@@ -186,7 +221,7 @@ export function App() {
       const p = await v.openPhoto(file);
       setPhoto(p);
       setLensFov(p.lensFov);
-      setPositionSource(p.positioned ? 'photo' : positionSource);
+      if (p.positioned) { chosen('photo'); setGpsAccuracy(null); }
       if (!p.positioned) setNote('Foto ohne GPS: Standpunkt per Karte setzen.');
     } catch (e) {
       setNote(`Foto konnte nicht geladen werden: ${e instanceof Error ? e.message : String(e)}`);
@@ -226,7 +261,11 @@ export function App() {
   };
   const toggle = (p: typeof panel) => setPanel(panel === p ? 'none' : p);
 
-  const loading = status && status.levelsReady < status.levels;
+  // Tiles on their way. The overlay in the middle of the view only while a
+  // level still shows nothing: after a short move the old windows stand
+  // until the new ones are complete.
+  const loading = status && status.pending > 0;
+  const blank = loading && status.levelsShown < status.levels;
   const d = status?.diagnostics;
   const offsetYaw = status?.sensors.offsetYaw ?? 0;
   const offsetPitch = status?.sensors.offsetPitch ?? 0;
@@ -298,9 +337,12 @@ export function App() {
               <span>Lade Gelände: Tiles {status.tilesDone}/{status.tilesTotal}, Level {status.levelsReady}/{status.levels}
                 {status.failed > 0 ? `, ${status.failed} fehlgeschlagen` : ''}</span>
             )}
+            {status && !loading && status.missing > 0 && (
+              <span className="text-red-700">{status.missing} Kacheln fehlen ·{' '}
+                <button className={BTN} onClick={() => void viewerRef.current?.retryTiles()}>Erneut laden</button> · </span>
+            )}
             {status && !loading && (
-              <span>{status.levels} Level · {fmtBytes(status.bytes)} · {status.backend}
-                {status.failed > 0 ? ` · ${status.failed} Tiles fehlgeschlagen` : ''}
+              <span>{status.levelsShown} Level · {fmtBytes(status.bytes)} · {status.backend}
                 {status.peaks.total > 0 ? ` · Gipfel ${status.peaks.visible}/${status.peaks.total}` : ''}</span>
             )}
           </div>
@@ -411,7 +453,7 @@ export function App() {
         )}
       </div>
 
-      {(!status || loading) && !error && (
+      {(!status || blank) && !error && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div className="rounded-lg bg-white/85 px-4 py-3 text-[14px] text-neutral-800 shadow backdrop-blur" role="status">
             <div className="font-semibold">Gelände lädt …</div>

@@ -104,18 +104,95 @@ export function writeLastView(v: ViewState, storage = defaultStorage()) {
   try { storage?.setItem(LAST_VIEW_KEY, JSON.stringify(out)); } catch { /* private mode: not remembered */ }
 }
 
+/** How the standpoint came about. */
+export type StandSource = 'url' | 'map' | 'gps' | 'place' | 'photo';
+
+const defaultSession = (): Storage | undefined => {
+  try { return typeof sessionStorage !== 'undefined' ? sessionStorage : undefined; } catch { return undefined; }
+};
+
+const STAND_SOURCE_KEY = 'alp.standSource';
+const sameSpot = (a: number, b: number) => Math.abs(a - b) < 1e-5;   // the hash carries five decimals
+
 /**
- * Where the app opens. A standpoint in the URL is the standpoint, as before
- * (a shared link, a reload). Without one, the device's position is what a
- * person on a mountain wants (PeakFinder and PeakVisor open on the GPS), so
- * the caller asks for it; until it arrives, and when it is refused, the view
- * last shown here stands, or the default place.
+ * Remembers, for this tab, how the standpoint came about and which one it
+ * was. The app writes the standpoint into the URL itself, so on a reload the
+ * URL alone cannot tell "I started where I stood" from "somebody sent me
+ * this place"; this can.
  */
-export function startView(hash: string, storage = defaultStorage(), aspect = 1): { view: ViewState; locate: boolean } {
+export function writeStandSource(source: StandSource, at: { lon: number; lat: number }, session = defaultSession()) {
+  try { session?.setItem(STAND_SOURCE_KEY, JSON.stringify({ source, lon: at.lon, lat: at.lat })); } catch { /* not remembered */ }
+}
+
+export function readStandSource(session = defaultSession()): { source: StandSource; lon: number; lat: number } | null {
+  try {
+    const raw = session?.getItem(STAND_SOURCE_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as { source?: StandSource; lon?: number; lat?: number };
+    if (typeof v.source !== 'string' || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) return null;
+    return { source: v.source, lon: v.lon!, lat: v.lat! };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where the app opens. A standpoint in the URL is the standpoint (a shared
+ * link, a place chosen on the map and reloaded). Without one, the device's
+ * position is what a person on a mountain wants (PeakFinder and PeakVisor
+ * open on the GPS), so the caller asks for it; until it arrives, and when it
+ * is refused, the view last shown here stands, or the default place. And a
+ * standpoint in the URL that this tab took from the device itself is asked
+ * for again: reloaded on the next mountain, the app is on the next mountain.
+ */
+export function startView(
+  hash: string, storage = defaultStorage(), aspect = 1, session = defaultSession(),
+): { view: ViewState; locate: boolean } {
   // No field of view anywhere: 60° along the screen's long side (camera.ts fovForAspect).
   const fallback = { ...DEFAULT_VIEW, fov: fovForAspect(DEFAULT_VIEW.fov, aspect) };
-  if (hasStandpoint(hash)) return { view: readHash(hash, fallback), locate: false };
+  if (hasStandpoint(hash)) {
+    const view = readHash(hash, fallback);
+    const src = readStandSource(session);
+    const own = src?.source === 'gps' && sameSpot(src.lon, view.lon) && sameSpot(src.lat, view.lat);
+    return { view, locate: own };
+  }
   return { view: readHash(hash, readLastView(storage) ?? fallback), locate: true };
+}
+
+/** Metres: a fix coarser than this is a guess at the standpoint, and the whole view hangs on it. */
+export const COARSE_FIX_M = 100;
+
+/** What to tell the user about a fix of this accuracy (metres); null when it is good enough to stand on. */
+export function coarseFixNote(accuracy: number | null | undefined): string | null {
+  if (accuracy == null || !(accuracy > COARSE_FIX_M)) return null;
+  const size = accuracy < 1000 ? `${Math.round(accuracy)} m` : `${(accuracy / 1000).toFixed(1).replace('.', ',')} km`;
+  return `Standort nur auf ± ${size} genau, der Blick kann abweichen. Auf der Karte nachsetzen.`;
+}
+
+interface Timers {
+  set(fn: () => void, ms: number): number;
+  clear(id: number): void;
+}
+const realTimers: Timers = {
+  set: (fn, ms) => setTimeout(fn, ms) as unknown as number,
+  clear: (id) => clearTimeout(id),
+};
+
+/**
+ * `fn` with the latest value, `ms` after the first one not yet passed on:
+ * at most once per interval, and always in the end. A debounce would hold a
+ * stream of values back until it stops; in sensor mode the view changes
+ * every frame and never does.
+ */
+export function trailing<T>(fn: (v: T) => void, ms: number, timers: Timers = realTimers): ((v: T) => void) & { cancel(): void } {
+  let latest: T, timer: number | null = null;
+  const push = (v: T) => {
+    latest = v;
+    if (timer !== null) return;
+    timer = timers.set(() => { timer = null; fn(latest); }, ms);
+  };
+  push.cancel = () => { if (timer !== null) { timers.clear(timer); timer = null; } };
+  return push;
 }
 
 export function formatHash(v: ViewState): string {

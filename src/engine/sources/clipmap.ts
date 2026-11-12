@@ -1,11 +1,16 @@
 /**
  * Fills the clipmap from a tile source.
  *
- * Levels are fixed-size Web-Mercator windows centred on the observer, each one
- * zoom step coarser and twice the extent of the one inside it. Moving the
- * observer recomputes the windows and refills them from tiles; because tiles
- * are cached, walking around a valley refills from local storage and never
- * touches the network.
+ * Levels are fixed-size Web-Mercator windows around the observer, each one
+ * zoom step coarser and twice the extent of the one inside it. A window
+ * stays where it is while the observer is near its centre and follows once
+ * they are an eighth of it away; it is then cut anew, filled from tiles, and
+ * only when it is complete does it take the old one's place. A level
+ * therefore always holds one whole window in its own place, or nothing:
+ * never the old terrain under the new coordinates, and never a window with
+ * a tile missing (a pit 1000 m below sea level). Because tiles are cached,
+ * walking around a valley refills from local storage and never touches the
+ * network.
  *
  * Coarse levels are filled first. A blurry but complete horizon is far more
  * use than a sharp foreground with nothing behind it, and it is what makes the
@@ -57,6 +62,17 @@ export const LOW_CLIPMAP: ClipmapConfig = {
 
 const QUANT = 1;
 const BIAS = -1000;
+/** A window follows the observer once they are farther than this share of its size from its centre. */
+const RECENTRE = 1 / 8;
+/** Pauses before a failed tile is asked again, milliseconds. */
+const RETRY_DELAYS = [400, 1500, 4000];
+/** A tile that did not arrive, however often it was asked for. */
+const FAILED = Symbol('failed');
+
+export interface StreamerOptions {
+  /** Pauses before a failed tile is asked again, milliseconds; as many retries as entries. */
+  retryDelays?: number[];
+}
 
 export interface FillProgress {
   /** Tiles still to fetch for the current centre. */
@@ -64,12 +80,18 @@ export interface FillProgress {
   /** Tiles resolved so far for the current centre. */
   done: number;
   total: number;
+  /** Levels that hold the window for the current centre. */
   levelsReady: number;
+  /** Tiles that did not arrive, retries included; their levels are left out until retry(). */
+  failed: number;
 }
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export class ClipmapStreamer {
   readonly heightField: HeightField;
-  readonly progress: FillProgress = { pending: 0, done: 0, total: 0, levelsReady: 0 };
+  readonly progress: FillProgress = { pending: 0, done: 0, total: 0, levelsReady: 0, failed: 0 };
+  private readonly retryDelays: number[];
 
   private levels: Level[] = [];
   /** Window origin currently *loaded* into each level, or null when empty. */
@@ -88,7 +110,9 @@ export class ClipmapStreamer {
     readonly source: TileSource,
     readonly config: ClipmapConfig = DEFAULT_CLIPMAP,
     lon = 0, lat = 0,
+    options: StreamerOptions = {},
   ) {
+    this.retryDelays = options.retryDelays ?? RETRY_DELAYS;
     this.heightField = new HeightField(lon, lat);
     const { size } = config;
     for (const spec of config.levels) {
@@ -148,13 +172,15 @@ export class ClipmapStreamer {
     const { signal } = this.lookAbort;
     for (const job of jobs) {
       const lv = this.lookLevels[job.index];
-      const tiles = await Promise.all(job.keys.map((key) => this.source.load(key, signal)));
+      const tiles = await Promise.all(job.keys.map((key) => this.fetchTile(key, signal, this.retryDelays, () => gen !== this.lookGeneration)));
       if (gen !== this.lookGeneration) return;
+      // The telescope only sharpens: a window with a tile missing is not shown.
+      if (tiles.some((t) => t === FAILED)) continue;
       // A window moves as a whole: cut, filled, then shown, so no frame draws half of each.
       lv.px0 = job.px0;
       lv.py0 = job.py0;
       lv.raw.fill(0);
-      job.keys.forEach((key, k) => { if (tiles[k]) this.blit(lv, job.px0, job.py0, key, tiles[k]!); });
+      job.keys.forEach((key, k) => { const t = tiles[k]; if (t && t !== FAILED) this.blit(lv.raw, lv.w, lv.h, job.px0, job.py0, key, t); });
       this.heightField.setOrigin(this.heightField.lon, this.heightField.lat);
       lv.version++;
       lv.filled = true;
@@ -182,9 +208,30 @@ export class ClipmapStreamer {
     return this.levels.map((l) => mercResolution(this.heightField.lat, l.z));
   }
 
+  /** One tile, asked again after each pause while it fails; FAILED when it never arrived or nobody waits for it any more. */
+  private async fetchTile(
+    key: TileKey, signal: AbortSignal, delays: number[], stale: () => boolean,
+  ): Promise<Float32Array | null | typeof FAILED> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.source.load(key, signal);
+      } catch {
+        if (stale() || signal.aborted || attempt >= delays.length) return FAILED;
+        await wait(delays[attempt]);
+        if (stale()) return FAILED;
+      }
+    }
+  }
+
+  /** Asks again for what did not arrive: the levels left out after failed tiles. */
+  retry(): Promise<void> {
+    return this.setCenter(this.heightField.lon, this.heightField.lat);
+  }
+
   /**
-   * Recentres on a position and refills. Safe to call on every GPS fix: a
-   * level whose window has not moved is left alone.
+   * Moves the observer and refills what has to follow. Safe to call on every
+   * GPS fix: a level whose window still has the observer near its centre is
+   * left alone, and only reaches less far on the side they moved to.
    */
   async setCenter(lon: number, lat: number): Promise<void> {
     const gen = ++this.generation;
@@ -195,15 +242,26 @@ export class ClipmapStreamer {
     const size = this.config.size;
     const jobs: { index: number; keys: TileKey[]; px0: number; py0: number }[] = [];
 
+    // Where the observer now stands inside each window as it is, and hence
+    // how far each level reaches; a window they have left reaches nowhere.
+    this.heightField.setOrigin(lon, lat);
+
     this.levels.forEach((lv, i) => {
       const cx = lonToMercX(lon, lv.z);
       const cy = latToMercY(lat, lv.z);
+      const held = this.loaded[i] !== null && lv.filled;
+      if (held && Math.abs(cx - (lv.px0 + size / 2)) <= size * RECENTRE
+        && Math.abs(cy - (lv.py0 + size / 2)) <= size * RECENTRE) return;
       const px0 = Math.round(cx) - (size >> 1);
       const py0 = Math.round(cy) - (size >> 1);
-      const stamp = `${lv.z}:${px0}:${py0}`;
-      if (this.loaded[i] === stamp) return;
-      lv.px0 = px0;
-      lv.py0 = py0;
+      // The old window stays, in its own place, until the new one is
+      // complete. One the observer has left is of no use: it is emptied.
+      if (lv.filled && lv.maxRange <= 0) {
+        lv.filled = false;
+        lv.version++;
+        this.loaded[i] = null;
+        this.onUpdate?.(i);
+      }
       // The window is cut on the pixel grid at lv.z; the source's tiles may be
       // bigger than 256 px, in which case they live one tile zoom lower and
       // each covers `T` pixels of this level.
@@ -221,28 +279,41 @@ export class ClipmapStreamer {
       jobs.push({ index: i, keys, px0, py0 });
     });
 
-    // Only now that every px0/py0 is settled can the field recompute where the
-    // observer sits inside each window, and hence each level's usable range.
-    this.heightField.setOrigin(lon, lat);
-
     this.progress.total = jobs.reduce((a, j) => a + j.keys.length, 0);
     this.progress.done = 0;
     this.progress.pending = this.progress.total;
+    this.progress.failed = 0;
     this.progress.levelsReady = this.levels.length - jobs.length;
 
     // Coarsest first: a complete horizon beats a sharp foreground.
     jobs.sort((a, b) => b.index - a.index);
 
+    // Once a level has given up on a tile the connection is evidently down:
+    // the levels after it ask once and do not wait.
+    let delays = this.retryDelays;
     for (const job of jobs) {
       const lv = this.levels[job.index];
+      const raw = new Uint16Array(lv.w * lv.h);
+      let failed = 0;
       await Promise.all(job.keys.map(async (key) => {
-        const heights = await this.source.load(key, signal);
+        const heights = await this.fetchTile(key, signal, delays, () => gen !== this.generation);
         if (gen !== this.generation) return;
-        if (heights) this.blit(lv, job.px0, job.py0, key, heights);
+        if (heights === FAILED) failed++;
+        else if (heights) this.blit(raw, lv.w, lv.h, job.px0, job.py0, key, heights);
         this.progress.done++;
         this.progress.pending--;
       }));
       if (gen !== this.generation) return;
+      if (failed) {
+        this.progress.failed += failed;
+        delays = [];
+        continue;
+      }
+      // The window moves as a whole: cut, filled, then shown.
+      lv.px0 = job.px0;
+      lv.py0 = job.py0;
+      lv.raw.set(raw);
+      this.heightField.setOrigin(lon, lat);
       lv.version++;
       lv.filled = true;
       this.loaded[job.index] = `${lv.z}:${job.px0}:${job.py0}`;
@@ -252,28 +323,28 @@ export class ClipmapStreamer {
   }
 
   /**
-   * Copies the overlapping part of a tile into a level's raster. The tile's
-   * pixels are on the level's pixel grid; its origin is `key.x * T` where T is
-   * the tile edge, whatever tile zoom it was fetched at.
+   * Copies the overlapping part of a tile into a window's raster (`w` × `h`,
+   * its corner at pixel px0, py0). The tile's pixels are on the level's pixel
+   * grid; its origin is `key.x * T` where T is the tile edge, whatever tile
+   * zoom it was fetched at.
    */
-  private blit(lv: Level, px0: number, py0: number, key: TileKey, heights: Float32Array) {
+  private blit(raw: Uint16Array, w: number, h: number, px0: number, py0: number, key: TileKey, heights: Float32Array) {
     const T = Math.round(Math.sqrt(heights.length));
     const n = T * (1 << key.z);
     // The tile may be the wrapped copy of a column left or right of the window.
     for (const originX of [key.x * T, key.x * T - n, key.x * T + n]) {
       const x0 = Math.max(px0, originX);
-      const x1 = Math.min(px0 + lv.w, originX + T);
+      const x1 = Math.min(px0 + w, originX + T);
       if (x1 <= x0) continue;
       const originY = key.y * T;
       const y0 = Math.max(py0, originY);
-      const y1 = Math.min(py0 + lv.h, originY + T);
+      const y1 = Math.min(py0 + h, originY + T);
       if (y1 <= y0) continue;
       for (let y = y0; y < y1; y++) {
         const src = (y - originY) * T - originX;
-        const dst = (y - py0) * lv.w - px0;
+        const dst = (y - py0) * w - px0;
         for (let x = x0; x < x1; x++) {
-          const h = heights[src + x];
-          lv.raw[dst + x] = Math.max(0, Math.min(65535, Math.round(h - BIAS)));
+          raw[dst + x] = Math.max(0, Math.min(65535, Math.round(heights[src + x] - BIAS)));
         }
       }
     }

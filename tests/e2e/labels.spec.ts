@@ -4,7 +4,7 @@
  * where a label sits come from the terrain formula, not from a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { PEAKS, RIDGE_CREST, SHOULDER, STAND, TESTHORN, TESTHORN_RANGE, heightAt, skylineRow, summitScreenY } from './fixtures/terrain';
+import { FLANK, PEAKS, RIDGE_CREST, SHOULDER, STAND, TESTHORN, TESTHORN_RANGE, heightAt, skylineRow, summitScreenY } from './fixtures/terrain';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
 const PEAK_CELLS = '/tests/e2e/fixtures/peaks/';
@@ -88,6 +88,31 @@ test.describe('summit labels', () => {
     expect(t.by + t.bh).toBeLessThan(t.ay);
     expect(await inkIn(page, t)).toBeGreaterThan(50);
     await expect(page.getByText(`Gipfel ${PEAKS.length - 1}/${PEAKS.length}`)).toBeVisible();
+  });
+
+  test('a new standpoint drops the labels of the old one at once; a turn of the head keeps them', async ({ page }) => {
+    // The targets hold bearings and ranges from the standpoint. Until the
+    // catalogue for the new one arrived, the old ones were drawn from there.
+    await page.goto(url());
+    await ready(page);
+    await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toContain('Testhorn');
+    const turned = await page.evaluate(() => {
+      const v = (window as any).alp;
+      void v.relocate({ yaw: 95 });
+      return { targets: v.targets.length as number };
+    });
+    expect(turned.targets).toBeGreaterThan(0);                  // kept
+    const moved = await page.evaluate(([lon, lat]) => {
+      const v = (window as any).alp;
+      void v.relocate({ lon, lat });
+      return { targets: v.targets.length as number, placed: v.placed.length as number, settled: v.status().peaks.settled as boolean };
+    }, [FLANK.lon, FLANK.lat]);
+    expect(moved).toEqual({ targets: 0, placed: 0, settled: false });
+    // And they come back, computed from the new standpoint.
+    await expect.poll(() => page.evaluate(() => {
+      const v = (window as any).alp;
+      return v.status().peaks.settled && v.targets.length > 0;
+    }), { timeout: 60_000 }).toBe(true);
   });
 
   test('a summit behind its own shoulder is labelled on its visible edge, the card says how far the summit is', async ({ page }) => {

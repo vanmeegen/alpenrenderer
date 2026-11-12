@@ -67,8 +67,15 @@ export interface LabelBox {
 export interface ViewerStatus {
   tilesDone: number;
   tilesTotal: number;
+  /** Levels that hold the window for this standpoint. */
   levelsReady: number;
   levels: number;
+  /** Levels that hold terrain at all: after a short move the old windows still do while the new ones load. */
+  levelsShown: number;
+  /** Tiles still on their way. */
+  pending: number;
+  /** Tiles that did not arrive, retries included; their levels are left out until retryTiles(). */
+  missing: number;
   /** DEM ground under the eye, metres. */
   ground: number;
   eyeAltitude: number;
@@ -443,20 +450,44 @@ export class Viewer {
     return saveImage(blob, captureFilename(this.view.lon, this.view.lat, this.view.yaw));
   }
 
-  /** Moves the standpoint; the clipmap refills around it. */
+  /** Where the catalogues and the label targets were last asked for; null before the first standpoint. */
+  private standAt: { lon: number; lat: number } | null = null;
+
+  /**
+   * Changes the view; with another lon/lat the standpoint moves and the
+   * clipmap refills around it. The label targets hold bearings and ranges
+   * from the standpoint, so a move drops them at once, with their sightlines
+   * and what is placed: nothing of the old place is drawn from the new one.
+   */
   async relocate(v: Partial<ViewState>) {
-    if (v.lon !== undefined || v.lat !== undefined) this.select(null);
+    const before = this.view.alt;
     this.view = { ...this.view, ...v };
+    const moved = !this.standAt || this.standAt.lon !== this.view.lon || this.standAt.lat !== this.view.lat;
     if (v.yaw !== undefined || v.pitch !== undefined || v.fov !== undefined) {
       this.camera.set({ yaw: this.view.yaw, pitch: this.view.pitch, fov: this.view.fov });
     }
     this.applyAltitude();
-    this.sensors.setPosition(this.view.lon, this.view.lat);
+    if (moved) {
+      this.standAt = { lon: this.view.lon, lat: this.view.lat };
+      this.select(null);
+      this.targets = [];
+      this.visibility = null;
+      this.visibleCount = 0;
+      this.placed = [];
+      this.sensors.setPosition(this.view.lon, this.view.lat);
+      void this.coverage.around(this.view.lon, this.view.lat).then((s) => { this.surveys = s; });
+      this.loadPeaks();
+      this.loadLakes();
+    } else if (this.view.alt !== before) {
+      this.scheduleRebuildTargets();                        // the same place, seen from another height
+    }
     this.onView?.(this.current);
-    void this.coverage.around(this.view.lon, this.view.lat).then((s) => { this.surveys = s; });
-    this.loadPeaks();
-    this.loadLakes();
     await this.streamer.setCenter(this.view.lon, this.view.lat);
+  }
+
+  /** Asks again for the tiles that did not arrive (status().missing). */
+  retryTiles(): Promise<void> {
+    return this.streamer.retry();
   }
 
   /** The catalogue around the standpoint; a stale answer after another move is dropped. */
@@ -536,7 +567,7 @@ export class Viewer {
     if (!painter) return;
     const cssW = painter.canvas.clientWidth || 1, cssH = painter.canvas.clientHeight || 1;
     painter.resize(cssW, cssH);
-    if (!this.showLabels || !this.targets.length) { this.placed = []; return; }
+    if (!this.showLabels || !this.targets.length) { this.placed = []; return; }   // resize() cleared the overlay
     const mesh = this.renderer.meshParams();
     this.placed = layoutLabels(this.targets, this.camera, {
       width: cssW, height: cssH, measure: painter.measure,
@@ -620,6 +651,8 @@ export class Viewer {
     return {
       tilesDone: p.done, tilesTotal: p.total, levelsReady: p.levelsReady,
       levels: hf.eyeLevels().length,
+      levelsShown: hf.eyeLevels().filter((l) => l.filled).length,
+      pending: p.pending, missing: p.failed,
       ground: hf.groundAt(this.view.lon, this.view.lat),
       eyeAltitude: this.renderer.eyeAltitude,
       altitudeSource: this.view.alt === undefined ? 'dem' : 'given',

@@ -4,7 +4,7 @@
  * request to the tile host is answered with one flat PNG.
  */
 import { expect, Page, test } from '@playwright/test';
-import { STAND } from './fixtures/terrain';
+import { FLANK, STAND } from './fixtures/terrain';
 import { MAP_ZOOM } from '../../src/app/mapPicker';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
@@ -116,6 +116,50 @@ test.describe('GPS', () => {
   });
 });
 
+test.describe('GPS, a coarse fix', () => {
+  test.use({
+    geolocation: { latitude: STAND.lat + 0.001, longitude: STAND.lon + 0.002, accuracy: 850 },
+    permissions: ['geolocation'],
+  });
+
+  test('a fix good to 850 m only is taken, with a warning and the way out', async ({ page }) => {
+    await page.goto(url());
+    await ready(page);
+    await page.getByRole('button', { name: 'Standpunkt' }).click();
+    await page.getByRole('region', { name: 'Standpunkt wählen' }).getByRole('button').first().click();
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(STAND.lon + 0.002, 4);
+    await expect(page.getByText(/Standort nur auf ± 850 m genau/)).toBeVisible();
+    await expect(page.getByText(/Auf der Karte nachsetzen/)).toBeVisible();
+  });
+});
+
+test.describe('a fix that comes late', () => {
+  test('is dropped when the standpoint was chosen otherwise in the meantime', async ({ page }) => {
+    // The phone takes its time for a fix (ten seconds outdoors is normal);
+    // whoever picks a place meanwhile must not be carried off when it lands.
+    await page.addInitScript(([lon, lat]) => {
+      navigator.geolocation.getCurrentPosition = (ok) => {
+        (window as any).__fix = () => ok({
+          coords: { longitude: lon, latitude: lat, accuracy: 8, altitude: null, altitudeAccuracy: null, heading: null, speed: null },
+          timestamp: Date.now(),
+        } as GeolocationPosition);
+      };
+    }, [STAND.lon + 0.002, STAND.lat + 0.001]);
+    await page.goto(url());
+    await ready(page);
+    await page.getByRole('button', { name: 'Standpunkt' }).click();
+    await page.getByRole('region', { name: 'Standpunkt wählen' }).getByRole('button').first().click();
+    await expect.poll(() => page.evaluate(() => typeof (window as any).__fix), { timeout: 30_000 }).toBe('function');
+    const chosen = FLANK.lon;
+    await page.evaluate((h) => { location.hash = h; }, `#lon=${chosen}&lat=${FLANK.lat}&yaw=90&pitch=0&fov=60`);
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(chosen, 4);
+    await page.evaluate(() => (window as any).__fix());
+    await page.waitForTimeout(1500);
+    expect(await hashNum(page, 'lon')).toBeCloseTo(chosen, 4);
+    await expect(page.getByText(/GPS/)).toHaveCount(0);
+  });
+});
+
 test.describe('start without a standpoint', () => {
   test.use({
     geolocation: { longitude: STAND.lon + 0.002, latitude: STAND.lat + 0.001 },
@@ -130,6 +174,28 @@ test.describe('start without a standpoint', () => {
     await expect.poll(() => hashNum(page, 'lat'), { timeout: 60_000 }).toBeCloseTo(STAND.lat + 0.001, 4);
     await ready(page);
     await expect(page.getByText(/GPS/)).toBeVisible();
+  });
+
+  test('reloaded, a start from the device asks the device again; a standpoint from a link stands', async ({ page, context }) => {
+    // The app writes the standpoint into the URL, so after the first start
+    // every reload found one there: opened again on the next mountain, the
+    // app still stood on the last.
+    await page.goto(noHash);
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 60_000 }).toBeCloseTo(STAND.lon + 0.002, 4);
+    await ready(page);
+    await context.setGeolocation({ longitude: STAND.lon - 0.003, latitude: STAND.lat + 0.002 });
+    await page.reload();
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 60_000 }).toBeCloseTo(STAND.lon - 0.003, 4);
+    await expect.poll(() => hashNum(page, 'lat'), { timeout: 60_000 }).toBeCloseTo(STAND.lat + 0.002, 4);
+    await ready(page);
+    // A standpoint that came by the URL (a link, the address bar) is not the device's: it stands.
+    await page.evaluate((h) => { location.hash = h; }, `#lon=${STAND.lon + 0.004}&lat=${STAND.lat}&yaw=90&pitch=0&fov=60`);
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(STAND.lon + 0.004, 4);
+    await page.waitForTimeout(600);                              // the tab's note of where the standpoint came from is written with the hash
+    await page.reload();
+    await ready(page);
+    await page.waitForTimeout(1500);
+    expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon + 0.004, 4);
   });
 
   test('a standpoint in the URL is kept and the device is not asked', async ({ page }) => {

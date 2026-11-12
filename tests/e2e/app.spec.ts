@@ -20,7 +20,7 @@ function url(hash: Record<string, number | string> = {}, query: Record<string, s
 
 interface Status {
   tilesDone: number; tilesTotal: number; levelsReady: number; levels: number;
-  ground: number; eyeAltitude: number; failed: number; fps: number;
+  ground: number; eyeAltitude: number; failed: number; fps: number; missing: number; pending: number; levelsShown: number;
   diagnostics: { framesDrawn: number; frameErrors: number; terrainReady: boolean; shadeReady: boolean;
     compositeReady: boolean; shaderErrors: string[]; vertices: number };
 }
@@ -286,6 +286,26 @@ test.describe('controls', () => {
     await expect.poll(async () => hashNum(await hashOf(page), 'fov'), { timeout: 30_000 }).toBe(60);
   });
 
+  test('a view that keeps changing reaches the URL while it changes, not only once it rests', async ({ page }) => {
+    // The hash was written 300 ms after the last change of the view. With
+    // the sensors on the view changes every frame, so the URL only followed
+    // when the phone was put down, and a link shared while panning showed
+    // the old view. Driven here through the viewer's own change handler, 20
+    // times a second for two seconds.
+    await page.goto(url());
+    await ready(page);
+    await page.evaluate(() => {
+      const v = (window as any).alp;
+      let yaw = 100;
+      (window as any).__turning = setInterval(() => { yaw += 0.5; v.onView({ ...v.current, yaw }); }, 50);
+    });
+    await page.waitForTimeout(1500);
+    const during = hashNum(await hashOf(page), 'yaw');
+    await page.evaluate(() => clearInterval((window as any).__turning));
+    expect(during).toBeGreaterThan(100);                         // it used to be the 90 of the URL still
+    expect(during).toBeLessThan(120);
+  });
+
   test('arrow keys turn the view', async ({ page }) => {
     await page.goto(url());
     await ready(page);
@@ -329,16 +349,51 @@ test.describe('controls', () => {
 });
 
 test.describe('standpoint', () => {
-  test('a hash change relocates and refills the clipmap', async ({ page }) => {
+  test('a hash change relocates and refills the clipmap; a hash without a standpoint keeps the one there is', async ({ page }) => {
     await page.goto(url());
     const before = await ready(page);
-    await page.evaluate((h) => { location.hash = h; }, `#lon=${STAND.lon + 0.01}&lat=${STAND.lat}&yaw=90&pitch=0&fov=60`);
+    // 3.5 km east, onto the Testhorn's flank: the fine windows follow (a few
+    // hundred metres would stay inside them, clipmap.ts).
+    await page.evaluate((h) => { location.hash = h; }, `#lon=${FLANK.lon}&lat=${FLANK.lat}&yaw=90&pitch=0&fov=60`);
     await expect.poll(async () => (await status(page)).tilesDone, { timeout: 60_000 }).toBeGreaterThan(0);
     const after = await ready(page);
     expect(after.diagnostics.frameErrors).toBe(0);
     expect(after.failed).toBe(0);
-    expect(Math.abs(after.ground - PLAIN_M)).toBeLessThan(10);
+    expect(Math.abs(after.ground - heightAt(FLANK.lon, FLANK.lat))).toBeLessThan(10);
     expect(after.levelsReady).toBe(before.levels);
+    // Only a direction in the hash: the view turns, the standpoint stays (it used to jump to the Gornergrat).
+    await page.evaluate(() => { location.hash = '#yaw=180'; });
+    await expect.poll(async () => hashNum(await hashOf(page), 'yaw'), { timeout: 30_000 }).toBe(180);
+    await expect.poll(async () => hashNum(await hashOf(page), 'lon'), { timeout: 30_000 }).toBeCloseTo(FLANK.lon, 4);
+    expect(hashNum(await hashOf(page), 'lat')).toBeCloseTo(FLANK.lat, 4);
+  });
+
+  test('tiles that do not arrive leave their level out, not a pit; the HUD says so and "Erneut laden" brings them', async ({ page }) => {
+    // The second-finest level's tiles (tile zoom 11) fail as on a mountain
+    // with one bar of signal. They used to be blitted as nothing: a hole
+    // 1000 m below sea level, for good.
+    let down = true;
+    await page.route('**/fixtures/tiles/11/**', (route) => (down ? route.abort() : route.continue()));
+    await page.goto(url());
+    const retry = page.getByRole('button', { name: 'Erneut laden' });
+    await expect(retry).toBeVisible({ timeout: 120_000 });       // after three more tries, some seconds apart
+    const s = await status(page);
+    expect(s.missing).toBeGreaterThan(0);
+    expect(s.pending).toBe(0);
+    expect(s.levelsReady).toBe(s.levels - 1);
+    expect(s.levelsShown).toBe(s.levels - 1);
+    await expect(page.getByText(/\d+ Kacheln fehlen/)).toBeVisible();
+    await expect(page.getByText(/Gelände lädt/)).toBeHidden();   // the picture stands, from the levels that came
+    expect(Math.abs(s.ground - PLAIN_M)).toBeLessThan(10);
+    // The Testhorn, 5 km out, is drawn from the level beyond the missing one: on its row, no pit in front of it.
+    const expected = summitScreenY(s.eyeAltitude, 60) * H;
+    expect(Math.abs((await skyRows(page, W / 2)) - expected)).toBeLessThan(H * 0.03);
+    down = false;
+    await retry.click();
+    const after = await ready(page);
+    expect(after.missing).toBe(0);
+    expect(after.levelsShown).toBe(after.levels);
+    await expect(retry).toHaveCount(0);
   });
 
   test('the standpoint menu writes the place into the URL', async ({ page }) => {

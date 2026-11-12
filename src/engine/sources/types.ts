@@ -25,7 +25,13 @@ export interface TileSource {
   /** Tile zooms this source serves. */
   readonly minZoom: number;
   readonly maxZoom: number;
-  /** Heights in metres, row-major, tileSize*tileSize entries. Null if not available. */
+  /**
+   * Heights in metres, row-major, tileSize*tileSize entries. Null when the
+   * source has no tile there (outside its zooms or its coverage): that is an
+   * answer, and asking again brings the same. Rejects when the request did
+   * not get one (a dead connection, a server error, an abort): asking again
+   * may.
+   */
   load(key: TileKey, signal?: AbortSignal): Promise<Float32Array | null>;
   /** True when the tile is already local — used to decide what to preload. */
   has?(key: TileKey): Promise<boolean>;

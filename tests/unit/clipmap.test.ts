@@ -83,8 +83,8 @@ describe('clipmap configurations', () => {
       { size: 640, levels: [{ z: 12 }, { z: 8 }] }, LON, LAT);
     await streamer.setCenter(LON, LAT);
     const first = asked.length;
-    // A few metres east: the z12 window moves by a pixel, the z8 one does not.
-    await streamer.setCenter(LON + 0.0002, LAT);
+    // 5 km east: the z12 window follows, the z8 one (12 px of 640) does not.
+    await streamer.setCenter(LON + 0.07, LAT);
     const z8 = asked.slice(first).filter((k) => k.z === 7).length;
     expect(z8).toBe(0);
     expect(asked.length).toBeGreaterThan(first);
@@ -143,5 +143,155 @@ describe('look levels: the telescope\'s fine windows around the point looked at'
 
     s.clearLook();
     expect(look.filled).toBe(false);
+  });
+});
+
+describe('moving the standpoint', () => {
+  const M_LON = 111320 * Math.cos((LAT * Math.PI) / 180);
+  const cells = (lv: { w: number; h: number; raw: Uint16Array; quant: number; bias: number; z: number; px0: number; py0: number }) => {
+    let bad = 0;
+    for (let y = 0; y < lv.h; y += 7) for (let x = 0; x < lv.w; x += 5) {
+      if (Math.abs(lv.raw[y * lv.w + x] * lv.quant + lv.bias - value(lv.z, lv.px0 + x, lv.py0 + y)) > 0.5) bad++;
+    }
+    return bad;
+  };
+  /** A source whose tiles land only when `release()` is called. */
+  function gated(asked: TileKey[] = []) {
+    const inner = syntheticSource(512, asked);
+    let open = true;
+    let waiting: (() => void)[] = [];
+    const source: TileSource = {
+      ...inner,
+      async load(k, signal) {
+        if (!open) await new Promise<void>((r) => waiting.push(r));
+        return inner.load(k, signal);
+      },
+    };
+    return { source, hold() { open = false; }, release() { open = true; waiting.forEach((r) => r()); waiting = []; } };
+  }
+
+  test('a window stays where it is while the observer is within an eighth of it of its centre: no refetch, the eye moves inside it', async () => {
+    const asked: TileKey[] = [];
+    const s = new ClipmapStreamer(syntheticSource(512, asked), { size: 640, levels: [{ z: 12 }, { z: 8 }] }, LON, LAT);
+    await s.setCenter(LON, LAT);
+    const [fine] = s.heightField.levels;
+    const px0 = fine.px0, reach = fine.maxRange, first = asked.length;
+    // 1 km east: 38 px at z12, inside the 80 px the window tolerates.
+    await s.setCenter(LON + 1000 / M_LON, LAT);
+    expect(asked.length).toBe(first);
+    expect(fine.px0).toBe(px0);
+    expect(fine.filled).toBe(true);
+    expect(s.heightField.lon).toBeCloseTo(LON + 1000 / M_LON, 9);
+    expect(fine.maxRange).toBeLessThan(reach);                       // the eye is off-centre: the level reaches less far
+    expect(fine.maxRange).toBeGreaterThan(reach * 0.8);
+    expect(s.progress.levelsReady).toBe(2);
+    // 5 km east: 190 px, the fine window follows; the z8 one (0.4 px) does not.
+    await s.setCenter(LON + 5000 / M_LON, LAT);
+    expect(asked.slice(first).some((k) => k.z === 11)).toBe(true);
+    expect(asked.slice(first).some((k) => k.z === 7)).toBe(false);
+    expect(fine.px0 + 320).toBe(Math.round(lonToMercX(LON + 5000 / M_LON, 12)));
+    expect(cells(fine)).toBe(0);
+  });
+
+  test('a moved level is never the old terrain at the new place: far away it is empty until its tiles land', async () => {
+    const g = gated();
+    const s = new ClipmapStreamer(g.source, { size: 640, levels: [{ z: 12 }, { z: 9 }] }, LON, LAT);
+    await s.setCenter(LON, LAT);
+    g.hold();
+    // 300 km east: no window covers the new standpoint.
+    const far = LON + 300000 / M_LON;
+    const moving = s.setCenter(far, LAT);
+    await Promise.resolve();
+    for (const lv of s.heightField.levels) expect(lv.filled).toBe(false);
+    expect(s.progress.levelsReady).toBe(0);
+    g.release();
+    await moving;
+    for (const lv of s.heightField.levels) {
+      expect(lv.filled).toBe(true);
+      expect(lv.px0 + 320).toBe(Math.round(lonToMercX(far, lv.z)));
+      expect(cells(lv)).toBe(0);
+    }
+    expect(s.progress.levelsReady).toBe(2);
+  });
+
+  test('nearby, the old window is kept whole and in its own place until the new one is complete, then they swap', async () => {
+    const g = gated();
+    const s = new ClipmapStreamer(g.source, { size: 640, levels: [{ z: 12 }, { z: 9 }] }, LON, LAT);
+    await s.setCenter(LON, LAT);
+    const [fine] = s.heightField.levels;
+    const px0 = fine.px0, version = fine.version;
+    g.hold();
+    const near = LON + 5000 / M_LON;                                 // 190 px at z12: beyond the hysteresis, inside the old window
+    const moving = s.setCenter(near, LAT);
+    await Promise.resolve();
+    expect(fine.filled).toBe(true);
+    expect(fine.px0).toBe(px0);                                      // not moved under its data
+    expect(fine.version).toBe(version);
+    expect(cells(fine)).toBe(0);
+    expect(fine.maxRange).toBeGreaterThan(0);
+    expect(s.progress.levelsReady).toBe(1);                          // the coarse level is in place, the fine one is on its way
+    g.release();
+    await moving;
+    expect(fine.px0 + 320).toBe(Math.round(lonToMercX(near, 12)));
+    expect(fine.version).toBeGreaterThan(version);
+    expect(cells(fine)).toBe(0);
+    expect(s.progress.levelsReady).toBe(2);
+  });
+});
+
+describe('tiles that fail', () => {
+  /** A source that rejects the first `failures` requests for every tile at tile zoom `tz`, and has no tile (null) where `absent` says so. */
+  function flaky(tz: number, failures: number, asked: TileKey[], absent: (k: TileKey) => boolean = () => false): TileSource {
+    const inner = syntheticSource(512);
+    const seen = new Map<string, number>();
+    return {
+      ...inner,
+      async load(k, signal) {
+        asked.push(k);
+        if (absent(k)) return null;
+        const id = `${k.z}/${k.x}/${k.y}`, n = (seen.get(id) ?? 0) + 1;
+        seen.set(id, n);
+        if (k.z === tz && n <= failures) throw new Error('network');
+        return inner.load(k, signal);
+      },
+    };
+  }
+  const cfg = { size: 640, levels: [{ z: 12 }, { z: 9 }] };
+  const quick = { retryDelays: [0, 0] };
+
+  test('a failed tile is asked again and the level fills; a tile the server does not have is asked once', async () => {
+    const asked: TileKey[] = [];
+    const s = new ClipmapStreamer(flaky(11, 2, asked), cfg, LON, LAT, quick);
+    await s.setCenter(LON, LAT);
+    expect(s.heightField.levels.every((l) => l.filled)).toBe(true);
+    expect(s.progress.failed).toBe(0);
+    const perTile = new Map<string, number>();
+    for (const k of asked.filter((k) => k.z === 11)) perTile.set(`${k.x}/${k.y}`, (perTile.get(`${k.x}/${k.y}`) ?? 0) + 1);
+    expect([...perTile.values()].every((n) => n === 3)).toBe(true);
+
+    const once: TileKey[] = [];
+    const t = new ClipmapStreamer(flaky(-1, 0, once, (k) => k.z === 11), cfg, LON, LAT, quick);
+    await t.setCenter(LON, LAT);
+    expect(t.heightField.levels.every((l) => l.filled)).toBe(true);   // a hole in the data is the data
+    expect(t.progress.failed).toBe(0);
+    const ids = once.filter((k) => k.z === 11).map((k) => `${k.x}/${k.y}`);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test('a tile that keeps failing leaves its level out, counted, instead of a pit 1000 m below sea level; retry() asks again', async () => {
+    const asked: TileKey[] = [];
+    const s = new ClipmapStreamer(flaky(11, 5, asked), cfg, LON, LAT, quick);
+    await s.setCenter(LON, LAT);
+    const [fine, coarse] = s.heightField.levels;
+    expect(coarse.filled).toBe(true);
+    expect(fine.filled).toBe(false);
+    expect(s.progress.failed).toBeGreaterThan(0);
+    expect(s.progress.levelsReady).toBe(1);
+    expect(s.progress.pending).toBe(0);
+    // The fourth and fifth request still fail, the sixth lands.
+    await s.retry();
+    expect(fine.filled).toBe(true);
+    expect(s.progress.failed).toBe(0);
+    expect(s.progress.levelsReady).toBe(2);
   });
 });

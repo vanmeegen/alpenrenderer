@@ -42,6 +42,51 @@ describe('TerrariumSource configuration', () => {
   });
 });
 
+describe('what a tile request can come to', () => {
+  const key = { z: 12, x: 2170, y: 1434 };
+  async function withFetch<T>(impl: (url: string, init?: RequestInit) => Promise<Response>, run: () => Promise<T>): Promise<T> {
+    const orig = globalThis.fetch;
+    globalThis.fetch = impl as unknown as typeof fetch;
+    try { return await run(); } finally { globalThis.fetch = orig; }
+  }
+
+  test('a tile the server does not have (404) is no data: null, counted as absent, not as a failure', async () => {
+    const s = new TerrariumSource({ store: fakeStore() });
+    const got = await withFetch(async () => new Response(null, { status: 404 }), () => s.load(key));
+    expect(got).toBeNull();
+    expect(s.stats.absent).toBe(1);
+    expect(s.stats.failed).toBe(0);
+  });
+
+  test('a server error or a dead connection rejects, so the caller can ask again; each is counted', async () => {
+    const s = new TerrariumSource({ store: fakeStore() });
+    await withFetch(async () => new Response(null, { status: 503 }), async () => {
+      await expect(s.load(key)).rejects.toThrow(/503/);
+    });
+    await withFetch(async () => { throw new TypeError('Failed to fetch'); }, async () => {
+      await expect(s.load(key)).rejects.toThrow(/Failed to fetch/);
+    });
+    expect(s.stats.failed).toBe(2);
+    // The failure is not remembered: the next request goes out again.
+    let asked = 0;
+    await withFetch(async () => { asked++; return new Response(null, { status: 404 }); }, () => s.load(key));
+    expect(asked).toBe(1);
+  });
+
+  test('a request the caller gave up on rejects without counting as a failure', async () => {
+    const s = new TerrariumSource({ store: fakeStore() });
+    const abort = new AbortController();
+    abort.abort();
+    await withFetch(async (_url, init) => {
+      if (init?.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+      return new Response(null, { status: 200 });
+    }, async () => {
+      await expect(s.load(key, abort.signal)).rejects.toThrow();
+    });
+    expect(s.stats.failed).toBe(0);
+  });
+});
+
 /** The IndexedDB store, minus IndexedDB. */
 function fakeStore() {
   return {
