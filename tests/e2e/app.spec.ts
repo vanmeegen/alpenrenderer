@@ -3,9 +3,10 @@
  * here is derived from tests/e2e/fixtures/terrain.ts, not read off a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { BACK_RIDGE, BANK, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, heightAt, skylineRow, summitScreenY, terrainHit } from './fixtures/terrain';
+import { BACK_RIDGE, BANK, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, heightAt, skylineRow, spotAt, summitScreenY, terrainHit } from './fixtures/terrain';
 import { HORIZON_COLOR, luminance as lumOf, terrainColor } from '../../src/engine/render/shading';
 import { LogField, OUTLINE, rimAt } from '../../src/engine/render/outline';
+import { DETAIL, detailAt, detailFade, detailFrame } from '../../src/engine/render/detail';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
 const R_EFF_M = 6371008.8 / (1 - 0.13);
@@ -553,6 +554,64 @@ test.describe('appearance', () => {
       expect(row.step).toBeLessThan(0.008);
     }
   });
+
+  for (const [yaw, pitch] of [[180, -35], [215, -28]]) {
+    test(`the ground below you has grain, and it lies on the ground: looking ${yaw}° and ${-pitch}° down, each spot is lit as the formula says for that spot`, async ({ page }) => {
+      // The plain was one flat green from the feet to the horizon. The grain
+      // (render/detail.ts) is a noise tile fixed to the ground: what a pixel
+      // shows follows from the spot of ground behind it, whichever way the
+      // camera looks. The spot comes from the range buffer, which holds
+      // nothing under 8 m: so from 8 m up, the ground 10 to 70 m away.
+      await page.goto(url({ yaw, pitch, alt: PLAIN_M + 8 }, { shade: '1' }));   // a colour test
+      const s = await ready(page);
+      // Brightness (3 × 3 px) and range at each probe, read in the page.
+      const probes: [number, number][] = [];
+      for (let y = 100; y <= 500; y += 50) for (let x = 100; x <= 900; x += 50) probes.push([x, y]);
+      const seen = await page.evaluate(async (probes) => {
+        const r = (window as any).alp.renderer;
+        const c = await r.capture(), b = await r.readRange();
+        return probes.map(([x, y]) => {
+          let sum = 0;
+          for (let yy = y - 1; yy <= y + 1; yy++) for (let xx = x - 1; xx <= x + 1; xx++) {
+            const o = (yy * c.width + xx) * 4;
+            sum += 0.2126 * c.pixels[o] + 0.7152 * c.pixels[o + 1] + 0.0722 * c.pixels[o + 2];
+          }
+          const o = ((b.height - 1 - y) * b.width + x) * 4;          // render targets read back bottom-up
+          const packed = b.pixels[o + 3] < 128 ? -1 : b.pixels[o] * 65536 + b.pixels[o + 1] * 256 + b.pixels[o + 2];
+          return { lum: sum / 9 / 255, packed };
+        });
+      }, probes);
+      const LOG_MIN = Math.log(8), LOG_SPAN = Math.log(4e5) - Math.log(8);
+      const frame = detailFrame(STAND.lon, STAND.lat);
+      const got: number[] = [], want: number[] = [], sharp: boolean[] = [];
+      const pixel = (60 * Math.PI / 180) / H, up = 8;        // radians a pixel spans, metres the eye is up
+      probes.forEach(([x, y], i) => {
+        expect(seen[i].packed).toBeGreaterThan(0);             // ground, not sky
+        const range = Math.exp(LOG_MIN + (seen[i].packed / 16777215) * LOG_SPAN);
+        expect(range).toBeGreaterThan(9);
+        expect(range).toBeLessThan(100);                       // the near ground
+        const spot = spotAt(yaw, pitch, x, y, 60, W, H, range);
+        const detail = { d: detailAt(frame, spot.east, spot.north), fade: detailFade(range) };
+        want.push(lumOf(terrainColor(spot.h, spot.normal, range, false, undefined, yaw, s.eyeAltitude, 0.5, detail)));
+        got.push(seen[i].lum);
+        // Where a pixel covers less ground than a texel of the finest tile
+        // (it lies range²/up long on the ground), the picture holds the tile
+        // itself. Further out the sampler averages it, as it should.
+        sharp.push((range * range / up) * pixel < DETAIL.fine / DETAIL.finer / DETAIL.size);
+      });
+      const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+      const sd = (v: number[]) => { const m = mean(v); return Math.sqrt(mean(v.map((c) => (c - m) ** 2))); };
+      // It is grain: the spots differ, by what the formula says they should.
+      expect(sd(want)).toBeGreaterThan(0.01);
+      expect(sd(got)).toBeGreaterThan(0.01);
+      const g = got.filter((_, i) => sharp[i]), w = want.filter((_, i) => sharp[i]);
+      expect(g.length).toBeGreaterThan(20);
+      const mg = mean(g), mw = mean(w);
+      const corr = mean(g.map((c, i) => (c - mg) * (w[i] - mw))) / (sd(g) * sd(w));
+      expect(corr).toBeGreaterThan(0.9);
+      for (let i = 0; i < got.length; i++) if (sharp[i]) expect(Math.abs(got[i] - want[i])).toBeLessThan(0.02);
+    });
+  }
 
   test('the Testhorn view matches the golden within tolerance', async ({ page }) => {
     // A page screenshot of a software-rendered WebGL canvas can take well

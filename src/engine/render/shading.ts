@@ -10,6 +10,7 @@
  * perspective: haze that lies in the valleys and turns the distance blue.
  */
 import { SURFACE } from '../core/surface';
+import { lit } from './detail';
 
 /**
  * The light, degrees: 45° up and `behind` degrees from the view direction,
@@ -124,11 +125,13 @@ export function haze(col: [number, number, number], range: number, h: number, ey
  * point) the water shines; `yaw` is the view direction the light turns
  * with; `eyeAlt` is where the eye stands, for the air in between (the
  * point's own height when not given); `occlusion` what core/surface.ts
- * gives for the point, 0.5 on even ground.
+ * gives for the point, 0.5 on even ground; `detail` the grain of the near
+ * ground (detail.ts: `d` from detailAt, `fade` from detailFade), which
+ * changes the light on dry ground and not what the ground is made of.
  */
 export function terrainColor(
   h: number, n: [number, number, number], range: number, water = false, view?: [number, number, number], yaw = 0,
-  eyeAlt = h, occlusion = 0.5,
+  eyeAlt = h, occlusion = 0.5, detail?: { d: [number, number, number]; fade: number },
 ): [number, number, number] {
   const slope = 1 - n[2];
   const valley: [number, number, number] = [0.47, 0.60, 0.33];
@@ -147,8 +150,9 @@ export function terrainColor(
   col = mix(col, snow, snowy);
   if (water) col = [...WATER_COLOR];
   const s = sunVector(yaw);
-  const diff = n[0] * s[0] + n[1] * s[1] + n[2] * s[2];
-  const shade = shadeFactor(diff, occlusion);
+  const g = detail && !water ? lit(n, detail.d, detail.fade) : { normal: n, grain: 1 };
+  const diff = g.normal[0] * s[0] + g.normal[1] * s[1] + g.normal[2] * s[2];
+  const shade = shadeFactor(diff, occlusion) * g.grain;
   col = [col[0] * shade, col[1] * shade, col[2] * shade];
   if (water && view) col = waterShine(col, view, yaw);
   return haze(col, range, h, eyeAlt);

@@ -230,6 +230,28 @@ describe('the surface atlas', () => {
   });
 });
 
+describe('the grain of the near ground', () => {
+  test('both dialects lay the detail tile over the near range, fixed to the ground, with the constants from detail.ts', async () => {
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { DETAIL } = await import('../../src/engine/render/detail');
+    const { shaderFloat } = await import('../../src/engine/render/gpu/consts');
+    // Where the tiles lie comes from the renderer (detailFrame), their strength too: 0 switches the grain off.
+    expect(S.SHADE_UNIFORMS).toContain('uDetail');
+    expect(S.SHADE_UNIFORMS).toContain('uDetailOrigin');
+    for (const src of [GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_SHADE_FRAGMENT]) {
+      for (const [name, value] of [
+        ['DETAIL_GRAIN', DETAIL.grain], ['DETAIL_TILT', DETAIL.tilt], ['DETAIL_NEAR', DETAIL.near], ['DETAIL_FAR', DETAIL.far],
+        ['DETAIL_FINER', DETAIL.finer], ['DETAIL_FINEST', DETAIL.finest],
+      ] as [string, number][]) {
+        expect(src).toMatch(new RegExp(`const (float )?${name}\\b[^;]*= ${shaderFloat(value).replace('.', '\\.')};`));
+      }
+      expect(src).toContain('uDetailOrigin');
+    }
+    expect(GL.TERRAIN_SHADE_FRAGMENT_GL).toContain('uniform sampler2D detail;');
+    expect(S.TERRAIN_SHADE_FRAGMENT).toContain('var detail ');
+  });
+});
+
 describe('shader text Babylon can take apart', () => {
   test('no comment behind code holds a semicolon: the preprocessor cuts declarations there', async () => {
     // "uniform float uRim;   // …; 0 = off" compiled to a lone "0 = off" and a black screen (WebGL2).

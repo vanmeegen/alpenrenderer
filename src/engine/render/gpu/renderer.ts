@@ -61,6 +61,7 @@ import { RedrawGate, frameFingerprint } from '../redraw';
 import { OUTLINE } from '../outline';
 import { atlasLayout } from '../atlas';
 import { levelSurface } from '../../core/surface';
+import { DETAIL, detailFrame, detailTexture } from '../detail';
 import { QUALITY_HIGH, QUALITY_LOW, QUALITY_MID, Quality } from '../quality';
 import { renderPixelRatio } from '../resolution';
 import {
@@ -163,6 +164,8 @@ export class GpuRenderer {
   desaturate = 0.55;
   /** Scale of the ink line's width (outline.ts gives it in CSS pixels): the same line on a phone and a desktop. */
   edgeWidth = 1.0;
+  /** The grain of the near ground in the shaded view (render/detail.ts), 0..1; 0 is off. */
+  detail = 1;
   /** Strength of the haze rim behind ridges in the shaded view; 0 saves its eight taps. */
   rim = OUTLINE.rim;
   /**
@@ -416,12 +419,18 @@ export class GpuRenderer {
       { vertex: 'shade', fragment: 'shade' }, {
         attributes: ['position'],
         uniforms: [...SHADE_UNIFORMS],
-        samplers: ['heights', 'surface'],
+        samplers: ['heights', 'surface', 'detail'],
         shaderLanguage: this.shaderLanguage,
       });
     this.shadeMat.backFaceCulling = false;
     this.shadeMat.setTexture('heights', this.blank);
     this.shadeMat.setTexture('surface', this.blank);
+    // The grain tile repeats and is seen from far off: wrapped, with mips.
+    const grain = new RawTexture(detailTexture(), DETAIL.size, DETAIL.size, Constants.TEXTUREFORMAT_RGBA,
+      this.scene, true, false, Texture.TRILINEAR_SAMPLINGMODE);
+    grain.wrapU = Texture.WRAP_ADDRESSMODE;
+    grain.wrapV = Texture.WRAP_ADDRESSMODE;
+    this.shadeMat.setTexture('detail', grain);
   }
 
   private buildColorTarget() {
@@ -741,7 +750,7 @@ export class GpuRenderer {
       origin: [hf.lon, hf.lat] as [number, number],
       levels: hf.levels.map((l) => ({ version: l.version, waterVersion: l.waterVersion, filled: l.filled, px0: l.px0, py0: l.py0 })),
       knobs: {
-        shaded: this.shaded, outline: this.outline, snowLine: this.snowLine, fogRange: this.fogRange,
+        shaded: this.shaded, outline: this.outline, detail: this.detail, snowLine: this.snowLine, fogRange: this.fogRange,
         skyTop: this.skyTop, horizonColor: this.horizonColor, waterColor: this.waterColor,
         whiten: this.whiten, desaturate: this.desaturate, rim: this.rim, maxPixelRatio: this.maxPixelRatio,
         resolutionScale: this.resolutionScale,
@@ -848,6 +857,9 @@ export class GpuRenderer {
     sm.setFloat('uFogRange', this.fogRange);
     sm.setVector3('uHorizonColor', Vector3.FromArray(this.horizonColor));
     sm.setVector3('uWaterColor', Vector3.FromArray(this.waterColor));
+    const grain = detailFrame(hf.lon, hf.lat);
+    sm.setVector3('uDetail', new Vector3(grain.scale[0], grain.scale[1], this.detail));
+    sm.setVector4('uDetailOrigin', new Vector4(...grain.origin));
     // The shade pass is only worth its vertex cost when it will be seen.
     this.colorRtt.renderList = this.shaded ? this.sectors : [];
 

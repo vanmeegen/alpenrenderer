@@ -249,6 +249,33 @@ export function terrainHit(yawDeg: number, x: number, y: number, eye: number, fo
 }
 
 /**
+ * The ground a pixel shows, from what the range buffer holds for it: the
+ * spot `range` metres along the view ray through (x, y) of a camera looking
+ * along `yawDeg`, pitched by `pitchDeg`, as metres east and north of the
+ * standpoint, with its height and unit normal from the formula. For the
+ * near ground, where a ray march would have to know the eye to a centimetre.
+ */
+export function spotAt(yawDeg: number, pitchDeg: number, x: number, y: number, fov: number, width: number, height: number, range: number) {
+  const tanV = Math.tan((fov * Math.PI) / 360);
+  const tanH = tanV * (width / height);
+  const a = ((x + 0.5) / width * 2 - 1) * tanH, b = (1 - ((y + 0.5) / height) * 2) * tanV;
+  const yaw = (yawDeg * Math.PI) / 180, p = (pitchDeg * Math.PI) / 180;
+  // Forward, right and up of the camera, east-north-up.
+  const f = [Math.sin(yaw) * Math.cos(p), Math.cos(yaw) * Math.cos(p), Math.sin(p)];
+  const r = [Math.cos(yaw), -Math.sin(yaw), 0];
+  const u = [-Math.sin(yaw) * Math.sin(p), -Math.cos(yaw) * Math.sin(p), Math.cos(p)];
+  const d = [0, 1, 2].map((i) => f[i] + a * r[i] + b * u[i]);
+  const len = Math.hypot(d[0], d[1], d[2]);
+  const east = (d[0] / len) * range, north = (d[1] / len) * range;
+  const lon = STAND.lon + east / M_PER_DEG_LON, lat = STAND.lat + north / M_PER_DEG_LAT;
+  const e = 2;   // metres, for the gradient
+  const dhE = (heightAt(lon + e / M_PER_DEG_LON, lat) - heightAt(lon - e / M_PER_DEG_LON, lat)) / (2 * e);
+  const dhN = (heightAt(lon, lat + e / M_PER_DEG_LAT) - heightAt(lon, lat - e / M_PER_DEG_LAT)) / (2 * e);
+  const l = Math.hypot(dhE, dhN, 1);
+  return { east, north, h: heightAt(lon, lat), normal: [-dhE / l, -dhN / l, 1 / l] as [number, number, number] };
+}
+
+/**
  * The fake camera frame: luma values (0..255, full range) of the light upper
  * and dark lower half. Grey only, so what the renderer samples does not
  * depend on the browser's YUV matrix.

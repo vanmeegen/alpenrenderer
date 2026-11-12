@@ -49,7 +49,7 @@ export const TERRAIN_UNIFORMS = [
 /** The shade material takes every terrain uniform plus these. */
 export const SHADE_UNIFORMS = [
   ...TERRAIN_UNIFORMS,
-  'uSun', 'uSnowLine', 'uFogRange', 'uHorizonColor', 'uWaterColor',
+  'uSun', 'uSnowLine', 'uFogRange', 'uHorizonColor', 'uWaterColor', 'uDetail', 'uDetailOrigin',
 ] as const;
 
 export const COMPOSITE_UNIFORMS = [
@@ -315,8 +315,13 @@ uniform uDropScale : f32;
 
 var heightsSampler : sampler;
 var heights        : texture_2d<f32>;
+uniform uDetail : vec3<f32>;        // the grain of the near ground: tiles per radian fine and coarse, strength (0 = off)
+uniform uDetailOrigin : vec4<f32>;  // the standpoint's place in a tile, fine (xy) and coarse (zw)
+
 var surfaceSampler : sampler;
 var surface : texture_2d<f32>;
+var detailSampler : sampler;
+var detail : texture_2d<f32>;
 
 ${wgslConsts(SHADE_CONSTS)}
 
@@ -385,6 +390,14 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   let dIso = fragmentInputs.vDIso;
   let h = fragmentInputs.vH;
 
+  // The grain of the near ground (render/detail.ts, see glsl.ts): read before
+  // any branch, where the sampler still has its derivatives for the mip.
+  let ground = vec2<f32>(dLon, dIso);
+  let fineUv = ground * uniforms.uDetail.x + uniforms.uDetailOrigin.xy;
+  let grain = textureSample(detail, detailSampler, fineUv).rgb
+            + textureSample(detail, detailSampler, ground * uniforms.uDetail.y + uniforms.uDetailOrigin.zw).rgb - vec3<f32>(1.0)
+            + DETAIL_FINEST * (2.0 * textureSample(detail, detailSampler, fineUv * DETAIL_FINER).rgb - vec3<f32>(1.0));
+
   let lv = levelFor(r);
   var sf = surfaceAt(lv, dLon, dIso);
   var wet = waterAt(lv, dLon, dIso);
@@ -427,8 +440,12 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   // Plain Lambert with a floor: shadow sides keep their shape, lit faces
   // stand out. A sky term that lifted north faces flattened the relief.
   // Times what the ground around leaves of the sky: gullies darker, ridges lighter.
-  let diff = max(dot(n, uniforms.uSun), 0.0);
-  let shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0));
+  // Near the eye the grain bumps the normal the light sees and mottles the
+  // brightness, on dry ground (see glsl.ts).
+  let grainy = uniforms.uDetail.z * (1.0 - smoothstep(DETAIL_NEAR, DETAIL_FAR, r)) * (1.0 - wet);
+  let nl = normalize(vec3<f32>(n.xy - DETAIL_TILT * grainy * grain.xy, n.z));
+  let diff = max(dot(nl, uniforms.uSun), 0.0);
+  let shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0)) * (1.0 + DETAIL_GRAIN * grainy * grain.z);
   col = col * shade;
   if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 

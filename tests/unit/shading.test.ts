@@ -162,3 +162,25 @@ describe('occlusion: gullies darker, ridges lighter', () => {
     expect(luminance(ridge)).toBeGreaterThan(luminance(plain) + 0.02);
   });
 });
+
+describe('the grain of the near ground', () => {
+  test('grain changes the light, not what the ground is made of; without fade it changes nothing', async () => {
+    const { DETAIL, lit } = await import('../../src/engine/render/detail');
+    // A 30° slope at 2000 m, facing east: meadow with some rock, and it must stay that.
+    const n: [number, number, number] = [Math.sin(Math.PI / 6), 0, Math.cos(Math.PI / 6)];
+    const d: [number, number, number] = [0.7, -0.4, 0.8];
+    const plain = terrainColor(2000, n, 100, false, undefined, 0, 2000);
+    const off = terrainColor(2000, n, 100, false, undefined, 0, 2000, 0.5, { d, fade: 0 });
+    for (let i = 0; i < 3; i++) expect(off[i]).toBeCloseTo(plain[i], 9);
+    // With it: the colour of the smooth normal, lit by the bumped one, times the grain.
+    const g = lit(n, d, 1);
+    const s = sunVector(0);
+    const want = shadeFactor(g.normal[0] * s[0] + g.normal[1] * s[1] + g.normal[2] * s[2]) * g.grain
+      / shadeFactor(n[0] * s[0] + n[1] * s[1] + n[2] * s[2]);
+    const on = terrainColor(2000, n, 100, false, undefined, 0, 2000, 0.5, { d, fade: 1 });
+    // Range 100 m: the haze takes next to nothing, the ratio is the light's.
+    for (let i = 0; i < 3; i++) expect(on[i] / plain[i]).toBeCloseTo(want, 2);
+    expect(Math.abs(want - 1)).toBeGreaterThan(0.02);
+    expect(DETAIL.grain).toBeLessThan(0.2);
+  });
+});

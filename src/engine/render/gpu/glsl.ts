@@ -287,8 +287,12 @@ uniform float uEyeAlt;
 uniform float uRefRadius;
 uniform float uDropScale;
 
+uniform vec3  uDetail;        // the grain of the near ground: tiles per radian fine and coarse, strength (0 = off)
+uniform vec4  uDetailOrigin;  // the standpoint's place in a tile, fine (xy) and coarse (zw)
+
 uniform sampler2D heights;
 uniform sampler2D surface;
+uniform sampler2D detail;
 
 ${glslConsts(SHADE_CONSTS)}
 
@@ -365,6 +369,16 @@ void main(void) {
   float dIso = vDIso;
   float h = vH;
 
+  // The grain of the near ground (render/detail.ts): slope east, slope north
+  // and value of a small tiling noise at three sizes. Fixed to the ground by
+  // the standpoint's place in a tile. Read before any branch, where the
+  // sampler still has its derivatives for the mip.
+  vec2 ground = vec2(dLon, dIso);
+  vec2 fineUv = ground * uDetail.x + uDetailOrigin.xy;
+  vec3 grain = texture2D(detail, fineUv).rgb
+             + texture2D(detail, ground * uDetail.y + uDetailOrigin.zw).rgb - vec3(1.0)
+             + DETAIL_FINEST * (2.0 * texture2D(detail, fineUv * DETAIL_FINER).rgb - vec3(1.0));
+
   int lv = levelFor(r);
   vec3 sf = surfaceAt(lv, dLon, dIso);
   float wet = waterAt(lv, dLon, dIso);
@@ -407,8 +421,12 @@ void main(void) {
   // Plain Lambert with a floor: shadow sides keep their shape, lit faces
   // stand out. A sky term that lifted north faces flattened the relief.
   // Times what the ground around leaves of the sky: gullies darker, ridges lighter.
-  float diff = max(dot(n, uSun), 0.0);
-  float shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0));
+  // Near the eye the grain bumps the normal the light sees and mottles the
+  // brightness, on dry ground. What the ground is made of stays the smooth normal's.
+  float grainy = uDetail.z * (1.0 - smoothstep(DETAIL_NEAR, DETAIL_FAR, r)) * (1.0 - wet);
+  vec3 nl = normalize(vec3(n.xy - DETAIL_TILT * grainy * grain.xy, n.z));
+  float diff = max(dot(nl, uSun), 0.0);
+  float shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0)) * (1.0 + DETAIL_GRAIN * grainy * grain.z);
   col = col * shade;
   if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 

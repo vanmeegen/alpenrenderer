@@ -236,6 +236,7 @@ export class Viewer {
       // moves, as coarse as its frame times ask for (render/adapt.ts).
       this.renderer.resolutionScale = now - this.movedAt < REST_MS ? this.adaptation.scale : 1;
       this.renderer.rim = this.adaptation.rim ? OUTLINE.rim : 0;
+      this.renderer.detail = this.adaptation.rim ? 1 : 0;
       if (this.renderer.render()) {
         this.frames++;
         if (this.drawnAt) this.adaptation.frame(now - this.drawnAt, now);

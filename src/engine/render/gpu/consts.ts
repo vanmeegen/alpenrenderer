@@ -6,6 +6,7 @@
 import { OUTLINE } from '../outline';
 import { FOG, GROUND } from '../shading';
 import { SURFACE } from '../../core/surface';
+import { DETAIL } from '../detail';
 
 /** A number as a float literal both GLSL and WGSL accept. */
 export const shaderFloat = (v: number): string => (Number.isInteger(v) ? v.toFixed(1) : String(v));
@@ -27,6 +28,8 @@ export const SHADE_CONSTS: Const[] = [
   ['ROCK_LOW', GROUND.rockLow], ['ROCK_HIGH', GROUND.rockHigh], ['ROCK_BELOW', GROUND.rockBelow], ['ROCK_ABOVE', GROUND.rockAbove],
   ['ROCK_FROM', GROUND.rockFrom], ['ROCK_TO', GROUND.rockTo], ['SNOW_LOW', GROUND.snowLow], ['SNOW_HIGH', GROUND.snowHigh],
   ['AO', SURFACE.strength],
+  ['DETAIL_GRAIN', DETAIL.grain], ['DETAIL_TILT', DETAIL.tilt], ['DETAIL_NEAR', DETAIL.near], ['DETAIL_FAR', DETAIL.far],
+  ['DETAIL_FINER', DETAIL.finer], ['DETAIL_FINEST', DETAIL.finest],
 ];
 
 export const glslConsts = (list: Const[]): string => list.map(([n, v]) => (typeof v === 'number'
