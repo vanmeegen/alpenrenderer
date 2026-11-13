@@ -314,6 +314,27 @@ describe('the aerial picture in the shade pass', () => {
   });
 });
 
+describe('where the rings of the mesh lie', () => {
+  test('both dialects read a ring\'s radius from the table the CPU made, one texel a vertex: no formula of their own, no loop', async () => {
+    // The three-segment formula (near, one dense band, far) put the dense
+    // rings where the centre of the view pointed. The table (mesh.ts
+    // ringTable) puts them where the frame shows ground; the shader only
+    // decodes it: three bytes of the logarithm, as the CPU packed them.
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { RING_CODE } = await import('../../src/engine/render/mesh');
+    expect(RING_CODE).toBe(16777215);
+    for (const src of [GL.TERRAIN_VERTEX_GL, S.TERRAIN_VERTEX]) {
+      expect(src).not.toMatch(/uRadial/);
+      expect(src).toMatch(/uRing\b/);
+      expect(src).toMatch(/texelFetch\(rings,|textureSampleLevel\(rings,/);
+      expect(src).toContain('65536.0');
+      expect(src).toContain('16777215.0');
+    }
+    expect(S.TERRAIN_UNIFORMS).toContain('uRing');
+    expect(S.TERRAIN_UNIFORMS).not.toContain('uRadial');
+  });
+});
+
 describe('the telescope\'s windows in the shaders', () => {
   test('both dialects lay the look levels over the eye\'s, each by its share (its fade at the edge times its weight): the finest takes its share, the next its share of the rest', async () => {
     // One window used to be picked (the finest holding the point) and

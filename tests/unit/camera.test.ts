@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { DEFAULT_LENS_FOV, captureFilename, coverFovY, lensFovY, renderLensFov } from '../../src/app/cameraFeed';
-import { fovForAspect, longFovOf } from '../../src/engine/core/camera';
+import { Camera, fovForAspect, longFovOf } from '../../src/engine/core/camera';
 
 describe('coverFovY', () => {
   test('a frame wider than the canvas is not cropped vertically: the lens angle stays', () => {
@@ -61,5 +61,30 @@ describe('the panorama\'s default field of view is the long side\'s too: 60° ac
   test('longFovOf inverts it, so a rotation keeps the long side\'s angle', () => {
     for (const aspect of [0.5, 1, 1.78]) expect(longFovOf(fovForAspect(60, aspect), aspect)).toBeCloseTo(60, 9);
     expect(longFovOf(60, 0.5)).toBe(60);
+  });
+});
+
+describe('Camera.elevationSpan: the angles above the horizon a frame holds', () => {
+  const cam = (pitch: number, fov: number, roll = 0) => {
+    const c = new Camera();
+    c.yaw = 137; c.pitch = pitch; c.roll = roll; c.fov = fov; c.aspect = 1000 / 600;
+    c.update();
+    return c.elevationSpan();
+  };
+
+  test('level, the frame holds its pitch and half the field of view to either side', () => {
+    const s = cam(1, 3.2);
+    expect(s.hi).toBeCloseTo(2.6, 2);
+    expect(s.lo).toBeCloseTo(-0.6, 2);
+  });
+
+  test('tilted on its side, the corners reach further up and down', () => {
+    const s = cam(1, 3.2, 30);
+    expect(s.hi).toBeGreaterThan(3.2);
+    expect(s.lo).toBeLessThan(-1.2);
+    const upright = cam(10, 20);
+    expect(upright.hi).toBeCloseTo(20, 1);
+    expect(upright.lo).toBeLessThan(0.1);                   // the lower corners lie a little under the lower edge's middle
+    expect(upright.lo).toBeGreaterThan(-0.5);
   });
 });

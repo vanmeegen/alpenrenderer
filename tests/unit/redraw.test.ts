@@ -19,7 +19,7 @@ function inputs(over: Partial<FrameInputs> = {}): FrameInputs {
       { version: 3, waterVersion: 1, filled: true, px0: 100, py0: 200 },
       { version: 2, waterVersion: 0, filled: false, px0: 0, py0: 0 },
     ],
-    knobs: { shaded: true, outline: 0.7, band: null, horizonColor: [0.7, 0.8, 0.9] },
+    knobs: { shaded: true, outline: 0.7, rings: 0, horizonColor: [0.7, 0.8, 0.9] },
     ...over,
   };
 }
@@ -42,10 +42,10 @@ describe('frameFingerprint', () => {
       { levels: [{ version: 3, waterVersion: 1, weight: 0.5, filled: true, px0: 100, py0: 200 }, { version: 2, waterVersion: 0, filled: false, px0: 0, py0: 0 }] },
       { levels: [{ version: 3, waterVersion: 1, filled: true, px0: 100, py0: 200 }, { version: 2, waterVersion: 0, filled: true, px0: 0, py0: 0 }] },
       { levels: [{ version: 3, waterVersion: 1, filled: true, px0: 101, py0: 200 }, { version: 2, waterVersion: 0, filled: false, px0: 0, py0: 0 }] },
-      { knobs: { shaded: false, outline: 0.7, band: null, horizonColor: [0.7, 0.8, 0.9] } },
-      { knobs: { shaded: true, outline: 0.5, band: null, horizonColor: [0.7, 0.8, 0.9] } },
-      { knobs: { shaded: true, outline: 0.7, band: [4000, 7812.5], horizonColor: [0.7, 0.8, 0.9] } },
-      { knobs: { shaded: true, outline: 0.7, band: null, horizonColor: [0.7, 0.8, 0.91] } },
+      { knobs: { shaded: false, outline: 0.7, rings: 0, horizonColor: [0.7, 0.8, 0.9] } },
+      { knobs: { shaded: true, outline: 0.5, rings: 0, horizonColor: [0.7, 0.8, 0.9] } },
+      { knobs: { shaded: true, outline: 0.7, rings: 3, horizonColor: [0.7, 0.8, 0.9] } },
+      { knobs: { shaded: true, outline: 0.7, rings: 0, horizonColor: [0.7, 0.8, 0.91] } },
     ];
     for (const c of changed) expect(frameFingerprint(inputs(c))).not.toBe(base);
   });

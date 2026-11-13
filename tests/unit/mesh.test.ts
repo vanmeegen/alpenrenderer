@@ -7,7 +7,11 @@ import { describe, expect, test } from 'bun:test';
 import { destination, groundRange, latToMercY, localRadius, lonToMercX } from '../../src/engine/core/geodesy';
 import { HeightField } from '../../src/engine/core/heightfield';
 import { QUALITY_HIGH, QUALITY_LOW } from '../../src/engine/render/gpu/renderer';
-import { bandFor, lookRange, meshTopNear, radialParams, radiusAt, rowAt, vertexHeight, wedge } from '../../src/engine/render/mesh';
+import { frameScan, scanBin, scanStart } from '../../src/engine/render/framescan';
+import { RINGS, RING_CODE, encodeRings, lookRange, lookRanges, meshTopNear, radialParams, radiusAt, ringTable, ringsOf, rowAt, vertexHeight, wedge } from '../../src/engine/render/mesh';
+import { RIDGES, twoRidges } from './helpers/ridges';
+
+const DEG = Math.PI / 180;
 
 const LON = 10.0, LAT = 47.0, PLAIN = 1500, SPIKE = 500, EYE = PLAIN + 1.7;
 
@@ -194,7 +198,7 @@ describe('meshTopNear: the summit as the mesh draws it, where and how high', () 
   });
 });
 
-describe('the telescope: a dense band of rings around the distance looked at', () => {
+describe('the telescope: rings where the frame shows ground', () => {
   test('lookRange: where the centre ray meets the ground, or null for sky', () => {
     const { hf, at } = field([]);
     // Above the horizon: sky.
@@ -219,58 +223,192 @@ describe('the telescope: a dense band of rings around the distance looked at', (
     void at;
   });
 
-  test('bandFor quantises the distance in steps of 1.25, so panning across a slope does not move the rings', () => {
-    expect(bandFor(10000)).toEqual(bandFor(10800));
-    expect(bandFor(10000)).not.toEqual(bandFor(13000));
-    const b = bandFor(10000)!;
-    expect(b.r1).toBeLessThan(10000 * 0.8);
-    expect(b.r2).toBeGreaterThan(10000 * 1.2);
-    expect(bandFor(null)).toBeNull();
+  test('zoomed in, a mountain is drawn with the same rings wherever the centre of the view points: the rings follow what is seen in the frame', () => {
+    // The fault (2026-11-13, 47.6394/11.3761, 3.2°): one dense band of rings
+    // lay around the distance the centre ray met the ground. At SO 137° that
+    // was a summit 16 km off (rings 7 m apart there, 340 m apart on the
+    // summit 26 km off beside it); at SO 136° the centre ray slipped past it
+    // onto the far one (11 m there, 210 m on the near one). A crest between
+    // two rings is drawn lower by the slope times half their distance: the
+    // same mountain, 60 px different.
+    const { hf, eye } = twoRidges();
+    const px = (3.2 * DEG) / 600;                              // radians a pixel
+    const spacingAt = (radii: Float64Array, r: number) => {
+      let i = 0;
+      while (i < radii.length - 2 && radii[i + 1] < r) i++;
+      return radii[i + 1] - radii[i];
+    };
+    const tables = [90, 91].map((yaw) => {
+      // 5.3° wide, 3.2° high, a degree above the horizon: what the frame holds, a quarter more on every side.
+      const view = frameScan(hf, eye, { az0: yaw - 4, az1: yaw + 4, el0: -1.4, el1: 3.4 });
+      return ringTable(1600, view, px, hf.maxRange);
+    });
+    for (const radii of tables) {
+      // Both crests, whichever the centre ray meets: rings a pixel or two of the picture apart
+      // on the ground that rises into view (a pixel is 1.5 m of height at 16 km, 3 m of a 27° slope).
+      expect(spacingAt(radii, 15900)).toBeLessThan(12);
+      expect(spacingAt(radii, 25900)).toBeLessThan(18);
+    }
+    // And the same rings in both views: nothing in the frame changed.
+    expect(spacingAt(tables[0], 15900)).toBe(spacingAt(tables[1], 15900));
+    expect(spacingAt(tables[0], 25900)).toBe(spacingAt(tables[1], 25900));
   });
 
-  test('zoomed in below 8° the band narrows with the field of view: the rings stay a post apart when a pixel is a metre', () => {
-    // At 8° and wider, and without a field of view, the band is what it was.
-    expect(bandFor(20000, 8)).toEqual(bandFor(20000));
-    expect(bandFor(20000, 30)).toEqual(bandFor(20000));
-    const wide = bandFor(20000)!, narrow = bandFor(20000, 2.7)!;
-    expect((narrow.r2 - narrow.r1) / (wide.r2 - wide.r1)).toBeLessThan(0.4);            // about a third, as the field of view is
-    // 405 rings (a phone's 45 % of 900 rows) across it: a 13 m post apart, where the wide band had 37 m.
-    expect((narrow.r2 - narrow.r1) / 405).toBeLessThan(14);
-    expect((wide.r2 - wide.r1) / 405).toBeGreaterThan(30);
-    // What is looked at lies in the band, with room on both sides, at any distance and zoom.
-    for (const fov of [2.7, 3.5, 5, 7, 8, 20]) {
-      for (let r = 1000; r < 150000; r *= 1.013) {
-        const b = bandFor(r, fov)!;
-        expect(b.r1).toBeLessThan(r);
-        expect(b.r2).toBeGreaterThan(r * 1.05);
+  test('the ring table holds every row once, from the feet to the last level, never going back', () => {
+    const { hf, eye } = twoRidges();
+    const view = frameScan(hf, eye, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    for (const rows of [1600, 900, 300]) {
+      const radii = ringTable(rows, view, (3.2 * DEG) / 600, hf.maxRange);
+      expect(radii.length).toBe(rows);
+      expect(radii[0]).toBe(RINGS.r0);
+      expect(radii[rows - 1]).toBeCloseTo(hf.maxRange, 3);
+      let distinct = 1;
+      for (let i = 1; i < rows; i++) {
+        expect(radii[i]).toBeGreaterThanOrEqual(radii[i - 1]);
+        if (radii[i] > radii[i - 1]) distinct++;
       }
+      // Rings to spare lie on the far edge; with too few, none is wasted.
+      if (rows === 900) expect(distinct).toBeGreaterThan(rows * 0.7);   // the ladder of spacings has steps of √2
+      // Ground the frame does not show still has rings, a few percent of the range apart.
+      for (let i = 1; i < rows; i++) if (radii[i] > 30) expect((radii[i] - radii[i - 1]) / radii[i]).toBeLessThan(0.09);
     }
-    // Panning across a slope still leaves the rings where they are, and so does a little zooming.
-    expect(bandFor(20000, 2.7)).toEqual(bandFor(20300, 2.7));
-    expect(bandFor(20000, 2.7)).toEqual(bandFor(20000, 2.8));
-    expect(bandFor(20000, 2.7)).not.toEqual(bandFor(20000, 5));
   });
 
-  test('with a band the rings there are a post apart or finer, and rowAt still inverts radiusAt everywhere', () => {
-    const { hf } = field([]);
-    const band = { r1: 7000, r2: 13000 };
-    for (const q of [QUALITY_HIGH, QUALITY_LOW]) {
-      const p = radialParams(q, hf, null, band);
-      expect(radiusAt(p, p.jNear)).toBeCloseTo(7000, 3);
-      expect(radiusAt(p, p.jSplit)).toBeCloseTo(13000, 3);
-      // Inside the band the step is constant and no coarser than the level's post there (13.3 m here) times two.
-      const step = radiusAt(p, p.jNear + 1) - radiusAt(p, p.jNear);
-      expect(step).toBeCloseTo(radiusAt(p, p.jSplit) - radiusAt(p, p.jSplit - 1), 6);
-      expect(step).toBeLessThanOrEqual(2 * hf.levels[0].res);
-      // The band takes at most 45 % of the rows; the rest still reaches the last level.
-      expect(p.jSplit - p.jNear).toBeLessThanOrEqual(0.45 * q.rows);
-      expect(radiusAt(p, q.rows - 1)).toBeCloseTo(Math.max(hf.maxRange, 13000 * 1.5), 3);
-      for (const f of [0.5, p.jNear - 0.5, p.jNear + 3.25, p.jSplit - 1, p.jSplit + 10.5, q.rows - 2]) {
-        expect(rowAt(p, radiusAt(p, f))).toBeCloseTo(f, 6);
-      }
+  test('a plain in the frame does not take the rings from the crests behind it: rings go by rows of the screen, not by metres of ground', () => {
+    // Looking level over a plain at ridges 16 and 26 km off (the ink-line
+    // test of the E2E suite, 2026-11-13): the plain is seen from 2 km on,
+    // seven times the depth of both crests together, and fills a part of
+    // the frame's height only. By metres of ground it took nine rings in
+    // ten and left the crests rings 50 m apart.
+    const { hf } = twoRidges();
+    const low = RIDGES.plain + 50;
+    const view = frameScan(hf, low, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    expect(Array.from(view.classes).filter((c) => c === 2).length).toBeGreaterThan(60);
+    const radii = ringTable(900, view, (3.2 * DEG) / 600, hf.maxRange);
+    const spacing = (r: number) => {
+      let i = 0;
+      while (i < radii.length - 2 && radii[i + 1] < r) i++;
+      return radii[i + 1] - radii[i];
+    };
+    expect(spacing(15950)).toBeLessThan(8);
+    // (From 50 m up the far ridge stands behind the near one: nothing of it to draw.)
+    // The plain between 2 and 13 km: the frame's height below the horizon, a pixel or two a ring.
+    const onPlain = Array.from(radii).filter((r) => r > 2000 && r < 13000).length;
+    expect(onPlain).toBeGreaterThan(40);
+    expect(onPlain).toBeLessThan(450);
+  });
+
+  test('terrain that reaches further than the scan did (a level arrived since) has rings all the way out, not one leap to the edge', () => {
+    const { hf, eye } = twoRidges();
+    const view = frameScan(hf, eye, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    const radii = ringTable(1600, view, (3.2 * DEG) / 600, hf.maxRange * 4);
+    expect(radii[1599]).toBeCloseTo(hf.maxRange * 4, 3);
+    for (let i = 1; i < 1600; i++) if (radii[i] > 30) expect((radii[i] - radii[i - 1]) / radii[i]).toBeLessThan(0.09);
+  });
+
+  test('with too few rings for the frame, all that is seen is drawn coarser alike, not the centre fine and the rest coarse', () => {
+    const { hf, eye } = twoRidges();
+    const view = frameScan(hf, eye, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    const px = (3.2 * DEG) / 600;
+    const spacing = (radii: Float64Array, r: number) => {
+      let i = 0;
+      while (i < radii.length - 2 && radii[i + 1] < r) i++;
+      return radii[i + 1] - radii[i];
+    };
+    const plenty = ringTable(6000, view, px, hf.maxRange), scarce = ringTable(450, view, px, hf.maxRange);
+    // Both crests lose by the same factor (the ladder of spacings has steps of 2^¼).
+    const near = spacing(scarce, 15900) / spacing(plenty, 15900), far = spacing(scarce, 25900) / spacing(plenty, 25900);
+    expect(near).toBeGreaterThan(2);
+    expect(Math.max(near, far) / Math.min(near, far)).toBeLessThan(1.5);
+    // With rows to spare a ring comes every RINGS.finest of RINGS.seen pixels of the picture: on the
+    // near ridge's face (0.3 steep, 16 km off, a pixel 1.5 m high) that is 5 m of ground a pixel.
+    expect(spacing(plenty, 15000)).toBeLessThan(RINGS.seen * RINGS.finest * 5 * 1.3);
+    expect(spacing(plenty, 15000)).toBeGreaterThan(RINGS.seen * RINGS.finest * 5 / 3);
+  });
+
+  test('a stretch of ground keeps its rings when the frame changes elsewhere: they lie on a lattice of their own', () => {
+    const { hf, eye } = twoRidges();
+    const view = frameScan(hf, eye, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    const px = (3.2 * DEG) / 600;
+    // Rows to spare, so that the spacing is the finest in both: with too few, what the far crest frees goes to the near one.
+    const before = ringTable(8000, view, px, hf.maxRange);
+    // The far crest leaves the frame; the near one stays.
+    const without = { classes: view.classes.slice(), need: view.need.slice() };
+    for (let b = scanBin(22000); b < without.classes.length; b++) { without.classes[b] = 0; without.need[b] = 0; }
+    const after = ringTable(8000, without, px, hf.maxRange);
+    const near = (radii: Float64Array) => Array.from(radii).filter((r) => r > 15300 && r < 16000);
+    expect(near(before).length).toBeGreaterThan(50);
+    expect(near(after)).toEqual(near(before));
+  });
+
+  test('few rows go to waste on the ladder of spacings: whatever the count, most of them are rings of their own', () => {
+    const { hf, eye } = twoRidges();
+    const view = frameScan(hf, eye, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    // (Up to where the rows are more than the finest spacing asks for.)
+    for (let rows = 500; rows <= 1100; rows += 100) {
+      const distinct = new Set(ringTable(rows, view, (3.2 * DEG) / 600, hf.maxRange)).size;
+      expect(distinct).toBeGreaterThan(rows * 0.86);
     }
-    // Without a band, nothing changes.
-    expect(radialParams(QUALITY_HIGH, hf, null, null)).toEqual(radialParams(QUALITY_HIGH, hf));
+  });
+
+  test('the telescope\'s data windows lie one behind the other on what the frame shows, the nearest ground in the finest: not around the centre of the view', () => {
+    // Around the point the centre met, the windows gave the mountain there
+    // 6 m posts and the one beside it the eye's 100 m: a rock summit when
+    // looked at, a round green hill a degree aside (Montscheinspitze,
+    // 2026-11-13). What a window serves is now a stretch of the view's
+    // depth: the finest takes the nearest ground seen beyond where the
+    // eye's own level of that zoom ends, the next goes on from there.
+    const { hf, eye } = twoRidges();
+    const view = frameScan(hf, eye, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    const first = scanStart(view.classes.findIndex((c) => c >= 2));   // 12.2 km: the plain comes into the frame
+    const windows = [{ depth: 3300, from: 2000 }, { depth: 6600, from: 4000 }, { depth: 13100, from: 8000 }];
+    const at = lookRanges(view.classes, windows);
+    expect(at[0]).toBeCloseTo(first + 1650, 0);
+    expect(at[1]).toBeCloseTo(first + 3300 + 3300, 0);        // goes on where the finest ends: the near crest (16 km) lies in it
+    // The third skips the hidden dip behind the near ridge and starts where the far ridge shows its top.
+    const far = scanStart(view.classes.findIndex((c, b) => c >= 2 && b >= scanBin(first + 9900)));
+    expect(far).toBeGreaterThan(24000);
+    expect(at[2]).toBeCloseTo(far + 6550, 0);
+    expect(at[2]! - 6550).toBeLessThan(26000);                // the far crest in it
+    // Ground nearer than a window's own eye level reaches is left to that level.
+    expect(lookRanges(view.classes, [{ depth: 3300, from: 14000 }])[0]).toBeCloseTo(14000 + 1650, 0);
+    // A window with nothing left to show gets no place; with nothing seen, none does.
+    expect(lookRanges(view.classes, [...windows, { depth: 26000, from: 16000 }])[3]).toBeNull();
+    expect(lookRanges(new Uint8Array(view.classes.length), windows)).toEqual([null, null, null]);
+  });
+
+  test('on a table rowAt inverts radiusAt, between the rings too; the renderer takes the table as it is', () => {
+    const { hf, eye } = twoRidges();
+    const view = frameScan(hf, eye, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    const radii = ringTable(900, view, (3.2 * DEG) / 600, hf.maxRange);
+    const p = radialParams(QUALITY_LOW, hf, null, radii);
+    expect(p.radii).toBe(radii);
+    for (const f of [0, 0.5, 10.25, 300.75, 620]) {
+      const r = radiusAt(p, f);
+      expect(r).toBeGreaterThanOrEqual(radii[Math.floor(f)]);
+      expect(rowAt(p, r)).toBeCloseTo(f, 6);
+    }
+    expect(ringsOf(p)).toBe(radii);
+    // Without a table the three segments, as ever, and the table the shader reads is made from them.
+    const plain = radialParams(QUALITY_LOW, hf);
+    expect(plain.radii).toBeUndefined();
+    const made = ringsOf(plain);
+    expect(made.length).toBe(QUALITY_LOW.rows);
+    for (const f of [0, 7, 200, 899]) expect(made[f]).toBeCloseTo(radiusAt(plain, f), 6);
+  });
+
+  test('the table goes to the GPU as three bytes of the logarithm a ring: good to a millionth of the range', () => {
+    const { hf, eye } = twoRidges();
+    const view = frameScan(hf, eye, { az0: 86, az1: 94, el0: -1.4, el1: 3.4 });
+    const radii = ringTable(900, view, (3.2 * DEG) / 600, hf.maxRange);
+    const { bytes, r0, span } = encodeRings(radii);
+    expect(bytes.length).toBe(900 * 4);
+    expect(r0).toBe(radii[0]);
+    for (const i of [0, 1, 250, 600, 899]) {
+      const v = bytes[i * 4] * 65536 + bytes[i * 4 + 1] * 256 + bytes[i * 4 + 2];
+      const r = r0 * Math.exp((v / RING_CODE) * span);
+      expect(Math.abs(r - radii[i]) / radii[i]).toBeLessThan(1e-6);
+    }
   });
 });
 

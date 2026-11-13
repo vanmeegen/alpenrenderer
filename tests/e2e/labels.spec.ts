@@ -198,22 +198,24 @@ test.describe('summit labels', () => {
   });
 
   test('zoomed in, the telescope cuts its fine windows around the Testhorn and draws the apex where the formula puts it', async ({ page }) => {
-    // Below 30° the three look levels (z14, z13 and z12; z13, z12 and z11 at
-    // the low quality the tests run at) are cut around the point the centre
-    // of the view meets, and a dense band of rings sits there: the apex is
-    // drawn from 13 m posts on rings 9 m apart, instead of from 26 m posts
-    // on rings 42 m apart (1/120 of 5 km). The windows lie in one another;
-    // the picture is read when all are in (weight 1: at once here, fade=0).
+    // Below 30° the look levels (z14, z13 and z12; z13, z12 and z11 at the
+    // low quality the tests run at) are cut on the ground the frame shows,
+    // one behind the other along the view, and the rings of the mesh lie
+    // there too: the apex is drawn from 13 m posts on rings a few metres
+    // apart, instead of from 26 m posts on rings 42 m apart (1/120 of
+    // 5 km). Here the frame shows the Testhorn's top and nothing behind it:
+    // the finest window takes it, the others have nothing to show. The
+    // picture is read when the window is in (weight 1: at once here, fade=0).
     await page.goto(url({ pitch: 26, fov: 5 }));
     const s = await ready(page);
     const looks = () => page.evaluate(() => (window as any).alp.streamer.heightField.levels
       .filter((l: any) => l.role === 'look' && l.filled && l.weight === 1).map((l: any) => ({ z: l.z, px0: l.px0, py0: l.py0, w: l.w })));
-    await expect.poll(async () => (await looks()).map((l: any) => l.z).sort(), { timeout: 60_000 }).toEqual([11, 12, 13]);
+    await expect.poll(async () => (await looks()).map((l: any) => l.z), { timeout: 60_000 }).toContain(13);
     const fine = (await looks()).sort((a: any, b: any) => b.z - a.z)[0];
     expect(fine.z).toBe(13);
-    // Cut around the Testhorn, not around the standpoint: its centre within a quarter window of the summit.
+    // Cut on the Testhorn's face, not around the standpoint: the summit in the part of the window drawn at full weight.
     const merc = (lon: number, z: number) => ((lon + 180) / 360) * 256 * 2 ** z;
-    expect(Math.abs(fine.px0 + fine.w / 2 - merc(TESTHORN.lon, fine.z))).toBeLessThan(fine.w / 4);
+    expect(Math.abs(fine.px0 + fine.w / 2 - merc(TESTHORN.lon, fine.z))).toBeLessThan(fine.w * 0.4);
     expect(Math.abs(fine.px0 + fine.w / 2 - merc(STAND.lon, fine.z))).toBeGreaterThan(fine.w / 2);
     // The apex on screen, from the formula: elevation of the summit, less the pitch, in a 5° frame.
     const elev = Math.atan2(TESTHORN.summit - s.eyeAltitude, TESTHORN_RANGE);
@@ -221,6 +223,42 @@ test.describe('summit labels', () => {
     // 13 m posts round the cone's apex by up to 9 m: 0.1° here, 13 px of 600.
     // Without the telescope the apex comes 30–40 m low: 0.4°, 48 px.
     await expect.poll(async () => Math.abs((await drawnApex(page)).y - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.025);
+  });
+
+  test('zoomed in, a summit is drawn as the terrain has it wherever it stands in the frame: the rings follow what the frame shows, not where its centre points', async ({ page }) => {
+    // The fault (2026-11-13): zoomed in, the dense rings of the mesh lay in
+    // one band around the distance the centre of the view met the ground.
+    // A summit beside the centre was drawn with rings 1/120 of the range
+    // apart (42 m here), its apex wherever two of them fell: up to 20 m,
+    // 30 px at 5°, too low, and differently after every small pan. Here the
+    // Testhorn stands 3.5° left of the centre and the centre ray passes it
+    // into the sky. The rings lie where the frame shows ground (framescan,
+    // ringTable): the apex is drawn on the row the terrain's own top has.
+    // Three standpoints 14 m apart: wherever the rings of the old layout
+    // fell, the summit lay over 4 m from the nearest at one of them at least.
+    const M_PER_DEG_LON = 111320 * Math.cos((STAND.lat * Math.PI) / 180);
+    for (const east of [0, 14, 28]) {
+      await page.goto(url({ lon: STAND.lon + east / M_PER_DEG_LON, yaw: 93.5, pitch: 26, fov: 5 }));
+      await ready(page);
+      // The fine window is there although the centre of the view meets no ground at all.
+      await expect.poll(() => page.evaluate(() => (window as any).alp.streamer.heightField.levels
+        .some((l: any) => l.role === 'look' && l.z === 13 && l.filled && l.weight === 1)), { timeout: 60_000 }).toBe(true);
+      const expected = await page.evaluate(([lon, lat, range, rEff]) => {
+        const a = (window as any).alp, hf = a.streamer.heightField;
+        // The top as it is drawn: from the fine window, which lies on the ground the frame shows
+        // although the centre looks past it.
+        const top = hf.summitAt(lon, lat, 60).h;
+        const out = new Float32Array(3);
+        a.camera.update();
+        a.camera.project(range, 0, top - a.renderer.eyeAltitude - (range * range) / (2 * rEff), out);
+        return { top, x: ((out[0] + 1) / 2) * 1000, y: ((1 - out[1]) / 2) * 600 };
+      }, [TESTHORN.lon, TESTHORN.lat, TESTHORN_RANGE - east, R_EFF_M]);
+      expect(expected.top).toBeGreaterThan(TESTHORN.summit - 40);
+      expect(expected.x).toBeGreaterThan(20);               // in the frame, well off its centre
+      expect(expected.x).toBeLessThan(250);
+      // A pixel is 0.73 m on the summit; rings a few pixels of ground apart leave the apex within 4 m of the top.
+      await expect.poll(async () => Math.abs((await drawnApex(page)).y - expected.y), { timeout: 30_000 }).toBeLessThan(6);
+    }
   });
 
   test('a window of the telescope rises into the picture instead of jumping: its weight goes from nothing to all over the frames of a third of a second', async ({ page }) => {
@@ -233,17 +271,22 @@ test.describe('summit labels', () => {
     const seen = await page.evaluate(() => new Promise<Record<number, number[]>>((resolve) => {
       const out: Record<number, number[]> = {};
       const t0 = performance.now();
+      let rest = 0;
       const tick = () => {
         const v = (window as any).alp;
         const looks = v ? v.streamer.heightField.levels.filter((l: any) => l.role === 'look') : [];
         for (const l of looks) if (l.filled) (out[l.z] ??= []).push(l.weight ?? 1);
-        const done = looks.length === 3 && looks.every((l: any) => l.filled && l.weight === 1);
-        if (done || performance.now() - t0 > 90_000) resolve(out); else requestAnimationFrame(tick);
+        // Done when what has arrived has risen and nothing more has come for a while.
+        const up = looks.some((l: any) => l.filled) && looks.every((l: any) => !l.filled || l.weight === 1);
+        rest = up ? rest + 1 : 0;
+        if (rest > 60 || performance.now() - t0 > 90_000) resolve(out); else requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
     }));
-    expect(Object.keys(seen).map(Number).sort((a, b) => a - b)).toEqual([11, 12, 13]);
-    for (const z of [11, 12, 13]) {
+    // The finest window, on the Testhorn; the frame shows nothing behind it for the others.
+    const zs = Object.keys(seen).map(Number);
+    expect(zs).toContain(13);
+    for (const z of zs) {
       const w = seen[z];
       // The frame it arrives in may be sampled before the viewer has seen
       // it, and a window cut anew while the terrain loads starts over: from
@@ -275,7 +318,8 @@ test.describe('summit labels', () => {
     await expect.poll(async () => Number((await hash()).get('yaw')), { timeout: 30_000 }).not.toBe(90);
     await page.waitForTimeout(700);                        // the URL follows the view within 400 ms
     const before = { apex: await drawnApex(page), yaw: (await hash()).get('yaw'), pitch: (await hash()).get('pitch') };
-    expect(before.yaw).toMatch(/^\d+\.\d\d$/);             // hundredths of a degree
+    // Hundredths of a degree; the view glides on after the drag, so the last digit is whatever it is, a nought (not written) too.
+    expect(before.yaw).toMatch(/^\d+\.\d\d?$/);
     await page.reload();
     await ready(page);
     expect((await hash()).get('fov')).toBe('2.7');

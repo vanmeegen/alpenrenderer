@@ -174,6 +174,31 @@ describe('look levels: the telescope\'s fine windows around the point looked at'
     expect(look.filled).toBe(false);
   });
 
+  test('each window can be cut around a point of its own: one behind the other along the view, not all around one spot', async () => {
+    // Around one spot the windows served what the centre of the view met and
+    // nothing else in the frame: a mountain beside it came from posts eight
+    // times as far apart, and changed its shape when the centre moved on.
+    const cfg = { size: 640, levels: [{ z: 12 }, { z: 9 }], look: [{ z: 14 }, { z: 13 }, { z: 12 }] };
+    const s = new ClipmapStreamer(syntheticSource(512), cfg, LON, LAT);
+    await s.setCenter(LON, LAT);
+    const at = (km: number) => ({ lon: LON + (km * 1000) / M_LON, lat: LAT });
+    await s.setLooks([at(13), at(18), at(31)]);
+    const looks = s.heightField.levels.filter((l) => l.role === 'look');
+    expect(looks.map((l) => l.z)).toEqual([14, 13, 12]);
+    expect(looks.every((l) => l.filled)).toBe(true);
+    [13, 18, 31].forEach((km, i) => {
+      expect(looks[i].px0 + 320).toBe(Math.round(lonToMercX(at(km).lon, looks[i].z)));
+    });
+    // A window without a point stays where it is; the others follow theirs.
+    const kept = looks[0].px0;
+    await s.setLooks([null, at(40), at(31)]);
+    expect(looks[0].px0).toBe(kept);
+    expect(looks[1].px0 + 320).toBe(Math.round(lonToMercX(at(40).lon, 13)));
+    // setLook is the same point for all.
+    await s.setLook(at(20).lon, LAT);
+    looks.forEach((l) => expect(l.px0 + 320).toBe(Math.round(lonToMercX(at(20).lon, l.z))));
+  });
+
   test('the windows arrive the coarsest first: the picture sharpens in steps instead of jumping from the eye\'s level to the finest', async () => {
     const cfg = { size: 640, levels: [{ z: 12 }, { z: 9 }], look: [{ z: 14 }, { z: 13 }, { z: 12 }] };
     const s = new ClipmapStreamer(syntheticSource(512), cfg, LON, LAT);

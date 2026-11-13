@@ -709,8 +709,10 @@ test.describe('ink lines and haze', () => {
     const inked = lum.slice(Math.round(back) + 8, line + 20).filter((v) => v < 0.5).length;
     expect(inked).toBeGreaterThanOrEqual(1);
     expect(inked).toBeLessThanOrEqual(2);
-    // The skyline itself is a line too, on the Hintergrat's crest.
-    expect(Math.min(...lum.slice(Math.round(back) - 8, Math.round(back) + 9))).toBeLessThan(0.2);
+    // The skyline itself is a line too, on the Hintergrat's crest. (Where it steps down a row
+    // between two of the three columns read, the darkest row is two parts ink and one of the
+    // antialiased step: 0.2.)
+    expect(Math.min(...lum.slice(Math.round(back) - 8, Math.round(back) + 9))).toBeLessThan(0.3);
   });
 
   test('the ground right behind a nearer mountain is lightened towards the haze, as the formula says; away from it, not', async ({ page }) => {

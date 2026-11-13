@@ -56,7 +56,7 @@ import { Camera } from '../../core/camera';
 import { DEG, MERC_PX, REFRACTION_K, effectiveRadiusAt, localRadius } from '../../core/geodesy';
 import { HeightField, Observer } from '../../core/heightfield';
 import { FOG_RANGE, HORIZON_COLOR, SNOW_LINE, WATER_COLOR, sunVector } from '../shading';
-import { Band, RadialParams, radialParams } from '../mesh';
+import { RadialParams, encodeRings, radialParams, ringsOf } from '../mesh';
 import { RedrawGate, frameFingerprint } from '../redraw';
 import { OUTLINE } from '../outline';
 import { MAX_LEVELS, atlasLayout } from '../atlas';
@@ -365,6 +365,8 @@ export class GpuRenderer {
       this.atlas = null;
       this.dropSurface();
       this.uploaded = this.uploaded.map(() => '');
+      this.ringsTex?.dispose();
+      this.ringsTex = null;
       if (this.heightField) this.setHeightField(this.heightField);
       this.gate.request(2);
     });
@@ -415,11 +417,12 @@ export class GpuRenderer {
       { vertex: 'terrain', fragment: 'terrain' }, {
         attributes: ['position'],
         uniforms: [...TERRAIN_UNIFORMS],
-        samplers: ['heights'],
+        samplers: ['heights', 'rings'],
         shaderLanguage: this.shaderLanguage,
       });
     this.terrainMat.backFaceCulling = false;
     this.terrainMat.setTexture('heights', this.blank);
+    this.terrainMat.setTexture('rings', this.blank);
 
     // Same vertex stage, lit fragment stage. Drawn by the colour target in
     // place of the range material (setMaterialForRendering), so one set of
@@ -428,11 +431,12 @@ export class GpuRenderer {
       { vertex: 'shade', fragment: 'shade' }, {
         attributes: ['position'],
         uniforms: [...SHADE_UNIFORMS],
-        samplers: ['heights', 'surface', 'detail', 'imagery'],
+        samplers: ['heights', 'rings', 'surface', 'detail', 'imagery'],
         shaderLanguage: this.shaderLanguage,
       });
     this.shadeMat.backFaceCulling = false;
     this.shadeMat.setTexture('heights', this.blank);
+    this.shadeMat.setTexture('rings', this.blank);
     this.shadeMat.setTexture('surface', this.blank);
     // The grain tile repeats and is seen from far off: wrapped, with mips.
     const grain = new RawTexture(detailTexture(), DETAIL.size, DETAIL.size, Constants.TEXTUREFORMAT_RGBA,
@@ -783,8 +787,44 @@ export class GpuRenderer {
 
   // ----------------------------------------------------------------- render
 
-  /** The telescope's dense band of rings, set by the viewer when zoomed in; null otherwise. */
-  band: Band | null = null;
+  /**
+   * Where the rings lie when zoomed in: one radius a row, set by the viewer
+   * from what the frame shows (mesh.ts ringTable); null for the wide view's
+   * own three segments.
+   */
+  get rings(): Float64Array | null { return this.ringRadii; }
+  set rings(radii: Float64Array | null) {
+    if (radii === this.ringRadii) return;
+    this.ringRadii = radii;
+    this.ringsVersion++;
+  }
+  private ringRadii: Float64Array | null = null;
+  private ringsVersion = 0;
+  /** The table as the vertex shader reads it, and what it was made from. */
+  private ringsTex: RawTexture | null = null;
+  private ringsKey = '';
+
+  /** Sends the ring radii of a layout to the GPU when they changed. */
+  private syncRings(p: RadialParams) {
+    const key = p.radii ? `t${this.ringsVersion}`
+      : `f${p.rows},${p.r0},${p.logRatioNear},${p.jNear},${p.rNearEnd},${p.post},${p.jSplit},${p.rSplit},${p.logRatioFar}`;
+    if (key !== this.ringsKey || !this.ringsTex) {
+      const { bytes, r0, span } = encodeRings(ringsOf(p));
+      if (this.ringsTex && this.ringsTex.getSize().width === p.rows) {
+        this.ringsTex.update(bytes);
+      } else {
+        this.ringsTex?.dispose();
+        this.ringsTex = RawTexture.CreateRGBATexture(bytes, p.rows, 1, this.scene, false, false, Texture.NEAREST_SAMPLINGMODE);
+        this.ringsTex.wrapU = Texture.CLAMP_ADDRESSMODE;
+        this.ringsTex.wrapV = Texture.CLAMP_ADDRESSMODE;
+        this.terrainMat.setTexture('rings', this.ringsTex);
+        this.shadeMat.setTexture('rings', this.ringsTex);
+      }
+      this.ringsKey = key;
+      this.ringSpan = [r0, span];
+    }
+  }
+  private ringSpan: [number, number] = [2, 1];
 
   /** Draws only what changed (render/redraw.ts): the first frames, then on any new input, request or live source. */
   private readonly gate = new RedrawGate(3);
@@ -816,7 +856,7 @@ export class GpuRenderer {
         whiten: this.whiten, desaturate: this.desaturate, rim: this.rim, maxPixelRatio: this.maxPixelRatio,
         resolutionScale: this.resolutionScale,
         edgeWidth: this.edgeWidth, lineDark: this.lineDark, refractionK: this.refractionK, curvature: this.curvature,
-        band: this.band ? [this.band.r1, this.band.r2] : null, frame: this.frameVersion,
+        rings: this.ringsVersion, frame: this.frameVersion,
       },
     };
   }
@@ -827,9 +867,9 @@ export class GpuRenderer {
     return this.videoEl !== null || !(d.terrainReady && d.shadeReady && d.compositeReady);
   }
 
-  /** The ring and column layout for the current view: the wedge follows the camera, the band the zoom. */
+  /** The ring and column layout for the current view: the wedge follows the camera, the rings what the frame shows. */
   private radialParams(hf: HeightField) {
-    return radialParams(this.quality, hf, this.camera.azimuthArc(4), this.band);
+    return radialParams(this.quality, hf, this.camera.azimuthArc(4), this.ringRadii);
   }
 
   /** The ring layout the mesh uses now; see render/mesh.ts. */
@@ -892,13 +932,13 @@ export class GpuRenderer {
     // A look window's weight changes from frame to frame while it rises.
     this.syncLevels(hf);
     const p = this.radialParams(hf);
+    this.syncRings(p);
     const latR = hf.lat * DEG;
 
     for (const m of [this.terrainMat, this.shadeMat]) {
       m.setFloat('uAz0', p.az0);
       m.setFloat('uAzStep', p.azStep);
-      m.setVector4('uRadial', new Vector4(p.jNear, p.logRatioNear, p.jSplit, p.logRatioFar));
-      m.setVector4('uRadialB', new Vector4(p.r0, p.rNearEnd, p.post, p.rSplit));
+      m.setVector3('uRing', new Vector3(this.ringSpan[0], this.ringSpan[1], p.rows));
       m.setFloat('uSinLat0', Math.sin(latR));
       m.setFloat('uCosLat0', Math.cos(latR));
       m.setFloat('uEyeAlt', this.eyeAltitude);

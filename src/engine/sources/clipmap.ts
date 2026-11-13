@@ -164,11 +164,22 @@ export class ClipmapStreamer {
    * sharpens in steps of one zoom, each over more of the frame than the
    * next, instead of jumping from the eye's level to the finest posts.
    */
-  async setLook(lon: number, lat: number): Promise<void> {
+  setLook(lon: number, lat: number): Promise<void> {
+    return this.setLooks(this.lookLevels.map(() => ({ lon, lat })));
+  }
+
+  /**
+   * The same with a point for each window, the finest first: the windows
+   * one behind the other along the view (render/mesh.ts lookRanges). A
+   * window without a point (null) stays as it is.
+   */
+  async setLooks(points: ({ lon: number; lat: number } | null)[]): Promise<void> {
     const size = this.config.size;
     const jobs: { index: number; keys: TileKey[]; px0: number; py0: number }[] = [];
     this.lookLevels.forEach((lv, i) => {
-      const cx = lonToMercX(lon, lv.z), cy = latToMercY(lat, lv.z);
+      const at = points[i];
+      if (!at) return;
+      const cx = lonToMercX(at.lon, lv.z), cy = latToMercY(at.lat, lv.z);
       if (this.lookLoaded[i] && lv.filled
         && Math.abs(cx - (lv.px0 + size / 2)) < size / 4 && Math.abs(cy - (lv.py0 + size / 2)) < size / 4) return;
       const px0 = Math.round(cx) - (size >> 1), py0 = Math.round(cy) - (size >> 1);

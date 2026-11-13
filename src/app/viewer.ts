@@ -20,7 +20,8 @@ import { LandCover, urlCoverLoader } from '../engine/sources/landcover';
 import { Imagery, urlImageryLoader } from '../engine/sources/imagery';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
 import { LOOK_FADE_MS, LookFade } from '../engine/core/lookfade';
-import { bandFor, lookRange, meshTopNear } from '../engine/render/mesh';
+import { FrameScanner, FrameView } from '../engine/render/framescan';
+import { lookRange, lookRanges, meshTopNear, ringTable } from '../engine/render/mesh';
 import { DEG, destination, localRadius } from '../engine/core/geodesy';
 import { ClipmapStreamer } from '../engine/sources/clipmap';
 import { TerrariumSource } from '../engine/sources/terrarium';
@@ -39,6 +40,8 @@ import { OUTLINE } from '../engine/render/outline';
 
 /** Milliseconds without a change of the view after which it counts as resting (longer than adapt.ts takes for a pause). */
 const REST_MS = 300;
+/** A frame's share of a scan of what the zoomed frame shows (framescan.ts), milliseconds. */
+const SCAN_BUDGET_MS = 3;
 
 /** Milliseconds of sightline work per frame; the rest of the frame stays for drawing and touch. */
 const VISIBILITY_BUDGET_MS = 4;
@@ -447,34 +450,99 @@ export class Viewer {
 
   private lastAspect = 0;
 
-  /** Zoomed in below this field of view, the rings crowd around the distance looked at (mesh.ts bandFor). */
+  /** Zoomed in below this field of view, the rings of the mesh go where the frame shows ground (mesh.ts ringTable). */
   static readonly TELESCOPE_FOV = 30;
 
   /**
-   * The telescope: zoomed in, a dense band of rings around where the centre
-   * of the view meets the ground, so the summit looked at is drawn with
-   * rings a post apart instead of 1/190 of its range. Quantised in bandFor,
-   * so panning across a slope leaves the rings where they are.
+   * The telescope: zoomed in, the rings of the mesh lie where the frame
+   * shows ground, a few pixels apart on all of it (framescan.ts, mesh.ts
+   * ringTable), instead of 1/190 of the range apart; and the fine data
+   * windows are cut around where the centre of the view meets the ground.
    */
   private aimTelescope() {
     const hf = this.streamer.heightField;
     const zoomed = this.camera.fov < Viewer.TELESCOPE_FOV && hf.levels.length > 0;
     const r = zoomed ? lookRange(hf, this.renderer.eyeAltitude, this.camera.yaw, this.camera.pitch) : null;
-    const band = bandFor(r, this.camera.fov);
-    const cur = this.renderer.band;
-    if ((band?.r1 ?? -1) !== (cur?.r1 ?? -1) || (band?.r2 ?? -1) !== (cur?.r2 ?? -1)) this.renderer.band = band;
-    // The fine data windows (clipmap.ts look levels) go to the same point; one fetch at a time.
-    if (r !== null) {
-      if (!this.looking) {
-        const at = destination(hf.lon, hf.lat, this.camera.yaw, r, localRadius(hf.lat));
-        this.looking = this.streamer.setLook(at.lon, at.lat).finally(() => { this.looking = null; });
-      }
-    } else if (!zoomed) {
+    const rings = zoomed ? this.ringsForFrame() : null;
+    if (rings !== this.renderer.rings) {
+      this.renderer.rings = rings;
+      // The label pins sit on the summits as the mesh draws them.
+      if (this.targets.length) this.scheduleRebuildTargets();
+    }
+    // The fine data windows (clipmap.ts look levels), one fetch at a time: one behind the
+    // other on what the frame shows, or, where no scan says what that is, all where the centre looks.
+    if (zoomed) {
+      const points = this.lookPoints(r);
+      if (points && !this.looking) this.looking = this.streamer.setLooks(points).finally(() => { this.looking = null; });
+    } else {
       this.streamer.clearLook();
     }
   }
 
+  /**
+   * A point for each of the telescope's windows, the finest first (mesh.ts
+   * lookRanges): along the middle of the view, the nearest ground the frame
+   * shows in the finest window, the next behind it. Null for a window means
+   * it stays; null altogether, that there is nothing to look at.
+   */
+  private lookPoints(centre: number | null): ({ lon: number; lat: number } | null)[] | null {
+    const hf = this.streamer.heightField;
+    const looks = hf.levels.filter((l) => l.role === 'look');
+    const radius = localRadius(hf.lat);
+    const along = (r: number) => destination(hf.lon, hf.lat, this.camera.yaw, r, radius);
+    if (!this.ringView || !this.renderer.rings) {
+      // No scan to go by: a view too steep for one puts all windows where the centre looks. While
+      // the first scan still runs, nothing is fetched that would be fetched again a moment later.
+      return this.scanner.scanning || centre === null ? null : looks.map(() => along(centre));
+    }
+    const eye = hf.eyeLevels();
+    const ranges = lookRanges(this.ringView.classes, looks.map((l) => ({
+      // What a window draws at full weight (heightfield.ts looksAt: the inner 80 %).
+      depth: 0.8 * l.w * l.res,
+      // Up to there the eye's own level of this zoom, or a finer one, draws the ground.
+      from: eye.filter((e) => e.z >= l.z && e.filled).reduce((m, e) => Math.max(m, e.maxRange), 0),
+    })));
+    return ranges.some((x) => x !== null) ? ranges.map((x) => (x === null ? null : along(x))) : null;
+  }
+
   private looking: Promise<void> | null = null;
+
+  /**
+   * The rings for the frame as it stands: what it shows of the ground is
+   * scanned anew only when it leaves what was scanned (FrameScanner), and
+   * the table is made anew only for another scan, another step of zoom or
+   * other terrain. Null when the view is steep enough to sweep every
+   * bearing, and while the first scan runs: the wide view's own rings then.
+   */
+  private ringsForFrame(): Float64Array | null {
+    const hf = this.streamer.heightField;
+    this.camera.update();
+    const arc = this.camera.azimuthArc(0);
+    if (!arc || !(hf.maxRange > 0)) return null;
+    const el = this.camera.elevationSpan();
+    // The terrain the scan reads: the eye's levels, as far as they have arrived.
+    const stamp = hf.levels.map((l) => (l.role === 'look' ? '' : l.filled ? l.version : '-')).join(',');
+    const classes = this.scanner.scan(hf, this.renderer.eyeAltitude,
+      { az0: arc.start, az1: arc.start + arc.span, el0: el.lo, el1: el.hi }, stamp, SCAN_BUDGET_MS);
+    // The first scan of a place takes some frames: the wide view's rings until then.
+    if (!classes) { this.ringView = null; return null; }
+    // The angle of a pixel, on a ladder of 2^(1/4): zooming a little makes no new table.
+    const px = (this.camera.fov * DEG) / Math.max(1, this.canvas.clientHeight);
+    const step = Math.floor(Math.log2(px) * 4);
+    const rows = this.renderer.quality.rows;
+    const key = `${rows}|${step}|${hf.maxRange}`;
+    if (classes !== this.ringView || key !== this.ringKey || !this.ringRadii) {
+      this.ringView = classes;
+      this.ringKey = key;
+      this.ringRadii = ringTable(rows, classes, 2 ** (step / 4), hf.maxRange);
+    }
+    return this.ringRadii;
+  }
+
+  private scanner = new FrameScanner();
+  private ringView: FrameView | null = null;
+  private ringKey = '';
+  private ringRadii: Float64Array | null = null;
 
   /**
    * The telescope's windows rise into the picture instead of jumping
@@ -956,7 +1024,7 @@ export class Viewer {
       },
       peaks: {
         total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length, unnamed: this.unnamed, layouts: this.layouts,
-        settled: this.rebuildTimer === null && (this.visibility?.done ?? false),
+        settled: this.rebuildTimer === null && (this.visibility?.done ?? false) && !this.scanner.scanning,
       },
       sought: (() => {
         const t = this.soughtTarget();

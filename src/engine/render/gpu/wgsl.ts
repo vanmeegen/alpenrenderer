@@ -27,6 +27,7 @@
 import { WATER_SHINE } from '../shading';
 import { OUTLINE_CONSTS, SHADE_CONSTS, shaderFloat, wgslConsts } from './consts';
 import { ATLAS_COLUMNS, MAX_LEVELS, MAX_LOOK } from '../atlas';
+import { RING_CODE } from '../mesh';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -41,7 +42,7 @@ const SHARP = WATER_SHINE.sharpness.toFixed(1);
  */
 
 export const TERRAIN_UNIFORMS = [
-  'uAz0', 'uAzStep', 'uRadial', 'uRadialB', 'uSinLat0', 'uCosLat0', 'uEyeAlt',
+  'uAz0', 'uAzStep', 'uRing', 'uSinLat0', 'uCosLat0', 'uEyeAlt',
   'uRadius', 'uRefRadius', 'uDropScale', 'uLevelCount', 'uTexSize',
   'uLevelPx', 'uViewProj', 'uFar', 'uLvlA', 'uLvlB',
 ] as const;
@@ -174,8 +175,7 @@ attribute position : vec3<f32>;
 
 uniform uAz0       : f32;         // bearing of column 0 (the wedge over the view)
 uniform uAzStep    : f32;
-uniform uRadial    : vec4<f32>;   // jNear, logRatioNear, jSplit, logRatioFar
-uniform uRadialB   : vec4<f32>;   // r0, rNearEnd, stepMid, rSplit
+uniform uRing      : vec3<f32>;   // first ring's radius, log(last / first), rings
 uniform uSinLat0   : f32;
 uniform uCosLat0   : f32;
 uniform uEyeAlt    : f32;
@@ -192,6 +192,8 @@ uniform uLvlB      : array<vec4<f32>, ${MAX_LEVELS}>;  // quant, bias, w, h
 
 var heightsSampler : sampler;
 var heights        : texture_2d<f32>;
+var ringsSampler   : sampler;
+var rings          : texture_2d<f32>;
 
 ${VARYINGS}
 
@@ -204,15 +206,14 @@ fn log1p(x : f32) -> f32 {
 }
 
 /**
- * Sample spacing along a ray, in three segments: geometric near, so the ground
- * at your feet is not one enormous triangle; one DEM post per step through the
- * middle; geometric again far out, tracking the angular step so screen-space
- * triangle size stays roughly constant to the far plane.
+ * The radius of ring f, from the table the CPU made (mesh.ts ringsOf,
+ * encodeRings): a texel a ring, in R, G, B the logarithm of the radius as a
+ * share of the span from the first ring to the last (see the GLSL twin).
  */
 fn radiusAt(f : f32) -> f32 {
-  if (f < uniforms.uRadial.x) { return uniforms.uRadialB.x * exp(f * uniforms.uRadial.y); }
-  if (f < uniforms.uRadial.z) { return uniforms.uRadialB.y + (f - uniforms.uRadial.x) * uniforms.uRadialB.z; }
-  return uniforms.uRadialB.w * exp((f - uniforms.uRadial.z) * uniforms.uRadial.w);
+  let uv = vec2<f32>((floor(f + 0.5) + 0.5) / uniforms.uRing.z, 0.5);
+  let t = floor(textureSampleLevel(rings, ringsSampler, uv, 0.0).rgb * 255.0 + vec3<f32>(0.5, 0.5, 0.5));
+  return uniforms.uRing.x * exp((t.r * 65536.0 + t.g * 256.0 + t.b) / ${RING_CODE}.0 * uniforms.uRing.y);
 }
 
 ${CLIPMAP_SAMPLER}

@@ -27,6 +27,7 @@
 import { WATER_SHINE } from '../shading';
 import { OUTLINE_CONSTS, SHADE_CONSTS, glslConsts, shaderFloat } from './consts';
 import { ATLAS_COLUMNS, MAX_LEVELS, MAX_LOOK } from '../atlas';
+import { RING_CODE } from '../mesh';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -151,8 +152,7 @@ attribute vec3 position;
 
 uniform float uAz0;         // bearing of column 0 (the wedge over the view)
 uniform float uAzStep;
-uniform vec4  uRadial;      // jNear, logRatioNear, jSplit, logRatioFar
-uniform vec4  uRadialB;     // r0, rNearEnd, stepMid, rSplit
+uniform vec3  uRing;        // first ring's radius, log(last / first), rings
 uniform float uSinLat0;
 uniform float uCosLat0;
 uniform float uEyeAlt;
@@ -168,6 +168,7 @@ uniform vec4  uLvlA[${MAX_LEVELS}];    // cx, cy, pxPerRad, maxRange (< 0: a loo
 uniform vec4  uLvlB[${MAX_LEVELS}];    // quant, bias, w, h
 
 uniform sampler2D heights;
+uniform sampler2D rings;
 
 ${VARYINGS}
 
@@ -180,15 +181,15 @@ float log1p(float x) {
 }
 
 /**
- * Sample spacing along a ray, in three segments: geometric near, so the ground
- * at your feet is not one enormous triangle; one DEM post per step through the
- * middle; geometric again far out, tracking the angular step so screen-space
- * triangle size stays roughly constant to the far plane.
+ * The radius of ring f, from the table the CPU made (mesh.ts ringsOf,
+ * encodeRings): a texel a ring, in R, G, B the logarithm of the radius as a
+ * share of the span from the first ring to the last. Where the rings lie is
+ * decided there: the three segments of the wide view, or, zoomed in,
+ * wherever the frame shows ground (ringTable).
  */
 float radiusAt(float f) {
-  if (f < uRadial.x) { return uRadialB.x * exp(f * uRadial.y); }
-  if (f < uRadial.z) { return uRadialB.y + (f - uRadial.x) * uRadialB.z; }
-  return uRadialB.w * exp((f - uRadial.z) * uRadial.w);
+  vec3 t = floor(texelFetch(rings, ivec2(int(f + 0.5), 0), 0).rgb * 255.0 + 0.5);
+  return uRing.x * exp((t.r * 65536.0 + t.g * 256.0 + t.b) / ${RING_CODE}.0 * uRing.y);
 }
 
 ${CLIPMAP_SAMPLER}

@@ -132,6 +132,27 @@ export class Camera {
     const span = 360 - gap + 2 * marginDeg;
     return span >= 360 ? null : { start, span };
   }
+
+  /**
+   * The lowest and highest elevation angle in the frame, degrees above the
+   * horizon: over its corners, the middles of its edges and its centre (a
+   * tilted frame reaches furthest at a corner, an upright one looking up
+   * at the middle of its top edge).
+   */
+  elevationSpan(): { lo: number; hi: number } {
+    const th = Math.tan((this.fov * DEG) / 2);
+    const tw = th * this.aspect;
+    let lo = Infinity, hi = -Infinity;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]]) {
+      const e = this.forward[0] + this.right[0] * sx * tw + this.up[0] * sy * th;
+      const n = this.forward[1] + this.right[1] * sx * tw + this.up[1] * sy * th;
+      const u = this.forward[2] + this.right[2] * sx * tw + this.up[2] * sy * th;
+      const el = Math.atan2(u, Math.hypot(e, n)) / DEG;
+      if (el < lo) lo = el;
+      if (el > hi) hi = el;
+    }
+    return { lo, hi };
+  }
 }
 
 /**

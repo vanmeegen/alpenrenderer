@@ -14,6 +14,7 @@ import { bearing, curvatureDrop, destination, groundRange, localRadius } from '.
 
 const DEG = Math.PI / 180;
 import { HeightField, Level } from '../core/heightfield';
+import { FrameView, SCAN, scanBin, scanBins, scanStart } from './framescan';
 import type { Quality } from './gpu/renderer';
 
 export interface RadialParams {
@@ -31,6 +32,11 @@ export interface RadialParams {
   rSplit: number;
   logRatioFar: number;
   rows: number;
+  /**
+   * The radius of every ring, when the rings follow what the frame shows
+   * (ringTable) instead of the three segments above.
+   */
+  radii?: Float64Array;
 }
 
 /**
@@ -59,33 +65,13 @@ export function wedge(azimuths: number, arc: { start: number; span: number } | n
  * summit lands on a ring (§8.y had them 0–60 m too low at 1.1–1.4 %).
  */
 export function radialParams(
-  quality: Quality, hf: HeightField, arc: { start: number; span: number } | null = null, band: Band | null = null,
+  quality: Quality, hf: HeightField, arc: { start: number; span: number } | null = null, radii: Float64Array | null = null,
 ): RadialParams {
   const { azimuths, rows } = quality;
   const { az0, azStep } = wedge(azimuths, arc);
   const post = Math.max(12, hf.levels[0]?.res ?? 30);
   const maxRange = Math.max(hf.maxRange, post * 64);
-  const r0 = 2;
-  if (band) {
-    // The telescope: the shader's linear middle segment becomes a dense band
-    // of rings a post apart around the distance looked at, and the two
-    // geometric segments share the remaining rows by the span they cover.
-    // Zoomed in, the ground between the feet and the band is a thin strip
-    // at the bottom of the frame; the band is what the view is about.
-    const { r1, r2 } = band;
-    const res = hf.levels[0]?.res ?? 30;
-    const bandRows = Math.min(Math.floor(0.45 * rows), Math.max(2, Math.ceil((r2 - r1) / res)));
-    const step = (r2 - r1) / bandRows;
-    const maxR = Math.max(maxRange, r2 * 1.5);
-    const spanA = Math.log(r1 / r0), spanB = Math.log(maxR / r2);
-    const rest = rows - 1 - bandRows;
-    const rowsA = Math.max(1, Math.min(rest - 1, Math.round((rest * spanA) / (spanA + spanB))));
-    const jNear = rowsA, jSplit = rowsA + bandRows;
-    return {
-      az0, azStep, columns: azimuths, r0, logRatioNear: spanA / rowsA, jNear, rNearEnd: r1, post: step,
-      jSplit, rSplit: r2, logRatioFar: spanB / (rows - 1 - jSplit), rows,
-    };
-  }
+  const r0 = RINGS.r0;
   const ratioNear = 1.15;
   const logRatioNear = Math.log(ratioNear);
   const jNear = Math.max(1, Math.ceil(Math.log(post / (ratioNear - 1) / r0) / logRatioNear));
@@ -93,35 +79,153 @@ export function radialParams(
   // No post-spaced middle segment any more: jSplit = jNear keeps the shader's three-segment form.
   const jSplit = jNear, rSplit = rNearEnd;
   const logRatioFar = Math.log(Math.max(maxRange, rSplit * 1.5) / rSplit) / (rows - 1 - jSplit);
-  return { az0, azStep, columns: azimuths, r0, logRatioNear, jNear, rNearEnd, post, jSplit, rSplit, logRatioFar, rows };
+  const p: RadialParams = { az0, azStep, columns: azimuths, r0, logRatioNear, jNear, rNearEnd, post, jSplit, rSplit, logRatioFar, rows };
+  // Zoomed in, the rings lie where the frame shows ground: a table, one radius a ring.
+  if (radii && radii.length === rows) p.radii = radii;
+  return p;
 }
 
 /** Ground ranges a dense band of rings covers (the telescope). */
-export interface Band { r1: number; r2: number }
+export const RINGS = {
+  /** The innermost ring, metres (framescan.ts SCAN.r0: the bins start there too). */
+  r0: SCAN.r0,
+  /** Pixels of the picture between two rings, on ground that rises into view. */
+  seen: 2,
+  /** With rings to spare they come this much closer, no more. */
+  finest: 0.5,
+  /**
+   * Share of the range between two rings at most where ground is in the
+   * frame, seen or not: a ring a bin. Closer, and the ground at the feet
+   * (a hundred bins of it) takes half the rows of a phone for nothing.
+   */
+  inFrame: 0.025,
+  /** Share of the range between two rings elsewhere. */
+  rest: 0.05,
+} as const;
 
-/** At this field of view (vertical, degrees) and wider the band has its full width. */
-const BAND_FOV = 8;
+/** The largest value three bytes hold: a ring's radius goes to the GPU as that share of the logarithm's span. */
+export const RING_CODE = 16777215;
 
 /**
- * The band for a distance looked at: the distance quantised in steps of
- * ×1.25 (so panning across a slope leaves the rings where they are) with
- * room on both sides, 0.8× to 1.5625× of the quantised value. Nothing within
- * a kilometre: the near rings are dense already. Null for the sky.
+ * The rings for a zoomed frame: one radius a row, from RINGS.r0 to
+ * `maxRange`, where `view` (framescan.ts) says what the frame shows of
+ * each bin of distance and `pxAngle` is the angle of a pixel, radians.
  *
- * Zoomed in below 8° the step, and with it the band, narrows in proportion
- * to the field of view (1 + 0.25·fov/8). The rows the band may take are
- * fixed, so a band a third as wide has its rings a third as far apart: at
- * 2.7° a pixel is 1.6 m at 20 km, and the wide band's rings were 37 m apart
- * there on a phone, where the terrain has 13 m posts.
+ * A bin gets as many rings as it brings pixels of the picture into view,
+ * one every RINGS.seen pixels: the surface between two rings is flat, so
+ * a crest that falls between them is drawn lower by what the nearer of
+ * them lies under it on screen, and that is less than their distance on
+ * screen. Wherever the frame shows a crest, then, it is at most that much
+ * too low, not only where the frame's centre points (the one dense band
+ * this replaces had rings 7 m apart at the centre and 200–300 m beside
+ * it). A plain in view takes the rows of the screen it fills, whatever
+ * its depth. Ground in the frame gets a ring every RINGS.inFrame of the
+ * range at least (a strip the scan's rays missed), the rest every
+ * RINGS.rest. If the rows do not reach, the pixels between rings are
+ * stretched for all bins alike, in steps of 2^⅛, until they do: the error
+ * is shared by all that is seen. Rows to spare lie on the last ring.
+ *
+ * The rings of a bin are a lattice in the logarithm of the range,
+ * r0·exp(k·δ), with δ on a ladder of 2^¼: a stretch of ground keeps its
+ * rings whatever the frame shows elsewhere, and panning moves none.
  */
-export function bandFor(lookRange: number | null, fov = BAND_FOV): Band | null {
-  if (lookRange === null || !(lookRange >= 1000)) return null;
-  // The field of view on a ladder of quarter octaves below 8°, so that zooming a little leaves the rings alone too.
-  const f = Math.min(BAND_FOV, Math.max(1, fov));
-  const laddered = BAND_FOV * 2 ** (-Math.floor(Math.log2(BAND_FOV / f) * 4 + 1e-9) / 4);
-  const step = 1 + 0.25 * (laddered / BAND_FOV);
-  const q = 1000 * step ** Math.floor(Math.log(lookRange / 1000) / Math.log(step));
-  return { r1: q / step, r2: q * step * step };
+export function ringTable(rows: number, view: FrameView, pxAngle: number, maxRange: number): Float64Array {
+  const { classes, need } = view;
+  const rest = Math.log(1 + RINGS.rest), inFrame = Math.log(1 + RINGS.inFrame), bin = Math.log(SCAN.ratio);
+  // δ for a wanted spacing (a share of the range): the next finer on the ladder, never coarser than `most`.
+  const onLadder = (want: number, most: number) => (want >= most ? most : rest * 2 ** (-Math.ceil(4 * Math.log2(rest / want) - 1e-9) / 4));
+  // Bins the scan did not reach (terrain that arrived since) count as not in the frame.
+  const bins = Math.max(classes.length, scanBins(maxRange));
+  const out = new Float64Array(rows);
+  const lay = (stretch: number, write: boolean): number => {
+    let n = 0;
+    if (write) out[n] = RINGS.r0;
+    n++;
+    const end = Math.log(maxRange / RINGS.r0);
+    for (let b = 0; b < bins; b++) {
+      const most = classes[b] >= 1 ? inFrame : rest;
+      // Rings in the bin: the pixels it brings into view, one ring every `seen · stretch` of them.
+      const rings = (need[b] ?? 0) / (RINGS.seen * stretch * pxAngle);
+      const d = rings > 0 ? onLadder(bin / rings, most) : most;
+      const lo = Math.log(scanStart(b) / RINGS.r0), hi = Math.min(end, Math.log(scanStart(b + 1) / RINGS.r0));
+      // Lattice points in [lo, hi), past the first ring and short of the last.
+      for (let k = Math.max(1, Math.ceil(lo / d - 1e-9)); k * d < hi - 1e-9; k++) {
+        if (write && n < rows - 1) out[n] = RINGS.r0 * Math.exp(k * d);
+        n++;
+      }
+    }
+    return n + 1;                                             // and the ring on the last level's edge
+  };
+  let stretch = RINGS.finest, n = lay(stretch, false);
+  for (let i = 0; n > rows && i < 96; i++) {
+    stretch *= 2 ** 0.125;
+    n = lay(stretch, false);
+  }
+  lay(stretch, true);
+  if (n > rows) {
+    // Fewer rows than even the coarsest lattice asks for: every so-manyth ring of it.
+    const all: number[] = [RINGS.r0];
+    const end = Math.log(maxRange / RINGS.r0);
+    for (let k = 1; k * rest < end - 1e-9; k++) all.push(RINGS.r0 * Math.exp(k * rest));
+    for (let i = 0; i < rows - 1; i++) out[i] = all[Math.min(all.length - 1, Math.round((i * (all.length - 1)) / Math.max(1, rows - 2)))];
+    out[rows - 1] = maxRange;
+    return out;
+  }
+  for (let i = n - 1; i < rows; i++) out[i] = maxRange;
+  return out;
+}
+
+/**
+ * Where along the view the telescope's data windows go: for each window,
+ * the finest first, the ground range of its middle, or null when the frame
+ * shows nothing left for it. A window serves a stretch `depth` long (the
+ * part of it drawn at full weight). The finest takes the nearest ground
+ * seen (`classes`, framescan.ts) beyond `from`, where the eye's own level
+ * of that zoom ends and the window has something to add; the next goes on
+ * where it ends, skipping what is hidden or out of the frame. So the posts
+ * a mountain is drawn from depend on what the frame shows, the nearest the
+ * finest (a pixel is least ground there), and not on where its centre
+ * points: around the centre's spot, the mountain beside it came from posts
+ * eight times as far apart and changed when the centre moved on.
+ */
+export function lookRanges(classes: Uint8Array, windows: { depth: number; from: number }[]): (number | null)[] {
+  let pos = 0;
+  return windows.map((w) => {
+    const lo = Math.max(pos, w.from, RINGS.r0);
+    for (let b = scanBin(lo); b < classes.length; b++) {
+      if (classes[b] !== 2) continue;
+      const start = Math.max(lo, scanStart(b));
+      pos = start + w.depth;
+      return start + w.depth / 2;
+    }
+    return null;
+  });
+}
+
+/** The radius of every ring of a layout: its table, or the three segments worked out. */
+export function ringsOf(p: RadialParams): Float64Array {
+  if (p.radii) return p.radii;
+  const out = new Float64Array(p.rows);
+  for (let f = 0; f < p.rows; f++) out[f] = radiusAt(p, f);
+  return out;
+}
+
+/**
+ * The table as the vertex shader reads it: a texel a ring, in R, G, B the
+ * logarithm of its radius as a share (of RING_CODE) of the span from the
+ * first ring to the last. Three bytes resolve 7e-7 of the range.
+ */
+export function encodeRings(radii: Float64Array): { bytes: Uint8Array; r0: number; span: number } {
+  const r0 = radii[0], span = Math.max(1e-9, Math.log(radii[radii.length - 1] / r0));
+  const bytes = new Uint8Array(radii.length * 4);
+  for (let i = 0; i < radii.length; i++) {
+    const v = Math.min(RING_CODE, Math.max(0, Math.round((Math.log(radii[i] / r0) / span) * RING_CODE)));
+    bytes[i * 4] = v >>> 16;
+    bytes[i * 4 + 1] = (v >>> 8) & 255;
+    bytes[i * 4 + 2] = v & 255;
+    bytes[i * 4 + 3] = 255;
+  }
+  return { bytes, r0, span };
 }
 
 /**
@@ -158,6 +262,11 @@ export function lookRange(hf: HeightField, eyeAlt: number, yaw: number, pitch: n
 
 /** Ground range of ring `f` (the shader's `radiusAt`). */
 export function radiusAt(p: RadialParams, f: number): number {
+  if (p.radii) {
+    const t = p.radii, i = Math.min(t.length - 2, Math.max(0, Math.floor(f)));
+    // Between two rings, geometrically: where the row index is a fraction, as the lattice is.
+    return t[i] * (t[i + 1] / t[i]) ** (f - i);
+  }
   if (f < p.jNear) return p.r0 * Math.exp(f * p.logRatioNear);
   if (f < p.jSplit) return p.rNearEnd + (f - p.jNear) * p.post;
   return p.rSplit * Math.exp((f - p.jSplit) * p.logRatioFar);
@@ -165,6 +274,15 @@ export function radiusAt(p: RadialParams, f: number): number {
 
 /** The (fractional) ring at a ground range: the inverse of `radiusAt`. */
 export function rowAt(p: RadialParams, r: number): number {
+  if (p.radii) {
+    const t = p.radii;
+    let lo = 0, hi = t.length - 1;
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (t[m] <= r) lo = m; else hi = m;
+    }
+    return t[lo + 1] > t[lo] ? lo + Math.log(Math.max(r, 1e-9) / t[lo]) / Math.log(t[lo + 1] / t[lo]) : lo;
+  }
   if (r < p.rNearEnd) return Math.log(Math.max(r, 1e-9) / p.r0) / p.logRatioNear;
   if (r < p.rSplit) return p.jNear + (r - p.rNearEnd) / p.post;
   return p.jSplit + Math.log(r / p.rSplit) / p.logRatioFar;
