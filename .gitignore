@@ -13,3 +13,4 @@ playwright-report/
 tools/.scratch/
 tests/e2e/fixtures/lakes/
 tests/e2e/fixtures/cover/
+tests/e2e/fixtures/imagery/

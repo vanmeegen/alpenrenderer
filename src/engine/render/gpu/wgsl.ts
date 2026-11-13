@@ -49,7 +49,7 @@ export const TERRAIN_UNIFORMS = [
 /** The shade material takes every terrain uniform plus these. */
 export const SHADE_UNIFORMS = [
   ...TERRAIN_UNIFORMS,
-  'uSun', 'uSnowLine', 'uFogRange', 'uHorizonColor', 'uWaterColor', 'uDetail', 'uDetailOrigin',
+  'uSun', 'uSnowLine', 'uFogRange', 'uHorizonColor', 'uWaterColor', 'uDetail', 'uDetailOrigin', 'uImagery',
 ] as const;
 
 export const COMPOSITE_UNIFORMS = [
@@ -320,8 +320,12 @@ uniform uDetailOrigin : vec4<f32>;  // the standpoint's place in a tile, fine (x
 
 var surfaceSampler : sampler;
 var surface : texture_2d<f32>;
+uniform uImagery : vec4<f32>;       // the aerial picture: 1 when the style shows it, its pixels per level side, its atlas's width and height
+
 var detailSampler : sampler;
 var detail : texture_2d<f32>;
+var imagerySampler : sampler;
+var imagery : texture_2d<f32>;
 
 ${wgslConsts(SHADE_CONSTS)}
 
@@ -372,6 +376,17 @@ fn coverAt(lv : i32, dLon : f32, dIso : f32, jit : vec2<f32>) -> f32 {
   let py = clamp(floor(A.y - dIso * A.z - jit.y * perMetre), 0.0, uniforms.uLevelPx - 1.0) + o.y;
   let uv = vec2<f32>((px + 0.5) / uniforms.uTexSize.x, (py + 0.5) / uniforms.uTexSize.y);
   return floor(textureSampleLevel(heights, heightsSampler, uv, 0.0).a * 255.0 / 16.0 + 0.5);
+}
+
+/** The aerial picture at one level: its colour, and in alpha whether a tile gave one (see glsl.ts). */
+fn imageryAt(lv : i32, dLon : f32, dIso : f32) -> vec4<f32> {
+  let A = uniforms.uLvlA[lv];
+  let cell = uniforms.uImagery.y;
+  var p = vec2<f32>(A.x + dLon * A.z, A.y - dIso * A.z) * (cell / uniforms.uLevelPx);
+  p = clamp(p, vec2<f32>(0.5, 0.5), vec2<f32>(cell - 0.5, cell - 0.5));
+  let row = floor(f32(lv) / ATLAS_COLS);
+  let o = vec2<f32>(f32(lv) - row * ATLAS_COLS, row) * cell;
+  return textureSampleLevel(imagery, imagerySampler, (o + p) / uniforms.uImagery.zw, 0.0);
 }
 
 /** The ground's own colour for a class at height h, or none (the height's tint) where there is no class. */
@@ -433,6 +448,8 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   var sf = surfaceAt(lv, dLon, dIso);
   var wet = waterAt(lv, dLon, dIso);
   var cover = coverAt(lv, dLon, dIso, jit);
+  var picture = vec4<f32>(0.0);
+  if (uniforms.uImagery.x > 0.5) { picture = imageryAt(lv, dLon, dIso); }
   if (f32(lv) + 1.0 < uniforms.uLevelCount && uniforms.uLvlA[lv + 1].w > 0.0) {
     let outer = uniforms.uLvlA[lv].w;
     let fade = smoothstep(outer * 0.86, outer, r);
@@ -440,6 +457,7 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
       sf = mix(sf, surfaceAt(lv + 1, dLon, dIso), fade);
       wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
       if (fade > 0.5) { cover = coverAt(lv + 1, dLon, dIso, jit); }
+      if (uniforms.uImagery.x > 0.5) { picture = mix(picture, imageryAt(lv + 1, dLon, dIso), fade); }
     }
   }
   let lk = lookLevel(dLon, dIso);
@@ -473,16 +491,21 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
             * (1.0 - smoothstep(SNOW_LOW, SNOW_HIGH, slope)) * mix(1.0, SNOW_ON_LAND, known);
   col = mix(col, snow, snowy);
   col = mix(col, uniforms.uWaterColor, wet);
+  // The aerial style: where a tile gave a colour, the photograph is the ground.
+  let aerial = picture.a * uniforms.uImagery.x;
+  col = mix(col, vec3<f32>(1.0) - pow(vec3<f32>(1.0) - picture.rgb, vec3<f32>(AERIAL_LIFT)), aerial);
 
   // Plain Lambert with a floor: shadow sides keep their shape, lit faces
   // stand out. A sky term that lifted north faces flattened the relief.
   // Times what the ground around leaves of the sky: gullies darker, ridges lighter.
   // Near the eye the grain bumps the normal the light sees and mottles the
   // brightness, on dry ground (see glsl.ts).
-  let grainy = uniforms.uDetail.z * (1.0 - smoothstep(DETAIL_NEAR, DETAIL_FAR, r)) * (1.0 - wet);
+  // A photograph has its own grain and its own light (see glsl.ts).
+  let grainy = uniforms.uDetail.z * (1.0 - smoothstep(DETAIL_NEAR, DETAIL_FAR, r)) * (1.0 - wet) * mix(1.0, AERIAL_GRAIN, aerial);
   let nl = normalize(vec3<f32>(n.xy - DETAIL_TILT * grainy * grain.xy, n.z));
   let diff = max(dot(nl, uniforms.uSun), 0.0);
-  let shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0)) * (1.0 + DETAIL_GRAIN * grainy * grain.z);
+  var shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0)) * (1.0 + DETAIL_GRAIN * grainy * grain.z);
+  shade = mix(shade, 1.0 + (shade - 1.0) * AERIAL_LIGHT, aerial);
   col = col * shade;
   if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 

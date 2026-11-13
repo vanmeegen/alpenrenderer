@@ -32,6 +32,10 @@ Data:
   Sentinel data (2021) processed by ESA WorldCover consortium,
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The tiles are a
   derived product: resampled and reduced by majority.
+- Aerial picture (the "Luftbild" style, tiles fetched at run time from EOX's
+  tile service): EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH
+  (Contains modified Copernicus Sentinel data 2017),
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - Standpoint map tiles: © OpenStreetMap contributors, ODbL, served by the
   OpenStreetMap Foundation's standard tile layer under its
   [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).

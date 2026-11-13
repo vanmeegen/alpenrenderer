@@ -6,6 +6,7 @@
  * absolute eye altitude in metres; leave it out to stand on the ground.
  */
 
+import { IMAGERY_TEMPLATE } from '../engine/sources/imagery';
 import { fovForAspect } from '../engine/core/camera';
 
 export interface ViewState {
@@ -228,6 +229,8 @@ export interface AppOptions {
   lakes: string;
   /** Land cover tile template (sources/landcover.ts), likewise. */
   cover: string;
+  /** Aerial picture tile template (sources/imagery.ts): EOX's service unless a base is given. */
+  imagery: string;
   /**
    * Draw the lit shade pass (`shade=0` turns it off): without it the range
    * pass and the composite still run and the view is the outline over white
@@ -249,6 +252,7 @@ export function readOptions(search = location.search): AppOptions {
   const peaks = q.get('peaks') || 'peaks';
   const lakes = q.get('lakes') || 'lakes';
   const cover = q.get('cover') || 'landcover';
+  const imagery = q.get('imagery');
   return {
     backend: b === 'webgpu' ? 'webgpu' : 'webgl2',
     quality: ql === 'high' || ql === 'low' ? ql : 'auto',
@@ -256,6 +260,7 @@ export function readOptions(search = location.search): AppOptions {
     peaks: (peaks.endsWith('/') ? peaks : peaks + '/') + '{x}_{y}.json',
     lakes: (lakes.endsWith('/') ? lakes : lakes + '/') + '{x}_{y}.json',
     cover: (cover.endsWith('/') ? cover : cover + '/') + '{z}/{x}/{y}.png',
+    imagery: imagery ? (imagery.endsWith('/') ? imagery : imagery + '/') + '{z}/{y}/{x}.jpg' : IMAGERY_TEMPLATE,
     shade: q.get('shade') !== '0',
     ...(q.get('adapt') === '1' ? { adapt: true } : q.get('adapt') === '0' ? { adapt: false } : {}),
   };
@@ -316,12 +321,15 @@ export function writeOutline(v: number, storage = defaultStorage()) {
 
 /**
  * How the terrain is drawn. `relief`: lit and coloured, lines over it.
+ * `aerial`: the same with a satellite picture as the ground's colour
+ * (sources/imagery.ts), the relief wherever no picture comes.
  * `lines`: the outline alone on white, the look of a drawn panorama, and
  * what is left when the lit pass is too much for a GPU.
  */
-export type Style = 'relief' | 'lines';
+export type Style = 'relief' | 'aerial' | 'lines';
 export const STYLES: { id: Style; name: string }[] = [
   { id: 'relief', name: 'Relief' },
+  { id: 'aerial', name: 'Luftbild' },
   { id: 'lines', name: 'Linien' },
 ];
 const STYLE_KEY = 'alp.style';

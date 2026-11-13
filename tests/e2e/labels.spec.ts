@@ -12,7 +12,7 @@ const W = 1000, H = 600;
 const R_EFF_M = 6371008.8 / (1 - 0.13);
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', q: 'low', shade: '0', ...query });
+  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', imagery: '/tests/e2e/fixtures/imagery/', q: 'low', shade: '0', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;

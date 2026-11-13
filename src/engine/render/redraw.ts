@@ -17,7 +17,7 @@ export interface FrameInputs {
   eye: number;
   origin: [number, number];
   /** Per clipmap level: what changes the atlas or the window's place. */
-  levels: { version: number; waterVersion?: number; coverVersion?: number; filled: boolean; px0: number; py0: number }[];
+  levels: { version: number; waterVersion?: number; coverVersion?: number; imageryVersion?: number; filled: boolean; px0: number; py0: number }[];
   /** Everything else the shaders read: flags, sliders, colours, the telescope band. */
   knobs: Record<string, number | boolean | string | null | readonly number[]>;
 }
@@ -25,7 +25,7 @@ export interface FrameInputs {
 /** A string that changes when, and only when, some input changes. */
 export function frameFingerprint(i: FrameInputs): string {
   const c = i.camera, s = i.size;
-  const levels = i.levels.map((l) => `${l.version}.${l.waterVersion ?? 0}.${l.coverVersion ?? 0}.${l.filled ? 1 : 0}.${l.px0}.${l.py0}`).join(',');
+  const levels = i.levels.map((l) => `${l.version}.${l.waterVersion ?? 0}.${l.coverVersion ?? 0}.${l.imageryVersion ?? 0}.${l.filled ? 1 : 0}.${l.px0}.${l.py0}`).join(',');
   const knobs = Object.keys(i.knobs).sort().map((k) => {
     const v = i.knobs[k];
     return `${k}=${v === null ? 'null' : Array.isArray(v) ? (v as readonly number[]).join(':') : String(v)}`;

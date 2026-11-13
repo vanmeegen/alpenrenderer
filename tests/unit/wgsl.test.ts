@@ -294,6 +294,26 @@ describe('land cover in the shade pass', () => {
   });
 });
 
+describe('the aerial picture in the shade pass', () => {
+  test('both dialects read the picture from its own atlas, by a switch that is a uniform, with the constants of shading.ts', async () => {
+    // No shader variant per style: a new pipeline costs a phone seconds.
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { AERIAL } = await import('../../src/engine/render/shading');
+    const { shaderFloat } = await import('../../src/engine/render/gpu/consts');
+    expect(S.SHADE_UNIFORMS).toContain('uImagery');
+    for (const src of [GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_SHADE_FRAGMENT]) {
+      expect(src).toMatch(/fn imageryAt\(|vec4 imageryAt\(/);
+      expect(src).toContain('uImagery');
+      for (const [name, value] of [['AERIAL_LIGHT', AERIAL.light], ['AERIAL_LIFT', AERIAL.lift], ['AERIAL_GRAIN', AERIAL.grain]] as [string, number][]) {
+        expect(src).toMatch(new RegExp(`const (float )?${name}\\b[^;]*= ${shaderFloat(value).replace('.', '\\.')};`));
+      }
+    }
+    expect(GL.TERRAIN_SHADE_FRAGMENT_GL).toContain('uniform sampler2D imagery;');
+    expect(S.TERRAIN_SHADE_FRAGMENT).toContain('var imagery ');
+    expect(GL.TERRAIN_VERTEX_GL).not.toContain('imagery');
+  });
+});
+
 describe('shader text Babylon can take apart', () => {
   test('no comment behind code holds a semicolon: the preprocessor cuts declarations there', async () => {
     // "uniform float uRim;   // …; 0 = off" compiled to a lone "0 = off" and a black screen (WebGL2).

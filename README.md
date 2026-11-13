@@ -62,6 +62,11 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   Standpunkt dem Gerät folgen (ab zehn Metern, nicht bei jedem Wackeln
   des GPS). Ein Fix innerhalb seiner Genauigkeit von einem Gipfel steht
   auf dem Gipfel.
+- **Luftbild**: In den Einstellungen lässt sich statt des Reliefs ein
+  Satellitenbild über das Gelände legen (Sentinel-2 cloudless 2017 von
+  EOX, 10 m), weich beleuchtet, mit denselben Linien und Namen. Die
+  Kacheln kommen zur Laufzeit von EOX' Dienst; wo keine kommt, bleibt das
+  Relief.
 - **Landbedeckung**: Wo Wald steht, ist das Gelände dunkelgrün, Wiesen
   sind hell (im Tal grüner, oben fahler), Fels und Schutt grau, Gletscher
   weiß auch unter der Schneegrenze, Orte grau, Felder gelbgrün. Die Klassen
@@ -151,4 +156,7 @@ Shading-Pass erweitert.
 - Landbedeckung (`public/landcover/`): © ESA WorldCover project 2021 /
   Contains modified Copernicus Sentinel data (2021) processed by ESA
   WorldCover consortium, CC BY 4.0.
+- Luftbild (Stil „Luftbild“, zur Laufzeit geladen): EOxCloudless
+  https://cloudless.eox.at by EOX IT Services GmbH (Contains modified
+  Copernicus Sentinel data 2017), CC BY 4.0.
 - Code: MIT. Drittkomponenten in `THIRD-PARTY-NOTICES.md`.

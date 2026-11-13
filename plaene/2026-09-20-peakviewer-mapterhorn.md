@@ -1531,6 +1531,75 @@ Offen: Der Pfeil kann über einem Label stehen (er nimmt am Layout nicht
 teil). Eingerastet wird auf die Katalogposition, nicht auf die Spitze
 des Geländemodells; der freie Blick (E3) hebt das Auge über die Kuppe.
 
+### 8.aj Plan 4, Etappe 8: Luftbild-Stil (2026-11-13)
+
+**Wunsch.** „Vielleicht Tiles drauflegen“: neben dem Relief ein Stil, in
+dem das Gelände die Farbe eines Luftbilds trägt.
+
+**Daten und Lizenz.** Das einzige Luftbild der ganzen Alpen ohne
+Schlüssel ist Sentinel-2 cloudless von EOX (10 m). Der Kacheldienst
+weist in seinen Capabilities die Mosaike 2016 und 2017 als CC BY 4.0
+aus („EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH
+(Contains modified Copernicus Sentinel data 2017)“); die späteren
+Jahrgänge sind es nicht. Genutzt wird 2017
+(`s2cloudless-2017_3857`, 256-px-JPEG, CORS offen). Es ist EOX'
+Demo-Dienst: mit Rate-Limit und ohne Zusage. Deshalb ist hier nichts ein
+Fehler: was nicht kommt, bleibt Relief.
+
+**Laufzeit (`sources/imagery.ts`).** Je Clipmap-Ebene um den Beobachter
+wird das Bild in halber Auflösung der Ebene gelesen: ein Bildpixel für
+zwei Posten je Richtung, aus den Kacheln einen Zoom unter der Ebene und
+nie feiner als Zoom 13 (13 m bei 47° Nord, mehr sieht der Satellit
+nicht). Das sind vier bis neun kleine Kacheln je Ebene. Eine Kachel, die
+fehlt oder scheitert, ist im Bild durchsichtig (Alpha 0). Geladen wird
+nur im Luftbild-Stil.
+
+**Bild (`shading.ts AERIAL`, beide Shader-Dialekte).** Ein dritter
+Atlas (RGBA, vom Sampler zwischen den Pixeln gelesen, eine Zelle je
+Ebene wie im Höhen-Atlas, halb so groß). Wo eine Kachel Farbe gab, ist
+das Foto der Boden: kein Fels, Schnee oder Klassenfarbe darüber. Das
+Mosaik ist dunkel gegen die Relief-Palette, also wird jeder Kanal als
+1 − (1 − c)^1,6 angehoben: Wald und Schatten heller, Schnee kann nicht
+ausfressen. Das Foto hat sein eigenes Licht; das Relief-Licht liegt nur
+zur Hälfte darüber, genug für die Form. Ein Satellitenpixel misst 13 m,
+vor den Füßen wäre das Bild eine Farbfläche: die Körnung aus E5 bleibt
+mit halber Stärke. Dunst, Linien und Seeglanz wie im Relief. Der Stil
+ist ein Uniform, keine Shader-Variante.
+
+**Bedienung.** „Darstellung“: Relief, Luftbild, Linien; das Gerät merkt
+sich die Wahl. Im Luftbild-Stil nennt die Fußzeile „Luftbild © EOX,
+Copernicus Sentinel 2017“, das Quellen-Panel den vollen Vermerk.
+`?imagery=` setzt eine andere Kachelbasis (Tests, lokaler Cache);
+`tools/cache_tiles.mjs` holt die Bildkacheln mit.
+
+Abweichung vom Plan: „ab Tablet“ entfällt. Das Bild ist je Ebene
+320 × 320 Pixel (0,4 MB), auf dem Handy sechs Ebenen; es wird nur
+geladen, wenn der Stil gewählt ist.
+
+Tests rot → grün: `imagery.test.ts` (neu: Zoom je Ebene, eins zu zwei
+gelesen, Nah-Ebene vergrößert, fehlende Kachel durchsichtig, jede Kachel
+einmal, Fehler ist „kein Bild“), `shading.test.ts` („the aerial
+picture“: Farbe des Fotos mit Aufhellkurve, halbes Licht, halbe Körnung,
+nichts vom Relief darüber, ohne Bild das Relief), `wgsl.test.ts` („both
+dialects read the picture from its own atlas, by a switch that is a
+uniform…“), `state.test.ts` (drei Stile, `imagery`), `redraw.test.ts`
+(`imageryVersion`), `app.spec.ts` („"Luftbild" lays the satellite
+picture over the terrain: each spot takes the picture's colour there,
+lit softly; the source is named; "Relief" takes it off again“ gegen ein
+zweifarbiges Testbild, Abweichung 0,60 → unter 0,03; „where no picture
+comes, the aerial style is the relief“). Alle E2E-URLs zeigen auf die
+Bildkacheln der Testlandschaft, nie auf den Dienst.
+
+Messung: 423 Unit-Tests grün; volle E2E-Suite 85/85 grün in 12,4 min.
+Bilder mit echten Kacheln (lokal zwischengespeichert): am Gornergrat
+Gletscher, Fels und Moränen wie auf dem Satellitenbild, über dem
+Achensee bewaldete Hänge, an der Mauritzalm die Almwiesen.
+
+Offen: Das Mosaik hat die Schatten des Aufnahmetags und im Hochgebirge
+Altschnee; es ist ein Bild von 2017. Ob der Demo-Dienst die Last einer
+öffentlichen Seite trägt, zeigt der Betrieb; fällt er aus, bleibt das
+Relief.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

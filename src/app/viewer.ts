@@ -17,6 +17,7 @@ import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
 import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
 import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
 import { LandCover, urlCoverLoader } from '../engine/sources/landcover';
+import { Imagery, urlImageryLoader } from '../engine/sources/imagery';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
 import { bandFor, lookRange, meshTopNear } from '../engine/render/mesh';
 import { DEG, destination, localRadius } from '../engine/core/geodesy';
@@ -89,6 +90,8 @@ export interface ViewerStatus {
   levelsEmpty: number;
   /** Levels that hold a land cover class per post (sources/landcover.ts). */
   levelsCovered: number;
+  /** Levels that hold an aerial picture (sources/imagery.ts); 0 outside the aerial style. */
+  levelsPictured: number;
   /** DEM ground under the eye, metres. */
   ground: number;
   eyeAltitude: number;
@@ -159,6 +162,8 @@ export class Viewer {
   private waterStamp = new WeakMap<object, string>();
   private landCover: LandCover;
   private coverStamp = new WeakMap<object, string>();
+  private imagery: Imagery;
+  private imageryStamp = new WeakMap<object, string>();
   private targets: LabelTarget[] = [];
   /** Counts every new set of targets, the empty one after a move included. */
   private targetsVersion = 0;
@@ -199,8 +204,9 @@ export class Viewer {
     // switch it off while they run and restore this.
     this.shadeAllowed = opt.shade;
     this.style = readStyle();
-    this.shadeView = opt.shade && this.style === 'relief';
+    this.shadeView = opt.shade && this.style !== 'lines';
     renderer.shaded = this.shadeView;
+    renderer.aerial = this.style === 'aerial';
     this.camera = renderer.camera;
     this.quality = profile.quality;
     this.view = view;
@@ -216,6 +222,7 @@ export class Viewer {
     this.catalog = new PeakCatalog(urlFetcher(opt.peaks));
     this.lakeCatalog = new LakeCatalog(lakeFetcher(opt.lakes));
     this.landCover = new LandCover(urlCoverLoader(opt.cover));
+    this.imagery = new Imagery(urlImageryLoader(opt.imagery));
     this.painter = overlay ? new LabelPainter(overlay) : null;
     this.camera.set({ yaw: view.yaw, pitch: view.pitch, fov: view.fov });
   }
@@ -426,8 +433,10 @@ export class Viewer {
   setStyle(style: Style) {
     this.style = style;
     writeStyle(style);
-    this.shadeView = this.shadeAllowed && style === 'relief';
+    this.shadeView = this.shadeAllowed && style !== 'lines';
     if (!this.feed.status.active && !this.photo) this.renderer.shaded = this.shadeView;
+    this.renderer.aerial = style === 'aerial';
+    this.applyImagery();
   }
 
   private lastAspect = 0;
@@ -619,6 +628,30 @@ export class Viewer {
     }
   }
 
+  /**
+   * In the aerial style: reads the satellite picture onto every filled
+   * level around the observer whose grid changed since. The tiles come
+   * from a rate-limited server and may not come: a level without a picture
+   * is drawn as relief, which is also what shows until the picture is in.
+   */
+  private applyImagery() {
+    if (this.style !== 'aerial' || !this.shadeAllowed) return;
+    const hf = this.streamer.heightField;
+    for (const l of hf.levels) {
+      if (!l.filled || l.role === 'look') continue;
+      const stamp = `${l.version}|${l.px0},${l.py0}`;
+      if (this.imageryStamp.get(l) === stamp) continue;
+      this.imageryStamp.set(l, stamp);
+      if (l.imagery) { l.imagery = undefined; l.imageryVersion = (l.imageryVersion ?? 0) + 1; }
+      void this.imagery.rasterize(l).then((picture) => {
+        if (this.disposed || !picture || this.imageryStamp.get(l) !== stamp) return;
+        l.imagery = picture;
+        l.imageryVersion = (l.imageryVersion ?? 0) + 1;
+        this.renderer.setHeightField(hf);
+      });
+    }
+  }
+
   /** Summit geometry and what the terrain hides: once per position or level, not per frame. */
   private rebuildTargets() {
     const hf = this.streamer.heightField;
@@ -800,6 +833,7 @@ export class Viewer {
     this.applyAltitude();
     this.applyWater();
     this.applyCover();
+    this.applyImagery();
     this.renderer.setHeightField(this.streamer.heightField);
     this.scheduleRebuildTargets();
   }
@@ -876,6 +910,7 @@ export class Viewer {
       levelsShown: hf.eyeLevels().filter((l) => l.filled).length,
       pending: p.pending, missing: p.failed, levelsEmpty: p.empty,
       levelsCovered: this.streamer.heightField.levels.filter((l) => l.cover).length,
+      levelsPictured: this.streamer.heightField.levels.filter((l) => l.imagery).length,
       ground: hf.groundAt(this.view.lon, this.view.lat),
       eyeAltitude: this.renderer.eyeAltitude,
       eyeLift: this.eyeLift,

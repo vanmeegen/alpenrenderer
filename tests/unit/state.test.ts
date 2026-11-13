@@ -63,7 +63,8 @@ describe('readOptions', () => {
   test('defaults to WebGL2 and automatic quality', () => {
     expect(readOptions('')).toEqual({
       backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json', lakes: 'lakes/{x}_{y}.json',
-      cover: 'landcover/{z}/{x}/{y}.png', shade: true,
+      cover: 'landcover/{z}/{x}/{y}.png',
+      imagery: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/g/{z}/{y}/{x}.jpg', shade: true,
     });
   });
 
@@ -91,6 +92,11 @@ describe('readOptions', () => {
   test('the land cover base becomes a tile URL template', () => {
     expect(readOptions('?cover=/tests/e2e/fixtures/cover').cover).toBe('/tests/e2e/fixtures/cover/{z}/{x}/{y}.png');
     expect(readOptions('?cover=/c/').cover).toBe('/c/{z}/{x}/{y}.png');
+  });
+
+  test('the aerial picture comes from EOX unless a base is given, which becomes a tile URL template (row before column, as the service has it)', () => {
+    expect(readOptions('?imagery=/tests/e2e/fixtures/imagery').imagery).toBe('/tests/e2e/fixtures/imagery/{z}/{y}/{x}.jpg');
+    expect(readOptions('?imagery=/i/').imagery).toBe('/i/{z}/{y}/{x}.jpg');
   });
 
   test('lakes base becomes a cell URL template like the peaks', () => {
@@ -341,6 +347,15 @@ describe('the style of the picture', () => {
     expect(readStyle(s)).toBe('lines');
     writeStyle('relief', s);
     expect(readStyle(s)).toBe('relief');
+  });
+
+  test('three styles are offered: the relief, the aerial picture, the lines; the aerial one is kept like the others', async () => {
+    const { STYLES } = await import('../../src/app/state');
+    expect(STYLES.map((s) => s.id)).toEqual(['relief', 'aerial', 'lines']);
+    expect(STYLES.map((s) => s.name)).toEqual(['Relief', 'Luftbild', 'Linien']);
+    const s = mem();
+    writeStyle('aerial', s);
+    expect(readStyle(s)).toBe('aerial');
   });
 
   test('something unknown in the store, or a store that throws, is the relief', () => {

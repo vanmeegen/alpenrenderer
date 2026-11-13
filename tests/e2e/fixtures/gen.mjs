@@ -211,6 +211,33 @@ const lakeCell = `${Math.floor(T.LAKE.lon)}_${Math.floor(T.LAKE.lat)}.json`;
 writeFileSync(join(lakesDir, lakeCell), JSON.stringify(T.LAKES));
 console.log(`fixture lakes: ${T.LAKES.length} in ${lakesDir}/${lakeCell}`);
 
+// --- the aerial picture: 256-px tiles round the standpoint, PNG data under the service's .jpg name ---
+{
+  const dir = join(here, 'imagery');
+  const T256 = 256;
+  let tiles = 0;
+  for (let z = 13; z >= 6; z--) {
+    const world = T256 * 2 ** z;
+    const cx = Math.floor(((T.STAND.lon + 180) / 360) * 2 ** z);
+    const sinLat = Math.sin((T.STAND.lat * Math.PI) / 180);
+    const cy = Math.floor((0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * 2 ** z);
+    for (let ty = cy - 1; ty <= cy + 1; ty++) for (let tx = cx - 1; tx <= cx + 1; tx++) {
+      const rgb = Buffer.alloc(T256 * T256 * 3);
+      for (let j = 0; j < T256; j++) {
+        const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (ty * T256 + j + 0.5)) / world))) * 180) / Math.PI;
+        for (let i = 0; i < T256; i++) {
+          const c = T.imageAt(((tx * T256 + i + 0.5) / world) * 360 - 180, lat);
+          rgb.set(c, (j * T256 + i) * 3);
+        }
+      }
+      mkdirSync(join(dir, String(z), String(ty)), { recursive: true });
+      writeFileSync(join(dir, String(z), String(ty), `${tx}.jpg`), png(rgb, T256, T256));
+      tiles++;
+    }
+  }
+  console.log(`fixture imagery: ${tiles} tiles in ${dir}`);
+}
+
 // --- land cover: the range's forest and meadow, at every zoom the app reads ---
 {
   const C = await import('../../../tools/landcover.mjs');

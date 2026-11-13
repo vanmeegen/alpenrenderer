@@ -86,6 +86,18 @@ export const COVER = {
   snowOnLand: 0.3,
 };
 
+/**
+ * The aerial picture (sources/imagery.ts) as the ground's colour. A
+ * satellite mosaic has its own light and shadow in it, so the relief's
+ * light is laid over it at `light` of its strength only: enough to read
+ * the shape, not enough to shade the shadows twice. The mosaic is dark
+ * beside the relief's palette: each channel is lifted as 1 − (1 − c)^lift,
+ * which brightens forest and shadow and cannot clip the snow. A satellite
+ * pixel is 13 m, so right at the feet the picture is one flat colour: the
+ * grain of the near ground (detail.ts) stays, at `grain` of its strength.
+ */
+export const AERIAL = { light: 0.5, lift: 1.6, grain: 0.5 };
+
 const DEG = Math.PI / 180;
 
 /** Bearing of the light for a view direction `yaw`, degrees 0..360. */
@@ -186,11 +198,15 @@ export function coverJitter(coarse: RGB, fine: RGB): [number, number] {
  * gives for the point, 0.5 on even ground; `detail` the grain of the near
  * ground (detail.ts: `d` from detailAt, `fade` from detailFade), which
  * changes the light on dry ground and not what the ground is made of;
- * `cover` the land cover class there (COVER_CLASSES), 0 for none.
+ * `cover` the land cover class there (COVER_CLASSES), 0 for none;
+ * `picture` the aerial picture's colour there (0..1), when the style is
+ * the aerial one and a tile gave it: then it is the ground, with no rock,
+ * snow or class over it, lit softly and with half the grain (AERIAL).
  */
 export function terrainColor(
   h: number, n: [number, number, number], range: number, water = false, view?: [number, number, number], yaw = 0,
   eyeAlt = h, occlusion = 0.5, detail?: { d: [number, number, number]; fade: number }, cover = 0,
+  picture?: [number, number, number],
 ): [number, number, number] {
   const slope = 1 - n[2];
   const valley: [number, number, number] = [0.47, 0.60, 0.33];
@@ -211,10 +227,12 @@ export function terrainColor(
     * (known ? COVER.snowOnLand : 1);
   col = mix(col, snow, snowy);
   if (water) col = [...WATER_COLOR];
+  if (picture) col = picture.map((c) => 1 - (1 - Math.min(1, Math.max(0, c))) ** AERIAL.lift) as [number, number, number];
   const s = sunVector(yaw);
-  const g = detail && !water ? lit(n, detail.d, detail.fade) : { normal: n, grain: 1 };
+  const g = detail && !water ? lit(n, detail.d, detail.fade * (picture ? AERIAL.grain : 1)) : { normal: n, grain: 1 };
   const diff = g.normal[0] * s[0] + g.normal[1] * s[1] + g.normal[2] * s[2];
-  const shade = shadeFactor(diff, occlusion) * g.grain;
+  const full = shadeFactor(diff, occlusion) * g.grain;
+  const shade = picture ? 1 + (full - 1) * AERIAL.light : full;
   col = [col[0] * shade, col[1] * shade, col[2] * shade];
   if (water && view) col = waterShine(col, view, yaw);
   return haze(col, range, h, eyeAlt);

@@ -3,7 +3,7 @@
  * here is derived from tests/e2e/fixtures/terrain.ts, not read off a picture.
  */
 import { expect, Page, test } from '@playwright/test';
-import { BACK_RIDGE, BANK, COVER_PATCHES, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, coverAt, heightAt, skylineRow, spotAt, summitScreenY, terrainHit } from './fixtures/terrain';
+import { BACK_RIDGE, BANK, COVER_PATCHES, EYE_HEIGHT, FLANK, PLAIN_M, RIDGE_RANGE, STAND, coverAt, heightAt, imageAt, skylineRow, spotAt, summitScreenY, terrainHit } from './fixtures/terrain';
 import { HORIZON_COLOR, luminance as lumOf, terrainColor } from '../../src/engine/render/shading';
 import { LogField, OUTLINE, rimAt } from '../../src/engine/render/outline';
 import { DETAIL, detailAt, detailFade, detailFrame } from '../../src/engine/render/detail';
@@ -13,7 +13,7 @@ const R_EFF_M = 6371008.8 / (1 - 0.13);
 const W = 1000, H = 600;
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', q: 'low', shade: '0', ...query });
+  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', imagery: '/tests/e2e/fixtures/imagery/', q: 'low', shade: '0', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;
@@ -785,6 +785,74 @@ test.describe('the style of the picture', () => {
     await expect(page.getByRole('radio', { name: 'Linien' })).toBeChecked();
     await page.getByRole('radio', { name: 'Relief' }).click();
     await expect.poll(sky, { timeout: 60_000 }).toBeLessThan(235);
+  });
+});
+
+test.describe('the aerial style', () => {
+  test('"Luftbild" lays the satellite picture over the terrain: each spot takes the picture\'s colour there, lit softly; the source is named; "Relief" takes it off again', async ({ page }) => {
+    // The range's picture is red east of the standpoint and blue west of it
+    // (fixtures/terrain.ts imageAt). Looking south and down from 3000 m, the
+    // left of the frame is east; the ground is 5 km off, beyond the grain of
+    // the near ground, so the colour is the picture's and the light's alone.
+    await page.addInitScript(() => { if (!localStorage.getItem('alp.style')) localStorage.setItem('alp.style', 'aerial'); });
+    const yaw = 180, pitch = -35;
+    await page.goto(url({ yaw, pitch, alt: PLAIN_M + 3000 }, { shade: '1' }));   // a colour test
+    const s = await ready(page);
+    const probes: [number, number][] = [[250, 300], [750, 300]];
+    const read = () => page.evaluate(async (probes) => {
+      const r = (window as any).alp.renderer;
+      const c = await r.capture(), b = await r.readRange();
+      return probes.map(([x, y]) => {
+        const rgb = [0, 0, 0];
+        for (let yy = y - 4; yy <= y + 4; yy++) for (let xx = x - 4; xx <= x + 4; xx++) {
+          const o = (yy * c.width + xx) * 4;
+          for (let k = 0; k < 3; k++) rgb[k] += c.pixels[o + k] / 255 / 81;
+        }
+        const o = ((b.height - 1 - y) * b.width + x) * 4;
+        return { rgb, packed: b.pixels[o] * 65536 + b.pixels[o + 1] * 256 + b.pixels[o + 2] };
+      });
+    }, probes);
+    const LOG_MIN = Math.log(8), LOG_SPAN = Math.log(4e5) - Math.log(8);
+    /** The formula's colour at each probe, with the picture or without, and the worst channel's distance to what is drawn. */
+    const off = (px: Awaited<ReturnType<typeof read>>, withPicture: boolean) => Math.max(...px.map((p, i) => {
+      const range = Math.exp(LOG_MIN + (p.packed / 16777215) * LOG_SPAN);
+      expect(range).toBeGreaterThan(DETAIL.far);
+      const spot = spotAt(yaw, pitch, probes[i][0], probes[i][1], 60, W, H, range);
+      const picture = imageAt(spot.lon, spot.lat).map((c) => c / 255) as [number, number, number];
+      const want = terrainColor(spot.h, spot.normal, range, false, undefined, yaw, s.eyeAltitude, 0.5, undefined, 0, withPicture ? picture : undefined);
+      return Math.max(...want.map((c, k) => Math.abs(c - p.rgb[k])));
+    }));
+    // The picture's tiles come after the terrain's.
+    let px = await read();
+    await expect.poll(async () => { px = await read(); return off(px, true); }, { timeout: 30_000 }).toBeLessThan(0.03);
+    // East is red, west is blue: the picture, not the plain's green.
+    expect(px[0].rgb[0]).toBeGreaterThan(px[0].rgb[2] + 0.2);
+    expect(px[1].rgb[2]).toBeGreaterThan(px[1].rgb[0] + 0.2);
+    await expect(page.getByText(/Luftbild © EOX, Copernicus Sentinel 2017/)).toBeVisible();
+    await page.getByRole('button', { name: 'Quellen' }).click();
+    await expect(page.getByRole('link', { name: 'EOX, Copernicus Sentinel' })).toBeVisible();
+
+    // Back to the relief: the plain is green again, and the note on the picture is gone.
+    await page.getByRole('button', { name: 'Einstellungen' }).click();
+    const style = page.getByRole('radiogroup', { name: 'Darstellung' });
+    await expect(style.getByRole('radio', { name: 'Luftbild' })).toBeChecked();
+    await style.getByRole('radio', { name: 'Relief' }).click();
+    await expect.poll(async () => { const p = await read(); return p[0].rgb[1] - p[0].rgb[0]; }, { timeout: 30_000 }).toBeGreaterThan(0.05);
+    await expect(page.getByText(/Luftbild © EOX/)).toHaveCount(0);
+  });
+
+  test('where no picture comes, the aerial style is the relief', async ({ page }) => {
+    // The tile server is someone's demonstration service: rate-limited, and gone without a network.
+    await page.addInitScript(() => localStorage.setItem('alp.style', 'aerial'));
+    await page.goto(url({}, { shade: '1', imagery: '/tests/e2e/fixtures/no-such-imagery/' }));
+    const s = await ready(page);
+    const ys = summitScreenY(s.eyeAltitude, 60) * H;
+    const x = W / 2 - 100, y = Math.round(ys + 200);
+    const hit = terrainHit(90, x, y, s.eyeAltitude, 60, W, H)!;
+    const expected = lumOf(terrainColor(hit.h, hit.normal, hit.range, false, undefined, 90, s.eyeAltitude));
+    await page.waitForTimeout(1500);                           // time for the tiles to have been refused
+    expect(Math.abs((await luminance(page, x - 6, y - 6, 12, 12)) / 255 - expected)).toBeLessThan(0.015);
+    expect(await page.evaluate(() => (window as any).alp.status().levelsPictured)).toBe(0);
   });
 });
 

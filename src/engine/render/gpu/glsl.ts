@@ -290,9 +290,12 @@ uniform float uDropScale;
 uniform vec3  uDetail;        // the grain of the near ground: tiles per radian fine and coarse, strength (0 = off)
 uniform vec4  uDetailOrigin;  // the standpoint's place in a tile, fine (xy) and coarse (zw)
 
+uniform vec4  uImagery;       // the aerial picture: 1 when the style shows it, its pixels per level side, its atlas's width and height
+
 uniform sampler2D heights;
 uniform sampler2D surface;
 uniform sampler2D detail;
+uniform sampler2D imagery;
 
 ${glslConsts(SHADE_CONSTS)}
 
@@ -350,6 +353,23 @@ float coverAt(int lv, float dLon, float dIso, vec2 jit) {
   float px = clamp(floor(A.x + dLon * A.z + jit.x * perMetre), 0.0, uLevelPx - 1.0) + o.x;
   float py = clamp(floor(A.y - dIso * A.z - jit.y * perMetre), 0.0, uLevelPx - 1.0) + o.y;
   return floor(texelFetch(heights, ivec2(int(px), int(py)), 0).a * 255.0 / 16.0 + 0.5);
+}
+
+/**
+ * The aerial picture at one level (sources/imagery.ts): its colour, and in
+ * alpha whether a tile gave one. The picture's cells lie in their atlas as
+ * the levels do in theirs, at their own size. Read between its pixels by
+ * the sampler, kept half a pixel inside the cell so the neighbour's does
+ * not bleed in.
+ */
+vec4 imageryAt(int lv, float dLon, float dIso) {
+  vec4 A = uLvlA[lv];
+  float cell = uImagery.y;
+  vec2 p = vec2(A.x + dLon * A.z, A.y - dIso * A.z) * (cell / uLevelPx);
+  p = clamp(p, vec2(0.5, 0.5), vec2(cell - 0.5, cell - 0.5));
+  float row = floor(float(lv) / ATLAS_COLS);
+  vec2 o = vec2(float(lv) - row * ATLAS_COLS, row) * cell;
+  return textureLod(imagery, (o + p) / uImagery.zw, 0.0);
 }
 
 /** The ground's own colour for a class at height h, or none (the height's tint) where there is no class. */
@@ -417,6 +437,8 @@ void main(void) {
   vec3 sf = surfaceAt(lv, dLon, dIso);
   float wet = waterAt(lv, dLon, dIso);
   float cover = coverAt(lv, dLon, dIso, jit);
+  vec4 picture = vec4(0.0);
+  if (uImagery.x > 0.5) { picture = imageryAt(lv, dLon, dIso); }
   if (float(lv) + 1.0 < uLevelCount && uLvlA[lv + 1].w > 0.0) {
     float outer = uLvlA[lv].w;
     float fade = smoothstep(outer * 0.86, outer, r);
@@ -424,6 +446,7 @@ void main(void) {
       sf = mix(sf, surfaceAt(lv + 1, dLon, dIso), fade);
       wet = mix(wet, waterAt(lv + 1, dLon, dIso), fade);
       if (fade > 0.5) { cover = coverAt(lv + 1, dLon, dIso, jit); }
+      if (uImagery.x > 0.5) { picture = mix(picture, imageryAt(lv + 1, dLon, dIso), fade); }
     }
   }
   int lk = lookLevel(dLon, dIso);
@@ -457,16 +480,21 @@ void main(void) {
               * (1.0 - smoothstep(SNOW_LOW, SNOW_HIGH, slope)) * mix(1.0, SNOW_ON_LAND, known);
   col = mix(col, snow, snowy);
   col = mix(col, uWaterColor, wet);
+  // The aerial style: where a tile gave a colour, the photograph is the ground.
+  float aerial = picture.a * uImagery.x;
+  col = mix(col, vec3(1.0) - pow(vec3(1.0) - picture.rgb, vec3(AERIAL_LIFT)), aerial);
 
   // Plain Lambert with a floor: shadow sides keep their shape, lit faces
   // stand out. A sky term that lifted north faces flattened the relief.
   // Times what the ground around leaves of the sky: gullies darker, ridges lighter.
   // Near the eye the grain bumps the normal the light sees and mottles the
   // brightness, on dry ground. What the ground is made of stays the smooth normal's.
-  float grainy = uDetail.z * (1.0 - smoothstep(DETAIL_NEAR, DETAIL_FAR, r)) * (1.0 - wet);
+  // A photograph has its own light, and a little grain of its own: the relief's at part strength over it.
+  float grainy = uDetail.z * (1.0 - smoothstep(DETAIL_NEAR, DETAIL_FAR, r)) * (1.0 - wet) * mix(1.0, AERIAL_GRAIN, aerial);
   vec3 nl = normalize(vec3(n.xy - DETAIL_TILT * grainy * grain.xy, n.z));
   float diff = max(dot(nl, uSun), 0.0);
   float shade = (0.28 + 0.72 * diff) * (1.0 + AO * (2.0 * sf.z - 1.0)) * (1.0 + DETAIL_GRAIN * grainy * grain.z);
+  shade = mix(shade, 1.0 + (shade - 1.0) * AERIAL_LIGHT, aerial);
   col = col * shade;
   if (wet > 0.0) { col = mix(col, waterShine(col, viewDir()), wet); }
 

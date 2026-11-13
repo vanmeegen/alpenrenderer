@@ -61,6 +61,10 @@ export interface Level extends LevelSpec {
   cover?: Uint8Array;
   /** Bumped whenever `cover` is replaced. */
   coverVersion?: number;
+  /** The aerial picture over this level, (w/2) × (h/2) RGBA, alpha 0 where no tile came (sources/imagery.ts). */
+  imagery?: Uint8Array;
+  /** Bumped whenever `imagery` is replaced. */
+  imageryVersion?: number;
 }
 
 export interface Observer {

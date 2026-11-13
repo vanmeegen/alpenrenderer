@@ -62,6 +62,7 @@ import { OUTLINE } from '../outline';
 import { MAX_LEVELS, atlasLayout } from '../atlas';
 import { levelSurface } from '../../core/surface';
 import { DETAIL, detailFrame, detailTexture } from '../detail';
+import { IMAGERY } from '../../sources/imagery';
 import { QUALITY_HIGH, QUALITY_LOW, QUALITY_MID, Quality } from '../quality';
 import { renderPixelRatio } from '../resolution';
 import {
@@ -163,6 +164,8 @@ export class GpuRenderer {
   desaturate = 0.55;
   /** Scale of the ink line's width (outline.ts gives it in CSS pixels): the same line on a phone and a desktop. */
   edgeWidth = 1.0;
+  /** The aerial style: the ground takes the colour of the picture wherever a level holds one (sources/imagery.ts). */
+  aerial = false;
   /** The grain of the near ground in the shaded view (render/detail.ts), 0..1; 0 is off. */
   detail = 1;
   /** Strength of the haze rim behind ridges in the shaded view; 0 saves its eight taps. */
@@ -220,6 +223,13 @@ export class GpuRenderer {
   private surfaceAtlas: RawTexture | null = null;
   private surfaceBlock: Uint8Array | null = null;
   private surfaced: string[] = [];
+  /**
+   * The aerial picture, one cell per level at half the level's size, laid
+   * out like the height atlas; `pictured` holds what each cell was sent
+   * from. Built only in the aerial style.
+   */
+  private imageryAtlas: RawTexture | null = null;
+  private pictured: string[] = [];
   private blank!: RawTexture;
   private video: VideoTexture | null = null;
   private videoEl: HTMLVideoElement | null = null;
@@ -418,7 +428,7 @@ export class GpuRenderer {
       { vertex: 'shade', fragment: 'shade' }, {
         attributes: ['position'],
         uniforms: [...SHADE_UNIFORMS],
-        samplers: ['heights', 'surface', 'detail'],
+        samplers: ['heights', 'surface', 'detail', 'imagery'],
         shaderLanguage: this.shaderLanguage,
       });
     this.shadeMat.backFaceCulling = false;
@@ -430,6 +440,7 @@ export class GpuRenderer {
     grain.wrapU = Texture.WRAP_ADDRESSMODE;
     grain.wrapV = Texture.WRAP_ADDRESSMODE;
     this.shadeMat.setTexture('detail', grain);
+    this.shadeMat.setTexture('imagery', this.blank);
   }
 
   private buildColorTarget() {
@@ -609,6 +620,7 @@ export class GpuRenderer {
       this.uploaded[i] = stamp;
     });
     if (this.shaded) this.syncSurface();
+    if (this.shaded && this.aerial) this.syncImagery();
     if (this.gl2) this.diagnostics.glError = this.gl2.getError();
 
     this.diagnostics.levels = levels.length;
@@ -621,6 +633,49 @@ export class GpuRenderer {
     this.surfaceAtlas = null;
     this.surfaced = [];
     this.shadeMat?.setTexture('surface', this.blank);
+    this.imageryAtlas?.dispose();
+    this.imageryAtlas = null;
+    this.pictured = [];
+    this.shadeMat?.setTexture('imagery', this.blank);
+  }
+
+  /** Pixels of the aerial picture per level side, and where its cells lie. */
+  private imageryLayout(levels: number) {
+    const cell = Math.floor(this.atlasLevelPx / IMAGERY.shrink);
+    return { cell, layout: atlasLayout(levels, cell) };
+  }
+
+  /**
+   * Brings the picture atlas up to the levels: a level whose picture
+   * changed is sent alone; one that lost its picture is sent see-through,
+   * so the relief shows there. Called when levels arrive and before a
+   * frame in the aerial style.
+   */
+  private syncImagery() {
+    const hf = this.heightField;
+    if (!hf || !hf.levels.length || !this.atlas) return;
+    const levels = hf.levels;
+    const stampOf = (l: (typeof levels)[number]) => (l.imagery ? `${l.imageryVersion ?? 0}` : '');
+    if (this.imageryAtlas && !levels.some((l, i) => (this.pictured[i] ?? '') !== stampOf(l))) return;
+    const { cell, layout } = this.imageryLayout(levels.length);
+    if (!this.imageryAtlas) {
+      // Read between its pixels by the sampler: the picture is colour, a texel off is nothing.
+      this.imageryAtlas = new RawTexture(new Uint8Array(layout.width * layout.height * 4), layout.width, layout.height,
+        Constants.TEXTUREFORMAT_RGBA, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE);
+      this.imageryAtlas.wrapU = Texture.CLAMP_ADDRESSMODE;
+      this.imageryAtlas.wrapV = Texture.CLAMP_ADDRESSMODE;
+      this.shadeMat.setTexture('imagery', this.imageryAtlas);
+      this.pictured = levels.map(() => '');
+    }
+    const texture = this.imageryAtlas.getInternalTexture();
+    levels.forEach((l, i) => {
+      const stamp = stampOf(l);
+      if ((this.pictured[i] ?? '') === stamp) return;
+      const block = l.imagery && l.imagery.length === cell * cell * 4 ? l.imagery : new Uint8Array(cell * cell * 4);
+      const at = layout.origin(i);
+      if (texture) (this.engine as unknown as SubUpload).updateTextureData(texture, block, at.x, at.y, cell, cell);
+      this.pictured[i] = stamp;
+    });
   }
 
   /**
@@ -748,9 +803,12 @@ export class GpuRenderer {
       },
       eye: this.eyeAltitude,
       origin: [hf.lon, hf.lat] as [number, number],
-      levels: hf.levels.map((l) => ({ version: l.version, waterVersion: l.waterVersion, coverVersion: l.coverVersion, filled: l.filled, px0: l.px0, py0: l.py0 })),
+      levels: hf.levels.map((l) => ({
+        version: l.version, waterVersion: l.waterVersion, coverVersion: l.coverVersion, imageryVersion: l.imageryVersion,
+        filled: l.filled, px0: l.px0, py0: l.py0,
+      })),
       knobs: {
-        shaded: this.shaded, outline: this.outline, detail: this.detail, snowLine: this.snowLine, fogRange: this.fogRange,
+        shaded: this.shaded, aerial: this.aerial, outline: this.outline, detail: this.detail, snowLine: this.snowLine, fogRange: this.fogRange,
         skyTop: this.skyTop, horizonColor: this.horizonColor, waterColor: this.waterColor,
         whiten: this.whiten, desaturate: this.desaturate, rim: this.rim, maxPixelRatio: this.maxPixelRatio,
         resolutionScale: this.resolutionScale,
@@ -802,6 +860,7 @@ export class GpuRenderer {
       const { w, h } = this.resize();
       this.camera.update();
       if (this.shaded) this.syncSurface();
+      if (this.shaded && this.aerial) this.syncImagery();
       this.updateTerrainUniforms();
       this.updateCompositeUniforms(w, h);
       this.scene.render();
@@ -860,6 +919,8 @@ export class GpuRenderer {
     const grain = detailFrame(hf.lon, hf.lat);
     sm.setVector3('uDetail', new Vector3(grain.scale[0], grain.scale[1], this.detail));
     sm.setVector4('uDetailOrigin', new Vector4(...grain.origin));
+    const picture = this.imageryLayout(hf.levels.length);
+    sm.setVector4('uImagery', new Vector4(this.aerial && this.imageryAtlas ? 1 : 0, picture.cell, picture.layout.width, picture.layout.height));
     // The shade pass is only worth its vertex cost when it will be seen.
     this.colorRtt.renderList = this.shaded ? this.sectors : [];
 

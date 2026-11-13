@@ -257,3 +257,56 @@ describe('land cover: what the ground is, where a survey says so', () => {
     expect(COVER.jitter).toBeLessThan(60);
   });
 });
+
+describe('the aerial picture', () => {
+  const up: [number, number, number] = [0, 0, 1];
+  const picture: [number, number, number] = [0.3, 0.5, 0.2];
+
+  test('where there is a picture the ground takes its colour, lit softly: the photograph has its own light and shadow', async () => {
+    const { AERIAL } = await import('../../src/engine/render/shading');
+    const steep: [number, number, number] = [Math.sin(Math.PI / 4), 0, Math.cos(Math.PI / 4)];
+    // Facing away from the light (yaw 0: the light stands north-west, the face looks east).
+    const got = terrainColor(2000, steep, 100, false, undefined, 0, 2000, 0.5, undefined, 0, picture);
+    const s = sunVector(0);
+    const full = shadeFactor(steep[0] * s[0] + steep[1] * s[1] + steep[2] * s[2]);
+    const soft = 1 + (full - 1) * AERIAL.light;
+    // The mosaic is dark: it is lifted on a curve that brightens the shadows and cannot clip the snow.
+    const lift = (c: number) => 1 - (1 - c) ** AERIAL.lift;
+    expect(lift(0)).toBe(0);
+    expect(lift(1)).toBe(1);
+    expect(lift(0.2)).toBeGreaterThan(0.2 * 1.3);
+    expect(lift(0.9)).toBeLessThan(1);
+    // Range 100 m: the haze takes next to nothing.
+    for (let i = 0; i < 3; i++) expect(got[i]).toBeCloseTo(lift(picture[i]) * soft, 2);
+    expect(soft).toBeGreaterThan(full + 0.1);
+    expect(AERIAL.light).toBeGreaterThan(0.2);
+    expect(AERIAL.light).toBeLessThan(0.8);
+  });
+
+  test('the picture is the ground: no rock, no snow of the height and no land cover are laid over it; the grain at half strength, for the ground at your feet', async () => {
+    const { AERIAL, COVER_CLASSES } = await import('../../src/engine/render/shading');
+    const { lit } = await import('../../src/engine/render/detail');
+    const plain = terrainColor(1000, up, 100, false, undefined, 0, 1000, 0.5, undefined, 0, picture);
+    const high = terrainColor(3400, up, 100, false, undefined, 0, 3400, 0.5, undefined, 0, picture);
+    const forest = terrainColor(1000, up, 100, false, undefined, 0, 1000, 0.5, undefined, COVER_CLASSES.indexOf('tree'), picture);
+    const grainy = terrainColor(1000, up, 100, false, undefined, 0, 1000, 0.5, { d: [0.8, -0.5, 0.9], fade: 1 }, 0, picture);
+    for (let i = 0; i < 3; i++) {
+      expect(high[i]).toBeCloseTo(plain[i], 2);
+      expect(forest[i]).toBeCloseTo(plain[i], 9);
+    }
+    // A satellite pixel is 13 m: right at the feet the picture is one flat colour without it.
+    const g = lit(up, [0.8, -0.5, 0.9], AERIAL.grain);
+    const s = sunVector(0);
+    const soft = (shade: number) => 1 + (shade - 1) * AERIAL.light;
+    const want = soft(shadeFactor(g.normal[0] * s[0] + g.normal[1] * s[1] + g.normal[2] * s[2]) * g.grain) / soft(shadeFactor(s[2]));
+    expect(grainy[1] / plain[1]).toBeCloseTo(want, 3);
+    expect(Math.abs(want - 1)).toBeGreaterThan(0.01);
+    expect(AERIAL.grain).toBe(0.5);
+  });
+
+  test('without a picture the ground is the relief, as before', () => {
+    const relief = terrainColor(1500, up, 500, false, undefined, 0, 1500);
+    const none = terrainColor(1500, up, 500, false, undefined, 0, 1500, 0.5, undefined, 0, undefined);
+    for (let i = 0; i < 3; i++) expect(none[i]).toBeCloseTo(relief[i], 9);
+  });
+});

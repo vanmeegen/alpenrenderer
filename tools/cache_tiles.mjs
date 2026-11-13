@@ -2,7 +2,8 @@
 /**
  * Fills tile-cache/ with the Mapterhorn tiles the clipmap needs around one or
  * more standpoints, so the app can run offline or in a headless check with
- * `?tiles=/tile-cache/`. Uses curl: the sandbox and most laptops have it, and
+ * `?tiles=/tile-cache/` (and the aerial picture with
+ * `?imagery=/tile-cache/imagery/`). Uses curl: the sandbox and most laptops have it, and
  * it honours proxies that Node's fetch does not.
  *
  *   node tools/cache_tiles.mjs [lon,lat ...]      default: Gornergrat, Zugspitze
@@ -53,3 +54,32 @@ for (const [lon, lat] of points) {
   }
 }
 console.log(`tile-cache: ${fetched} fetched, ${kept} already present, ${failed} failed`);
+
+// The aerial picture for the same standpoints (sources/imagery.ts): 256-px
+// tiles one zoom below each level, no finer than zoom 13, under
+// tile-cache/imagery/ for `?imagery=/tile-cache/imagery/`.
+let pictures = 0, picturesKept = 0, picturesFailed = 0;
+for (const [lon, lat] of points) {
+  for (const z of LEVELS) {
+    const zi = Math.min(13, z - 1), scale = 2 ** (zi - z);
+    const px0 = Math.round(mercX(lon, z)) - SIZE / 2, py0 = Math.round(mercY(lat, z)) - SIZE / 2;
+    const at = (p) => Math.floor(p * scale / 256);
+    for (let ty = at(py0); ty <= at(py0 + SIZE - 1); ty++) {
+      for (let tx = at(px0); tx <= at(px0 + SIZE - 1); tx++) {
+        const dir = join(out, 'imagery', String(zi), String(ty));
+        const file = join(dir, `${tx}.jpg`);
+        if (existsSync(file) && statSync(file).size > 500) { picturesKept++; continue; }
+        mkdirSync(dir, { recursive: true });
+        try {
+          execFileSync('curl', ['-sS', '-f', '-A', 'Mozilla/5.0 alpenrenderer-cache', '-o', file,
+            `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/g/${zi}/${ty}/${tx}.jpg`], { stdio: 'pipe' });
+          pictures++;
+        } catch {
+          picturesFailed++;
+          console.error(`failed imagery ${zi}/${ty}/${tx}`);
+        }
+      }
+    }
+  }
+}
+console.log(`tile-cache/imagery: ${pictures} fetched, ${picturesKept} already present, ${picturesFailed} failed`);

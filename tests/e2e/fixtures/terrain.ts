@@ -130,6 +130,16 @@ export function coverAt(lon: number, lat: number): number {
   return 0;
 }
 
+/**
+ * The range's "satellite picture": brick red east of the standpoint's
+ * meridian, blue west of it. Colours no part of the relief has, so a probe
+ * can tell picture from relief. gen.mjs writes it as tiles for the aerial
+ * style (sources/imagery.ts); bytes 0..255.
+ */
+export function imageAt(lon: number, _lat: number): [number, number, number] {
+  return lon >= STAND.lon ? [200, 70, 50] : [50, 90, 200];
+}
+
 /** Height in metres at a geodetic point. */
 export function heightAt(lon: number, lat: number): number {
   if (inLake(lon, lat)) return LAKE.surface;

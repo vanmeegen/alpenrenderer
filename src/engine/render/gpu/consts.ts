@@ -4,7 +4,7 @@
  * computes and what the GPU draws cannot drift apart.
  */
 import { OUTLINE } from '../outline';
-import { COVER, FOG, GROUND } from '../shading';
+import { AERIAL, COVER, FOG, GROUND } from '../shading';
 import { SURFACE } from '../../core/surface';
 import { DETAIL } from '../detail';
 
@@ -34,6 +34,7 @@ export const SHADE_CONSTS: Const[] = [
   ['GRASS_FROM', COVER.grassFrom], ['GRASS_TO', COVER.grassTo], ['COVER_CROP', COVER.crop], ['COVER_BUILT', COVER.built],
   ['COVER_BARE', COVER.bare], ['COVER_SNOW', COVER.snow], ['COVER_WETLAND', COVER.wetland], ['COVER_MOSS', COVER.moss],
   ['COVER_JITTER', COVER.jitter], ['SNOW_ON_LAND', COVER.snowOnLand],
+  ['AERIAL_LIGHT', AERIAL.light], ['AERIAL_LIFT', AERIAL.lift], ['AERIAL_GRAIN', AERIAL.grain],
 ];
 
 export const glslConsts = (list: Const[]): string => list.map(([n, v]) => (typeof v === 'number'

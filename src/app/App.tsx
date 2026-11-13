@@ -537,7 +537,7 @@ export function App() {
               ))}
             </div>
             <div className="mt-0.5 text-neutral-500">
-              Relief: beleuchtetes Gelände. Linien: nur die Umrisse, wie ein gezeichnetes Panorama; schont schwache Geräte.
+              Relief: beleuchtetes Gelände. Luftbild: Satellitenbild (Sentinel-2, 2017) über dem Gelände, braucht Netz; wo keines kommt, bleibt das Relief. Linien: nur die Umrisse, wie ein gezeichnetes Panorama; schont schwache Geräte.
             </div>
             <label className="mt-2 flex items-center gap-2">
               <span className="shrink-0 whitespace-nowrap tabular-nums">Konturen {Math.round(outline * 100)} %</span>
@@ -647,7 +647,7 @@ export function App() {
 
       <div className="pointer-events-none absolute inset-x-2 bottom-2 text-center text-[11px] text-white drop-shadow"
         style={{ bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-        {sensors ? '1 Finger: Kompass korrigieren' : '1 Finger: umschauen'}{camera || photo ? ' · Zoom: Objektiv-Regler' : ' · 2 Finger: zoomen'} · Gelände © Mapterhorn und Quellen
+        {sensors ? '1 Finger: Kompass korrigieren' : '1 Finger: umschauen'}{camera || photo ? ' · Zoom: Objektiv-Regler' : ' · 2 Finger: zoomen'} · Gelände © Mapterhorn und Quellen{style === 'aerial' ? ' · Luftbild © EOX, Copernicus Sentinel 2017' : ''}
       </div>
     </div>
   );

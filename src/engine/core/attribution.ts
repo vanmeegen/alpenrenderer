@@ -48,6 +48,12 @@ export const FIXED_CREDITS: Credit[] = [
     url: 'https://esa-worldcover.org',
   },
   {
+    who: 'EOX, Copernicus Sentinel',
+    text: 'Aerial picture ("Luftbild"): EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH '
+      + '(Contains modified Copernicus Sentinel data 2017), CC BY 4.0.',
+    url: 'https://cloudless.eox.at',
+  },
+  {
     who: 'NOAA NCEI and the British Geological Survey',
     text: 'Magnetic declination from the World Magnetic Model 2025.',
     url: 'https://www.ncei.noaa.gov/products/world-magnetic-model',
