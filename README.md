@@ -56,6 +56,12 @@ Live: https://vanmeegen.github.io/alpenrenderer/
   `public/lakes/` (Build: `node tools/build_lakes.mjs`), die Wassermaske
   wird pro Clipmap-Level gerastert und im freien Kanal des Höhenatlas an den
   Shader gegeben.
+- **Finden und Mitlaufen**: „Gipfel suchen“ listet, was von hier zu sehen
+  ist, und findet Gipfel und Seen im Umkreis beim Namen, auch verdeckte;
+  ein Pfeil zeigt, wohin man sich drehen muss. „Mitlaufen“ lässt den
+  Standpunkt dem Gerät folgen (ab zehn Metern, nicht bei jedem Wackeln
+  des GPS). Ein Fix innerhalb seiner Genauigkeit von einem Gipfel steht
+  auf dem Gipfel.
 - **Landbedeckung**: Wo Wald steht, ist das Gelände dunkelgrün, Wiesen
   sind hell (im Tal grüner, oben fahler), Fels und Schutt grau, Gletscher
   weiß auch unter der Schneegrenze, Orte grau, Felder gelbgrün. Die Klassen

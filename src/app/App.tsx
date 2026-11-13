@@ -7,7 +7,8 @@ import {
 import { FoundPeak, PeakInfo, PhotoStatus, Viewer, ViewerStatus } from './viewer';
 import { fmtRange } from '../engine/core/labels';
 import { MapPanel } from './MapPanel';
-import { LocationHelp, PickedPosition, locateChecked, sitePermission } from './mapPicker';
+import { LocationHelp, PickedPosition, locateChecked, locationHelp, sitePermission, watchDevice } from './mapPicker';
+import { FollowFilter } from '../engine/core/stand';
 import { LocationHelpBox } from './LocationHelpBox';
 import { CompassRose } from './CompassRose';
 import { Icon, IconName } from './icons';
@@ -62,11 +63,24 @@ export function App() {
   const chosen = (source: StandSource) => {
     standChoice.current++;
     sourceRef.current = source;
+    // A standpoint chosen any other way than by the device ends the following.
+    if (source !== 'gps') stopFollow();
     setPositionSource(source);
     const v = viewerRef.current?.current;
     if (v) writeStandSource(source, v);
   };
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  /** The altitude the device reported with its last fix: shown in the Check panel, used for nothing. */
+  const [gpsAltitude, setGpsAltitude] = useState<number | null>(null);
+  /** "Mitlaufen": the standpoint follows the device's fixes (core/stand.ts FollowFilter). */
+  const [following, setFollowing] = useState(false);
+  const followRef = useRef<(() => void) | null>(null);
+  const stopFollow = () => {
+    if (!followRef.current) return;
+    followRef.current();
+    followRef.current = null;
+    setFollowing(false);
+  };
   const [sensors, setSensors] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [labelsOn, setLabelsOn] = useState(true);
@@ -177,16 +191,57 @@ export function App() {
     setPanel('none');
   };
 
-  /** From the map or the GPS: stand there on the ground, keep looking the same way. */
-  const pick = (p: PickedPosition) => {
+  /**
+   * From the map or the GPS: stand there on the ground, keep looking the
+   * same way. A device fix within its accuracy of a catalogued summit
+   * stands on the summit (core/stand.ts): from beside the top, half the
+   * view is behind the summit's own cap. `keepPanel` for the fixes that
+   * come while following, which are nobody's choice of the moment.
+   */
+  const pick = async (p: PickedPosition, keepPanel = false) => {
     const v = viewerRef.current;
+    let at = { lon: p.lon, lat: p.lat }, summit: string | null = null;
+    if (p.source === 'gps' && v) {
+      const asked = standChoice.current;
+      const s = await v.summitUnder(p).catch(() => null);
+      if (asked !== standChoice.current) return;          // a standpoint was chosen meanwhile
+      if (s) { at = { lon: s.lon, lat: s.lat }; summit = s.name; }
+    }
     if (v) v.fixAccuracy = p.source === 'gps' ? p.accuracy ?? null : null;
-    void v?.relocate({ lon: p.lon, lat: p.lat, alt: undefined });
+    void v?.relocate({ lon: at.lon, lat: at.lat, alt: undefined });
     chosen(p.source);
     setGpsAccuracy(p.source === 'gps' ? p.accuracy ?? null : null);
+    setGpsAltitude(p.source === 'gps' ? p.altitude ?? null : null);
     // A fix good to a kilometre is a guess at where one stands, and the whole view hangs on it.
-    setNote(p.source === 'gps' ? coarseFixNote(p.accuracy) : null);
-    setPanel('none');
+    setNote(p.source === 'gps' ? (summit ? `Auf dem Gipfel: ${summit}` : coarseFixNote(p.accuracy)) : null);
+    if (!keepPanel) setPanel('none');
+  };
+
+  /** "Mitlaufen": on, the standpoint follows the device until it is switched off or a standpoint is chosen otherwise. */
+  const toggleFollow = () => {
+    if (followRef.current) { stopFollow(); return; }
+    setLocNote(null);
+    const filter = new FollowFilter();
+    let later: ReturnType<typeof setTimeout> | undefined;
+    const offer = (p: PickedPosition) => {
+      clearTimeout(later);
+      const j = filter.judge(p, performance.now());
+      if (j.take) void pick(p, true);
+      else if (j.again !== undefined) later = setTimeout(() => offer(p), j.again);
+    };
+    // The watch can fail before it has begun (no GPS in this browser): then there is nothing to follow.
+    let failed = false;
+    const stopWatch = watchDevice(
+      offer,
+      (e) => {
+        failed = true;
+        stopFollow();
+        setLocNote({ message: e.message, help: locationHelp({ code: e.code, permission: 'unknown', secure: window.isSecureContext }) });
+      },
+    );
+    if (failed) return;
+    followRef.current = () => { clearTimeout(later); stopWatch(); };
+    setFollowing(true);
   };
 
   /**
@@ -202,7 +257,7 @@ export function App() {
       const r = await locateChecked({ secure: window.isSecureContext, permission: sitePermission });
       // A fix can take ten seconds: whoever chose a standpoint meanwhile is not carried off by it.
       if (asked !== standChoice.current) return;
-      if (r.ok) pick(r.position);
+      if (r.ok) await pick(r.position);
       else {
         setLocNote({ message: r.message, help: r.help });
         if (openOnFail) setPanel('places');
@@ -447,6 +502,9 @@ export function App() {
             <div className="flex flex-wrap gap-x-3 gap-y-1">
               <button className="font-semibold text-blue-700 hover:underline disabled:opacity-50" disabled={locating}
                 onClick={() => void locateHere()}>{locating ? 'Suche Position…' : 'Mein Standort'}</button>
+              <button className={following ? 'rounded bg-blue-700 px-1.5 font-semibold text-white' : 'text-blue-700 hover:underline'}
+                aria-pressed={following} title="Der Standpunkt folgt dem Gerät"
+                onClick={toggleFollow}>Mitlaufen</button>
               {PLACES.map((p) => (
                 <button key={p.id} className="text-blue-700 hover:underline" onClick={() => go(p.id)}>{p.name}</button>
               ))}
@@ -531,6 +589,7 @@ export function App() {
             {d.limits && <div>Limits: {d.limits} · GL-Fehler {d.glError}</div>}
             {status?.decoder && <div>Tile-Dekoder: {status.decoder}</div>}
             {status && <div>Boden {status.ground.toFixed(0)} m · Auge {status.eyeAltitude.toFixed(1)} m · Augenhöhe {aboveGround(eyeHeight)}</div>}
+            {gpsAltitude !== null && <div>GPS-Höhe {gpsAltitude.toFixed(0)} m (wie das Gerät sie meldet, nur zur Kontrolle; das Auge steht auf dem Geländemodell)</div>}
             {d.shaderErrors.length > 0 && (
               <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-red-700">{d.shaderErrors.join('\n')}</pre>
             )}
@@ -582,7 +641,8 @@ export function App() {
       )}
 
       {panel === 'map' && (
-        <MapPanel lon={view.lon} lat={view.lat} yaw={view.yaw} onPick={pick} onClose={() => setPanel('none')} />
+        <MapPanel lon={view.lon} lat={view.lat} yaw={view.yaw} accuracy={positionSource === 'gps' ? gpsAccuracy : null}
+          onPick={(p) => void pick(p)} onClose={() => setPanel('none')} />
       )}
 
       <div className="pointer-events-none absolute inset-x-2 bottom-2 text-center text-[11px] text-white drop-shadow"

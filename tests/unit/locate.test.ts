@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { LocateError, locateChecked, locateDevice, locationHelp } from '../../src/app/mapPicker';
+import { LocateError, locateChecked, locateDevice, locationHelp, watchDevice } from '../../src/app/mapPicker';
 
 type Success = (p: GeolocationPosition) => void;
 type Failure = (e: GeolocationPositionError) => void;
@@ -151,5 +151,63 @@ describe('locateChecked: the checks before and after asking for the position', (
       expect(r.message).toBe('Standort nicht verfügbar: Zugriff verweigert.');
       expect(r.help.title).toBe('Standort für diese Seite blockiert');
     }
+  });
+});
+
+describe('watchDevice: fixes as the device moves', () => {
+  /** A Geolocation whose watch the test feeds by hand. */
+  function watched() {
+    const state = { ok: null as Success | null, fail: null as Failure | null, cleared: [] as number[], options: null as PositionOptions | null };
+    const g = {
+      watchPosition: (ok: Success, fail: Failure, options: PositionOptions) => { state.ok = ok; state.fail = fail; state.options = options; return 7; },
+      clearWatch: (id: number) => { state.cleared.push(id); },
+    } as unknown as Geolocation;
+    return { g, state };
+  }
+  const fix = (lon: number, lat: number, accuracy: number, altitude: number | null = null) =>
+    ({ coords: { longitude: lon, latitude: lat, accuracy, altitude } } as GeolocationPosition);
+
+  test('every fix is handed on as a GPS position; the returned function ends the watch', () => {
+    const { g, state } = watched();
+    const got: unknown[] = [];
+    const stop = watchDevice((p) => got.push(p), () => {}, g);
+    state.ok!(fix(11.1, 47.5, 6));
+    state.ok!(fix(11.2, 47.6, 12));
+    expect(got).toEqual([{ lon: 11.1, lat: 47.5, source: 'gps', accuracy: 6 }, { lon: 11.2, lat: 47.6, source: 'gps', accuracy: 12 }]);
+    expect(state.options!.enableHighAccuracy).toBe(true);
+    stop();
+    expect(state.cleared).toEqual([7]);
+    // A fix that was already on its way is not handed on any more.
+    state.ok!(fix(11.3, 47.7, 5));
+    expect(got).toHaveLength(2);
+  });
+
+  test('a refusal ends it with a readable error; a fix that is merely late does not', () => {
+    const { g, state } = watched();
+    const errors: LocateError[] = [];
+    watchDevice(() => {}, (e) => errors.push(e), g);
+    state.fail!(positionError(3));                       // a timeout between two fixes: the watch goes on
+    expect(errors).toHaveLength(0);
+    expect(state.cleared).toEqual([]);
+    state.fail!(positionError(1));
+    expect(errors[0].message).toBe('Standort nicht verfügbar: Zugriff verweigert.');
+    expect(errors[0].code).toBe(1);
+    expect(state.cleared).toEqual([7]);
+  });
+
+  test('without geolocation it reports that and returns a function that does nothing', () => {
+    const errors: LocateError[] = [];
+    const stop = watchDevice(() => {}, (e) => errors.push(e), undefined);
+    expect(errors[0].message).toContain('kein GPS');
+    stop();
+  });
+});
+
+describe('the altitude the device reports', () => {
+  test('comes along when there is one: for the diagnosis, never for where the eye stands', async () => {
+    const g = geo((ok) => ok({ coords: { latitude: 47.5, longitude: 11.1, accuracy: 6, altitude: 1893.4 } } as GeolocationPosition));
+    expect(await locateDevice(g)).toEqual({ lon: 11.1, lat: 47.5, source: 'gps', accuracy: 6, altitude: 1893.4 });
+    const none = geo((ok) => ok({ coords: { latitude: 47.5, longitude: 11.1, accuracy: 6, altitude: null } } as GeolocationPosition));
+    expect(await locateDevice(none)).toEqual({ lon: 11.1, lat: 47.5, source: 'gps', accuracy: 6 });
   });
 });

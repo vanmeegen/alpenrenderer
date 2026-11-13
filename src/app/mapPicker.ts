@@ -16,6 +16,48 @@ export interface PickedPosition {
   source: 'map' | 'gps';
   /** GPS accuracy in metres, when known. */
   accuracy?: number;
+  /**
+   * The altitude the device reports, metres, when it reports one. For the
+   * diagnosis only: Android hands out the height over the ellipsoid, some
+   * fifty metres off in the Alps, and the eye stands on the terrain model.
+   */
+  altitude?: number;
+}
+
+/** A browser's position as the app carries it. */
+function fromCoords(c: GeolocationCoordinates): PickedPosition {
+  return {
+    lon: c.longitude, lat: c.latitude, source: 'gps', accuracy: c.accuracy,
+    ...(typeof c.altitude === 'number' && Number.isFinite(c.altitude) ? { altitude: c.altitude } : {}),
+  };
+}
+
+const whyNot = (e: GeolocationPositionError) => (e.code === e.PERMISSION_DENIED ? 'Zugriff verweigert'
+  : e.code === e.TIMEOUT ? 'Zeitüberschreitung' : 'keine Position');
+
+/**
+ * Watches the device position: every fix is handed to `onFix` until the
+ * returned function is called. A refusal ends the watch and is reported; a
+ * fix that is merely late or missing is not an end (walking through woods
+ * the GPS comes and goes).
+ */
+export function watchDevice(
+  onFix: (p: PickedPosition) => void, onError: (e: LocateError) => void,
+  geo: Geolocation | undefined = typeof navigator !== 'undefined' ? navigator.geolocation : undefined,
+): () => void {
+  if (!geo) { onError(new LocateError('Standort nicht verfügbar: kein GPS in diesem Browser.', 0)); return () => {}; }
+  let on = true;
+  const stop = () => { if (!on) return; on = false; geo.clearWatch(id); };
+  const id = geo.watchPosition(
+    (p) => { if (on) onFix(fromCoords(p.coords)); },
+    (e) => {
+      if (!on || e.code !== e.PERMISSION_DENIED) return;
+      stop();
+      onError(new LocateError(`Standort nicht verfügbar: ${whyNot(e)}.`, e.code));
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 },
+  );
+  return stop;
 }
 
 /** A failed position request; `code` is the Geolocation error code, 0 for "no API" or "no answer". */
@@ -42,17 +84,11 @@ export function locateDevice(
     const finish = (fn: () => void) => { if (done) return; done = true; clearTimeout(timer); fn(); };
     const timer = setTimeout(() => finish(() => reject(new LocateError('Standort nicht verfügbar: keine Antwort.', 0))), watchdogMs);
     const ask = (precise: boolean) => geo.getCurrentPosition(
-      (p) => finish(() => resolve({
-        lon: p.coords.longitude, lat: p.coords.latitude, source: 'gps', accuracy: p.coords.accuracy,
-      })),
+      (p) => finish(() => resolve(fromCoords(p.coords))),
       (e) => {
         if (done) return;
         if (precise && e.code !== e.PERMISSION_DENIED) { ask(false); return; }
-        finish(() => {
-          const why = e.code === e.PERMISSION_DENIED ? 'Zugriff verweigert'
-            : e.code === e.TIMEOUT ? 'Zeitüberschreitung' : 'keine Position';
-          reject(new LocateError(`Standort nicht verfügbar: ${why}.`, e.code));
-        });
+        finish(() => reject(new LocateError(`Standort nicht verfügbar: ${whyNot(e)}.`, e.code)));
       },
       precise ? { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
         : { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 },

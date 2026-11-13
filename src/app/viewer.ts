@@ -11,6 +11,7 @@ import { Camera, fovForAspect, longFovOf } from '../engine/core/camera';
 import { DEFAULT_HORIZON, HorizonTable, VisibilityJob } from '../engine/core/horizon';
 import { LabelTarget, PlacedLabel, buildTargets, layout, pickLabel } from '../engine/core/labels';
 import { pointerSpot, pointerTo, searchTargets } from '../engine/core/find';
+import { Fix, summitUnder } from '../engine/core/stand';
 import { Peak } from '../engine/core/peaks';
 import { CoverageIndex, SurveyCredit } from '../engine/sources/coverage';
 import { PeakCatalog, urlFetcher } from '../engine/sources/peakcatalog';
@@ -739,6 +740,16 @@ export class Viewer {
     const ndc = new Float32Array(3);
     if (this.camera.project(t.east, t.north, t.up, ndc) <= 0) return;
     painter.drawMark((ndc[0] * 0.5 + 0.5) * cssW, (0.5 - ndc[1] * 0.5) * cssH, t.decided && !t.visible ? `${t.peak.name} (verdeckt)` : t.peak.name);
+  }
+
+  /**
+   * The catalogued summit a device fix stands on, within what the fix is
+   * good for (core/stand.ts), or null: asked before the standpoint is put
+   * there, so the catalogue is read for the fix's place, not the current one.
+   */
+  async summitUnder(fix: Fix): Promise<{ name: string; lon: number; lat: number } | null> {
+    const s = summitUnder(fix, await this.catalog.around(fix.lon, fix.lat, 1));
+    return s ? { name: s.peak.name, lon: s.peak.lon, lat: s.peak.lat } : null;
   }
 
   /** Summits and lakes for the find panel: what is in sight, or everything within range whose name holds the query. */

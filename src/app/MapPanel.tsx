@@ -15,6 +15,8 @@ export interface MapPanelProps {
   lat: number;
   /** Bearing of the panorama, degrees, drawn on the marker. */
   yaw: number;
+  /** How good the fix was the standpoint came from, metres: drawn as a circle round it. Null when it was chosen. */
+  accuracy?: number | null;
   onPick: (p: PickedPosition) => void;
   onClose: () => void;
 }
@@ -30,7 +32,7 @@ function arrowIcon(yaw: number): L.DivIcon {
   });
 }
 
-export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
+export function MapPanel({ lon, lat, yaw, accuracy, onPick, onClose }: MapPanelProps) {
   const host = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
@@ -46,6 +48,13 @@ export function MapPanel({ lon, lat, yaw, onPick, onClose }: MapPanelProps) {
     });
     L.tileLayer(OSM_TILES, { maxZoom: 18, attribution: OSM_ATTRIBUTION, crossOrigin: true }).addTo(map);
     const marker = L.marker([lat, lon], { icon: arrowIcon(yaw), interactive: false }).addTo(map);
+    // Where the device may really be: the fix's own radius, at least the two metres a circle needs to be seen.
+    if (accuracy != null) {
+      L.circle([lat, lon], {
+        radius: Math.max(2, accuracy), className: 'alp-accuracy', interactive: false,
+        color: '#1d4ed8', weight: 1.5, fillColor: '#1d4ed8', fillOpacity: 0.12,
+      }).addTo(map);
+    }
     map.on('click', (e: L.LeafletMouseEvent) => {
       marker.setLatLng(e.latlng);
       setPicked({ lon: e.latlng.lng, lat: e.latlng.lat });

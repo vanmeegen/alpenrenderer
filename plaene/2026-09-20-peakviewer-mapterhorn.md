@@ -1460,6 +1460,77 @@ Offen: Am Ufer des Achensees stehen sich Seemaske (genau) und
 Wasserklasse (106 m, ausgefranst) gegenüber; am Gegenufer bleibt ein
 unruhiger Saum. Die Kanten von Schneeflecken sind gezoomt gepunktet.
 
+### 8.ai Plan 4, Etappe 7: Standort-Komfort (2026-11-13)
+
+**Befund vorher.** Die Labels im Bild sind die wenigen, die Platz
+finden: „Wo ist von hier der Großglockner?“ hatte keine Antwort, wenn
+sein Label keinen Platz bekam oder ein Grat davorstand. Der Standort
+wurde einmal geholt und blieb; wer weiterging, musste neu orten. Und auf
+einem Gipfel lag der Fix ein paar Meter neben der Spitze, die halbe
+Aussicht hinter der eigenen Kuppe.
+
+**Gipfel suchen (`core/find.ts`).** Leistenknopf „Gipfel suchen“: ohne
+Eingabe die Liste dessen, was von hier zu sehen ist, das Auffälligste
+zuerst (der Rang, nach dem auch die Labels vergeben werden); mit Eingabe
+alles im Umkreis, dessen Name sie enthält, auch Verdecktes und Seen.
+Groß- und Kleinschreibung, Akzente und ß zählen nicht. Namensanfang vor
+Sichtbarem vor Nahem. Ein Treffer wird gesucht: die Ansicht dreht sich
+zu ihm (außer die Sensoren steuern), er wird im Bild markiert (Ring und
+Name, auch wenn verdeckt: „(verdeckt)“), und liegt er außerhalb des
+Bilds, zeigt ein Pfeil auf einem Kreis um die Bildmitte hin, mit
+Gradzahl („60° rechts“). Die Karte sagt „von hier verdeckt“; ihr
+Schließen beendet die Suche. Das Gesuchte hängt an der Id, überlebt also
+den Neuaufbau der Ziele.
+
+**Einrasten (`core/stand.ts summitUnder`).** Liegt ein Gipfel des
+Katalogs innerhalb dessen, wofür der GPS-Fix gut ist (seine Genauigkeit,
+mindestens 15 m, höchstens 60 m), steht man auf dem Gipfel: der
+Standpunkt wird dorthin gesetzt, der HUD sagt „Auf dem Gipfel: …“. Nur
+bei einem Fix des Geräts, nie bei Kartenwahl oder URL; nie bei einem
+groben Fix (über 100 m); nie auf einen See.
+
+**Mitlaufen (`core/stand.ts FollowFilter`, `mapPicker.ts watchDevice`).**
+Schalter im Standpunkt-Panel. Das Gerät meldet laufend Fixes; der
+Standpunkt folgt, wenn ein Fix weiter als zehn Meter und weiter als
+seine halbe Genauigkeit vom jetzigen Standpunkt liegt (ein grober Fix
+etwas daneben ist derselbe Ort, schlechter gesehen), und frühestens zwei
+Sekunden nach dem letzten Versetzen. Ein Fix, der nur zu früh kam, wird
+nach der Wartezeit noch einmal angeboten: ein Gerät, das danach
+stehenbleibt, schickt keinen weiteren (das fand der E2E-Test). Ein
+Standpunkt, der anders gewählt wird (Karte, Ort, URL, Foto), beendet das
+Mitlaufen. Eine Verweigerung beendet es mit der bekannten Hilfe; ein
+ausbleibender Fix (Wald) nicht. Die Clipmap-Fenster haben ihre Hysterese
+aus E2, die Körnung liegt am Boden (E5): unterwegs wird wenig nachgeladen
+und nichts schwimmt.
+
+**Karte.** Kam der Standpunkt vom Gerät, zeigt die Karte den
+Genauigkeitskreis um ihn.
+
+**GPS-Höhe.** Nur im Check-Panel („wie das Gerät sie meldet, nur zur
+Kontrolle“). Android liefert die Höhe über dem Ellipsoid, in den Alpen
+rund 50 m neben der Landeshöhe; das Auge steht weiter auf dem
+Geländemodell.
+
+Tests rot → grün: `find.test.ts` (neu: `foldName`, `searchTargets`,
+`pointerTo`, `pointerSpot`), `stand.test.ts` (neu: `summitUnder`,
+`snapRadius`, `FollowFilter` mit Wackeln, Gehen, Mindestabstand, grobem
+Fix, „a move that comes too soon is not lost“), `locate.test.ts`
+(`watchDevice`, Höhe), `labels.spec.ts` („finding a summit: the panel
+lists what is in sight; a hidden summit is found by name and marked
+hidden; a tap looks at it, and once the view has turned away an arrow
+points back“), `map.spec.ts` („a fix within its accuracy of a summit
+stands on the summit, and the app says so“ mit Genauigkeitskreis,
+„"Mitlaufen" keeps the standpoint on the device: it follows a walk, not
+a wobble, and a standpoint chosen by hand ends it“). Als
+Charakterisierung (vorher und nachher grün): „two hundred metres from
+the top one stands where the fix says“.
+
+Messung: 412 Unit-Tests grün; volle E2E-Suite 83/83 grün in 11,6 min.
+
+Offen: Der Pfeil kann über einem Label stehen (er nimmt am Layout nicht
+teil). Eingerastet wird auf die Katalogposition, nicht auf die Spitze
+des Geländemodells; der freie Blick (E3) hebt das Auge über die Kuppe.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

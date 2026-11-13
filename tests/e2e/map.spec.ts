@@ -4,7 +4,7 @@
  * request to the tile host is answered with one flat PNG.
  */
 import { expect, Page, test } from '@playwright/test';
-import { FLANK, STAND } from './fixtures/terrain';
+import { FLANK, STAND, TESTHORN } from './fixtures/terrain';
 import { MAP_ZOOM } from '../../src/app/mapPicker';
 
 const TILES = '/tests/e2e/fixtures/tiles/';
@@ -113,6 +113,84 @@ test.describe('GPS', () => {
     await expect.poll(() => hashNum(page, 'lat'), { timeout: 30_000 }).toBeCloseTo(STAND.lat + 0.001, 4);
     await expect(page.getByText(/GPS/)).toBeVisible();
     await expect(panel).toBeHidden();
+  });
+});
+
+const M_PER_DEG_LON = 111320 * Math.cos((STAND.lat * Math.PI) / 180);
+
+test.describe('GPS on a summit', () => {
+  // Twenty metres east of the Testhorn's top, good to 25 m: within what the fix is good for, that is the summit.
+  test.use({
+    geolocation: { latitude: TESTHORN.lat, longitude: TESTHORN.lon + 20 / M_PER_DEG_LON, accuracy: 25 },
+    permissions: ['geolocation'],
+  });
+
+  test('a fix within its accuracy of a summit stands on the summit, and the app says so', async ({ page }) => {
+    // From beside the top, half the view is behind the summit's own cap.
+    await page.goto(url());
+    await ready(page);
+    await page.getByRole('button', { name: 'Standpunkt' }).click();
+    await page.getByRole('region', { name: 'Standpunkt wählen' }).getByRole('button', { name: 'Mein Standort' }).click();
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(TESTHORN.lon, 5);
+    await expect.poll(() => hashNum(page, 'lat'), { timeout: 30_000 }).toBeCloseTo(TESTHORN.lat, 5);
+    await expect(page.getByText('Auf dem Gipfel: Testhorn')).toBeVisible();
+    // The map shows how good the fix was: a circle round the standpoint.
+    await page.getByRole('button', { name: 'Karte' }).click();
+    await expect(page.locator('path.alp-accuracy')).toBeVisible();
+  });
+});
+
+test.describe('GPS beside a summit', () => {
+  test.use({
+    geolocation: { latitude: TESTHORN.lat, longitude: TESTHORN.lon + 200 / M_PER_DEG_LON, accuracy: 25 },
+    permissions: ['geolocation'],
+  });
+
+  test('two hundred metres from the top one stands where the fix says, not on the summit', async ({ page }) => {
+    await page.goto(url());
+    await ready(page);
+    await page.getByRole('button', { name: 'Standpunkt' }).click();
+    await page.getByRole('region', { name: 'Standpunkt wählen' }).getByRole('button', { name: 'Mein Standort' }).click();
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(TESTHORN.lon + 200 / M_PER_DEG_LON, 5);
+    await expect(page.getByText(/GPS/)).toBeVisible();
+    await expect(page.getByText(/Auf dem Gipfel/)).toHaveCount(0);
+  });
+});
+
+test.describe('following the device', () => {
+  test.use({
+    geolocation: { latitude: STAND.lat + 0.001, longitude: STAND.lon + 0.002, accuracy: 8 },
+    permissions: ['geolocation'],
+  });
+
+  test('"Mitlaufen" keeps the standpoint on the device: it follows a walk, not a wobble, and a standpoint chosen by hand ends it', async ({ page, context }) => {
+    await page.goto(url());
+    await ready(page);
+    await page.getByRole('button', { name: 'Standpunkt' }).click();
+    const follow = page.getByRole('region', { name: 'Standpunkt wählen' }).getByRole('button', { name: 'Mitlaufen' });
+    await expect(follow).toHaveAttribute('aria-pressed', 'false');
+    await follow.click();
+    await expect(follow).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(STAND.lon + 0.002, 4);
+    await expect.poll(() => hashNum(page, 'lat'), { timeout: 30_000 }).toBeCloseTo(STAND.lat + 0.001, 4);
+
+    // 150 m on: the standpoint comes along.
+    await context.setGeolocation({ latitude: STAND.lat + 0.001, longitude: STAND.lon + 0.004, accuracy: 8 });
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(STAND.lon + 0.004, 4);
+
+    // Three metres on: the GPS wobbling. The standpoint stays (to the fifth decimal, a metre).
+    await page.waitForTimeout(2500);
+    await context.setGeolocation({ latitude: STAND.lat + 0.001, longitude: STAND.lon + 0.00404, accuracy: 8 });
+    await page.waitForTimeout(3000);
+    expect(await hashNum(page, 'lon')).toBeCloseTo(STAND.lon + 0.004, 5);
+
+    // A standpoint from elsewhere (here the address bar) is a choice: following ends, and the device no longer moves it.
+    await page.evaluate((h) => { location.hash = h; }, `#lon=${FLANK.lon}&lat=${FLANK.lat}&yaw=90&pitch=0&fov=60`);
+    await expect.poll(() => hashNum(page, 'lon'), { timeout: 30_000 }).toBeCloseTo(FLANK.lon, 4);
+    await expect(follow).toHaveAttribute('aria-pressed', 'false');
+    await context.setGeolocation({ latitude: STAND.lat + 0.003, longitude: STAND.lon + 0.008, accuracy: 8 });
+    await page.waitForTimeout(3000);
+    expect(await hashNum(page, 'lon')).toBeCloseTo(FLANK.lon, 4);
   });
 });
 
