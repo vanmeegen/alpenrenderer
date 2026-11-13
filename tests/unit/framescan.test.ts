@@ -6,7 +6,7 @@
  * was drawn with rings hundreds of metres apart.
  */
 import { describe, expect, test } from 'bun:test';
-import { FrameScanner, FrameView, SCAN, frameScan, scanBin, scanBins, scanStart } from '../../src/engine/render/framescan';
+import { FrameBox, FrameScanner, FrameView, SCAN, frameScan, scanBin, scanBins, scanBox, scanStart } from '../../src/engine/render/framescan';
 import { RIDGES, twoRidges } from './helpers/ridges';
 
 // A frame 3.2° high a degree above the horizon, 5.3° wide, looking east, with a quarter more on every side.
@@ -108,13 +108,64 @@ describe('frameScan', () => {
   });
 });
 
-describe('FrameScanner over several frames', () => {
-  const { hf, eye } = twoRidges();
-  const frame = (yaw: number) => ({ az0: yaw - 2.65, az1: yaw + 2.65, el0: -0.6, el1: 2.6 });
+describe('scanBox: what is scanned for a frame depends on the frame alone', () => {
+  const frame = (yaw: number, pitch = 1, fov = 3.2) => ({ az0: yaw - 2.65, az1: yaw + 2.65, el0: pitch - fov / 2, el1: pitch + fov / 2 });
+  const inside = (f: FrameBox, b: FrameBox) => f.az0 >= b.az0 && f.az1 <= b.az1 && f.el0 >= b.el0 && f.el1 <= b.el1;
 
-  test('with a budget a scan is spread over calls: the old classes stand until the new are whole, and the result is the same as in one go', () => {
+  test('the box holds the frame, with room, and is the same for every frame of its cell of bearings, tilt and zoom', () => {
+    // The scan used to be kept while the frame stayed near where it was made: the rings, and with
+    // them the picture, depended on the way the view had come. After a reload a summit stood
+    // 3 px elsewhere (CI, 2026-11-13). Now the box is cut on a fixed lattice.
+    for (const [yaw, pitch, fov] of [[90, 1, 3.2], [137.31, -4.2, 2.7], [359.2, 12, 25], [0.4, 0, 8]]) {
+      const f = frame(yaw, pitch, fov), b = scanBox(f);
+      expect(inside(f, b)).toBe(true);
+      expect(b.az1 - b.az0).toBeLessThan((f.az1 - f.az0) * 1.8);
+      expect(b.el1 - b.el0).toBeLessThan((f.el1 - f.el0) * 1.8);
+    }
+    expect(scanBox(frame(90.2))).toEqual(scanBox(frame(90)));            // a little aside: the same cell
+    expect(scanBox(frame(90, 1.1))).toEqual(scanBox(frame(90)));
+    expect(scanBox(frame(90, 1, 3.1))).toEqual(scanBox(frame(90)));     // zoomed a little
+    expect(scanBox(frame(92))).not.toEqual(scanBox(frame(90)));
+    expect(scanBox(frame(90, 1, 1.6))).not.toEqual(scanBox(frame(90)));
+  });
+});
+
+describe('FrameScanner', () => {
+  const { hf, eye } = twoRidges();
+  const frame = (yaw: number, pitch = 1, fov = 3.2) => ({ az0: yaw - 2.65, az1: yaw + 2.65, el0: pitch - fov / 2, el1: pitch + fov / 2 });
+
+  test('the same frame gets the same scan whatever was looked at before', () => {
+    const fresh = new FrameScanner(), used = new FrameScanner();
+    const a = fresh.scan(hf, eye, frame(90), 'v1')!;
+    for (const yaw of [96, 93.1, 91.3, 88.2]) used.scan(hf, eye, frame(yaw), 'v1');
+    const b = used.scan(hf, eye, frame(90.2), 'v1')!;
+    expect(Array.from(b.classes)).toEqual(Array.from(a.classes));
+    expect(Array.from(b.need)).toEqual(Array.from(a.need));
+  });
+
+  test('a pan within the cell keeps the scan; another cell, a zoom, new terrain or another eye makes a new one; coming back, the old one is still there', () => {
+    const s = new FrameScanner();
+    const a = s.scan(hf, eye, frame(90), 'v1')!;
+    expect(a.classes[scanBin(15500)]).toBe(2);
+    expect(s.scan(hf, eye, frame(90.2), 'v1')).toBe(a);
+    expect(s.scan(hf, eye, frame(90, 1.1), 'v1')).toBe(a);
+    expect(s.scans).toBe(1);
+    const b = s.scan(hf, eye, frame(93), 'v1');
+    expect(b).not.toBe(a);
+    expect(s.scans).toBe(2);
+    // Back and forth over the edge of a cell costs nothing.
+    expect(s.scan(hf, eye, frame(90), 'v1')).toBe(a);
+    expect(s.scan(hf, eye, frame(93), 'v1')).toBe(b);
+    expect(s.scans).toBe(2);
+    expect(s.scan(hf, eye, frame(93, 1, 1.6), 'v1')).not.toBe(b);        // zoomed in to half
+    const c = s.scan(hf, eye, frame(93, 1, 1.6), 'v1');
+    expect(s.scan(hf, eye, frame(93, 1, 1.6), 'v2')).not.toBe(c);        // levels arrived
+    expect(s.scan(hf, eye + 30, frame(93, 1, 1.6), 'v2')).not.toBe(c);   // the eye moved
+  });
+
+  test('with a budget a scan is spread over calls: the old one stands until the new is whole, and the result is the same as in one go', () => {
     // A scan is 24 000 height lookups, 10–20 ms on a desktop: in one frame of
-    // a phone that is a stutter every time the pan leaves the margin.
+    // a phone that is a stutter every time the pan enters another cell.
     const whole = new FrameScanner(), sliced = new FrameScanner();
     const a = whole.scan(hf, eye, frame(90), 'v1');
     // The first scan has nothing to stand in for it: null until it is done, a ray a call at least.
@@ -123,44 +174,16 @@ describe('FrameScanner over several frames', () => {
     expect(calls).toBe(SCAN.rays);
     expect(Array.from(first!.classes)).toEqual(Array.from(a!.classes));
     expect(Array.from(first!.need)).toEqual(Array.from(a!.need));
-    // Panned out of the margin: the old classes are handed out while the new scan runs.
+    expect(sliced.scanning).toBe(false);
+    // Panned into another cell: the old scan is handed out while the new one runs.
     const b = whole.scan(hf, eye, frame(93), 'v1');
     let next = sliced.scan(hf, eye, frame(93), 'v1', 0);
     expect(next).toBe(first);
+    expect(sliced.scanning).toBe(true);
     calls = 1;
     while (next === first && calls < 100) { next = sliced.scan(hf, eye, frame(93), 'v1', 0); calls++; }
     expect(calls).toBe(SCAN.rays);
     expect(Array.from(next!.classes)).toEqual(Array.from(b!.classes));
     expect(sliced.scans).toBe(2);
-  });
-
-  test('a scan begins when the frame comes near the edge of what was scanned, before it leaves', () => {
-    const s = new FrameScanner();
-    const a = s.scan(hf, eye, frame(90), 'v1')!;
-    expect(s.scan(hf, eye, frame(90.3), 'v1', 0)).toBe(a);   // well inside: nothing to do
-    expect(s.scanning).toBe(false);
-    expect(s.scan(hf, eye, frame(91.0), 'v1', 0)).toBe(a);   // past half the margin (0.66° of 1.3°): the next scan is under way
-    expect(s.scanning).toBe(true);
-  });
-});
-
-describe('FrameScanner: scanning again only when the frame leaves what was scanned', () => {
-  const { hf, eye } = twoRidges();
-  const frame = (yaw: number, pitch = 1, fov = 3.2) => ({ az0: yaw - 2.65, az1: yaw + 2.65, el0: pitch - fov / 2, el1: pitch + fov / 2 });
-
-  test('a pan within the margin keeps the scan; a pan out of it, a zoom, or new terrain makes a new one', () => {
-    const s = new FrameScanner();
-    const a = s.scan(hf, eye, frame(90), 'v1')!;
-    expect(a.classes[scanBin(15500)]).toBe(2);
-    expect(s.scan(hf, eye, frame(90.5), 'v1')).toBe(a);      // within the quarter kept around the frame
-    expect(s.scan(hf, eye, frame(90, 1.3), 'v1')).toBe(a);
-    expect(s.scans).toBe(1);
-    expect(s.scan(hf, eye, frame(93), 'v1')).not.toBe(a);    // out of what was scanned
-    expect(s.scans).toBe(2);
-    const b = s.scan(hf, eye, frame(93), 'v1');
-    expect(s.scan(hf, eye, frame(93, 1, 1.6), 'v1')).not.toBe(b);   // zoomed in to half: the scan would be far too wide
-    const c = s.scan(hf, eye, frame(93, 1, 1.6), 'v1');
-    expect(s.scan(hf, eye, frame(93, 1, 1.6), 'v2')).not.toBe(c);   // levels arrived
-    expect(s.scan(hf, eye + 30, frame(93, 1, 1.6), 'v2')).not.toBe(c);   // the eye moved
   });
 });

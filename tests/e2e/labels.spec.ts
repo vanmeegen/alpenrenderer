@@ -317,6 +317,7 @@ test.describe('summit labels', () => {
     await page.mouse.up();
     await expect.poll(async () => Number((await hash()).get('yaw')), { timeout: 30_000 }).not.toBe(90);
     await page.waitForTimeout(700);                        // the URL follows the view within 400 ms
+    await ready(page);                                     // and the picture is the one this view has
     const before = { apex: await drawnApex(page), yaw: (await hash()).get('yaw'), pitch: (await hash()).get('pitch') };
     // Hundredths of a degree; the view glides on after the drag, so the last digit is whatever it is, a nought (not written) too.
     expect(before.yaw).toMatch(/^\d+\.\d\d?$/);

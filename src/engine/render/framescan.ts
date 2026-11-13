@@ -38,8 +38,6 @@ export const SCAN = {
   samples: 2,
   /** What is seen counts for this many bins to either side as well. */
   dilate: 1,
-  /** FrameScanner scans this share of the frame more on every side, and keeps the scan while the frame stays inside. */
-  margin: 0.25,
 } as const;
 
 const LOG_RATIO = Math.log(SCAN.ratio);
@@ -165,31 +163,44 @@ export function frameScan(
   return job.view();
 }
 
-const inside = (f: FrameBox, b: FrameBox) => f.az0 >= b.az0 && f.az1 <= b.az1 && f.el0 >= b.el0 && f.el1 <= b.el1;
-const grown = (f: FrameBox, by: number): FrameBox => {
-  const ma = (f.az1 - f.az0) * by, me = (f.el1 - f.el0) * by;
-  return { az0: f.az0 - ma, az1: f.az1 + ma, el0: f.el0 - me, el1: f.el1 + me };
-};
+/** The step of the lattice a span of the frame is laid on: the next of a ladder of √2 that holds it. */
+const rung = (span: number) => 2 ** (Math.ceil(Math.log2(Math.max(span, 1e-6)) * 2 - 1e-9) / 2);
 
 /**
- * Scans again only when it has to, and then over several frames. A scan
- * covers the frame and a margin around it; while the frame stays within
- * half that margin, and has not shrunk to under two thirds of what was
- * scanned (zoomed in: the scan would call far more seen than the frame
- * shows), the scan stands: panning within a mountain's width costs
- * nothing and moves no ring. Past half the margin the next scan begins,
- * `budgetMs` of it a call and a ray at least; the old scan is handed
- * out until the new one is whole.
+ * The box scanned for a frame: the frame's cell on a fixed lattice of
+ * bearings, tilt and zoom, with the room every frame of that cell needs.
+ * The spans are rounded up on a ladder of √2 and the middle to a quarter
+ * of the rounded span, so that the box, and with it the scan, the rings
+ * and the picture, depend on the frame alone: the same view is the same
+ * picture, however it was reached. (A scan kept for as long as the frame
+ * stayed near where it was made gave a summit another place after a
+ * reload.)
+ */
+export function scanBox(frame: FrameBox): FrameBox {
+  const axis = (lo: number, hi: number): [number, number] => {
+    const q = rung(hi - lo), g = q / 4;
+    const mid = Math.round((lo + hi) / 2 / g) * g;
+    // Half the widest frame of the cell, and half a cell for where its middle may lie.
+    const half = q / 2 + g / 2;
+    return [mid - half, mid + half];
+  };
+  const [az0, az1] = axis(frame.az0, frame.az1), [el0, el1] = axis(frame.el0, frame.el1);
+  return { az0, az1, el0, el1 };
+}
+
+/**
+ * Scans what a frame shows, once for each cell of the lattice of views
+ * (scanBox) and state of the terrain, and over several frames: `budgetMs`
+ * of a scan a call and a ray at least. Until a new scan is whole the last
+ * one is handed out. The last few are kept, so that a view going back
+ * and forth over the edge of a cell scans nothing.
  */
 export class FrameScanner {
-  private box: FrameBox | null = null;
-  private frame: FrameBox | null = null;
-  private found: FrameView | null = null;
-  private key = '';
+  private kept = new Map<string, FrameView>();
+  private last: FrameView | null = null;
   private place = '';
   private job: ScanJob | null = null;
   private jobKey = '';
-  private jobFrame: FrameBox | null = null;
   /** How many scans were made. */
   scans = 0;
 
@@ -202,33 +213,38 @@ export class FrameScanner {
    */
   scan(hf: HeightField, eyeAlt: number, frame: FrameBox, stamp: string, budgetMs = Infinity): FrameView | null {
     const place = `${hf.lon},${hf.lat}`;
-    const key = `${stamp}|${place},${Math.round(eyeAlt * 10)}`;
-    if (place !== this.place) { this.found = null; this.job = null; this.place = place; }
-    const f = this.frame;
-    if (this.found && this.box && f && key === this.key && inside(frame, grown(f, SCAN.margin / 2))
-      && frame.az1 - frame.az0 > (f.az1 - f.az0) * 0.67 && frame.el1 - frame.el0 > (f.el1 - f.el0) * 0.67) {
+    if (place !== this.place) { this.kept.clear(); this.last = null; this.job = null; this.place = place; }
+    const box = scanBox(frame);
+    const key = `${stamp}|${Math.round(eyeAlt * 10)}|${box.az0},${box.az1},${box.el0},${box.el1}`;
+    const have = this.kept.get(key);
+    if (have) {
       this.job = null;
-      return this.found;
+      // Most lately used last.
+      this.kept.delete(key);
+      this.kept.set(key, have);
+      this.last = have;
+      return have;
     }
-    // A scan for this frame, unless one is under way that still holds it.
-    if (!this.job || this.jobKey !== key || !this.jobFrame || !inside(frame, grown(this.jobFrame, SCAN.margin / 2))) {
-      this.jobFrame = { ...frame };
+    if (!this.job || this.jobKey !== key) {
       this.jobKey = key;
-      this.job = new ScanJob(hf, eyeAlt, grown(frame, SCAN.margin));
+      this.job = new ScanJob(hf, eyeAlt, box);
     }
     const t0 = budgetMs === Infinity ? 0 : performance.now();
     let done = this.job.step();
     while (!done && (budgetMs === Infinity || performance.now() - t0 < budgetMs)) done = this.job.step();
-    if (!done) return this.found;
-    this.found = this.job.view();
-    this.box = this.job.box;
-    this.frame = this.jobFrame;
-    this.key = key;
+    if (!done) return this.last;
+    const view = this.job.view();
     this.job = null;
     this.scans++;
-    return this.found;
+    this.kept.set(key, view);
+    if (this.kept.size > KEEP) this.kept.delete(this.kept.keys().next().value!);
+    this.last = view;
+    return view;
   }
 
-  /** Forget the scan: the next call scans. */
-  reset() { this.found = null; this.job = null; }
+  /** Forget the scans: the next call scans. */
+  reset() { this.kept.clear(); this.last = null; this.job = null; }
 }
+
+/** Scans a FrameScanner keeps. */
+const KEEP = 6;

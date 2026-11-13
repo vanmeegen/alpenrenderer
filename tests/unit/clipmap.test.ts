@@ -143,14 +143,20 @@ describe('look levels: the telescope\'s fine windows around the point looked at'
     expect(look.z).toBe(14);
     expect(look.filled).toBe(false);
 
-    // Looking at a point 10 km east: the window is centred there, not on the observer.
-    const target = { lon: LON + 10000 / M_LON, lat: LAT };
+    // Looking at a point 10 km east: the window is cut there, not on the observer, with its
+    // middle on a lattice of an eighth of its width: where a window lies depends on the point
+    // alone, not on where it lay before (the same view, the same picture).
+    const snap = (v: number) => Math.round(v / 80) * 80;
+    const lonAt = (px: number) => LON + ((px - lonToMercX(LON, 14)) / (lonToMercX(LON + 1, 14) - lonToMercX(LON, 14)));
+    // A point in the middle of a lattice cell, about 10 km east.
+    const target = { lon: lonAt(snap(lonToMercX(LON + 10000 / M_LON, 14))), lat: LAT };
     const before = hf.height(target.lon, target.lat, 10000);
     const askedBefore = asked.length;
     await s.setLook(target.lon, target.lat);
     expect(look.filled).toBe(true);
-    expect(look.px0 + 320).toBe(Math.round(lonToMercX(target.lon, 14)));
-    expect(look.py0 + 320).toBe(Math.round(latToMercY(target.lat, 14)));
+    expect(look.px0 + 320).toBe(snap(lonToMercX(target.lon, 14)));
+    expect(look.py0 + 320).toBe(snap(latToMercY(target.lat, 14)));
+    expect(Math.abs(look.px0 + 320 - lonToMercX(target.lon, 14))).toBeLessThan(1);
     expect(asked.length).toBeGreaterThan(askedBefore);
     let bad = 0;
     for (let y = 0; y < look.h; y += 7) for (let x = 0; x < look.w; x += 5) {
@@ -162,13 +168,21 @@ describe('look levels: the telescope\'s fine windows around the point looked at'
     expect(hf.height(target.lon, target.lat, 10000)).toBe(before);
     expect(hf.groundAt(target.lon, target.lat)).toBe(before);
 
-    // Looking a little aside stays inside the window: no refetch.
-    const n = asked.length;
-    await s.setLook(target.lon + 500 / M_LON, target.lat);
+    // Looking a little aside stays in the cell: the window stands, nothing is fetched.
+    const n = asked.length, px0 = look.px0;
+    await s.setLook(lonAt(lonToMercX(target.lon, 14) + 30), target.lat);
     expect(asked.length).toBe(n);
+    expect(look.px0).toBe(px0);
+    // Into the next cell: the window moves on by one, to where a first look there would have put it.
+    await s.setLook(lonAt(lonToMercX(target.lon, 14) + 60), target.lat);
+    expect(look.px0).toBe(px0 + 80);
+    // And back: the same place again.
+    await s.setLook(target.lon, target.lat);
+    expect(look.px0).toBe(px0);
     // Looking well beyond it refetches around the new point.
+    const m = asked.length;
     await s.setLook(target.lon + 3000 / M_LON, target.lat);
-    expect(asked.length).toBeGreaterThan(n);
+    expect(asked.length).toBeGreaterThan(m);
 
     s.clearLook();
     expect(look.filled).toBe(false);
@@ -182,21 +196,57 @@ describe('look levels: the telescope\'s fine windows around the point looked at'
     const s = new ClipmapStreamer(syntheticSource(512), cfg, LON, LAT);
     await s.setCenter(LON, LAT);
     const at = (km: number) => ({ lon: LON + (km * 1000) / M_LON, lat: LAT });
-    await s.setLooks([at(13), at(18), at(31)]);
+    expect(s.lookPending).toBe(false);
+    const going = s.setLooks([at(13), at(18), at(31)]);
+    expect(s.lookPending).toBe(true);                       // windows on their way: the picture is not final yet
+    await going;
+    expect(s.lookPending).toBe(false);
     const looks = s.heightField.levels.filter((l) => l.role === 'look');
     expect(looks.map((l) => l.z)).toEqual([14, 13, 12]);
     expect(looks.every((l) => l.filled)).toBe(true);
+    const snap = (v: number) => Math.round(v / 80) * 80;
     [13, 18, 31].forEach((km, i) => {
-      expect(looks[i].px0 + 320).toBe(Math.round(lonToMercX(at(km).lon, looks[i].z)));
+      expect(looks[i].px0 + 320).toBe(snap(lonToMercX(at(km).lon, looks[i].z)));
     });
     // A window without a point stays where it is; the others follow theirs.
     const kept = looks[0].px0;
     await s.setLooks([null, at(40), at(31)]);
     expect(looks[0].px0).toBe(kept);
-    expect(looks[1].px0 + 320).toBe(Math.round(lonToMercX(at(40).lon, 13)));
+    expect(looks[1].px0 + 320).toBe(snap(lonToMercX(at(40).lon, 13)));
     // setLook is the same point for all.
     await s.setLook(at(20).lon, LAT);
-    looks.forEach((l) => expect(l.px0 + 320).toBe(Math.round(lonToMercX(at(20).lon, l.z))));
+    looks.forEach((l) => expect(l.px0 + 320).toBe(snap(lonToMercX(at(20).lon, l.z))));
+  });
+
+  test('a window whose tiles are not there is asked for once, not again with every frame', async () => {
+    // The viewer points the telescope every frame. A place at the edge of the coverage, with a tile
+    // missing, was asked for again each time: requests without end, and windows forever on their way.
+    const asked: TileKey[] = [];
+    const whole = syntheticSource(512, asked);
+    const edge: TileSource = { ...whole, load: async (k) => (k.z === 13 && k.x * 512 > lonToMercX(LON + 12000 / M_LON, 14) ? null : whole.load(k)) };
+    const cfg = { size: 640, levels: [{ z: 12 }, { z: 9 }], look: [{ z: 14 }] };
+    const s = new ClipmapStreamer(edge, cfg, LON, LAT);
+    await s.setCenter(LON, LAT);
+    const look = s.heightField.levels.find((l) => l.role === 'look')!;
+    const beyond = { lon: LON + 13000 / M_LON, lat: LAT };
+    await s.setLook(beyond.lon, beyond.lat);
+    expect(look.filled).toBe(false);                        // a window with a tile missing is not shown
+    const n = asked.length;
+    const again = s.setLook(beyond.lon, beyond.lat);
+    expect(s.lookPending).toBe(false);
+    await again;
+    expect(asked.length).toBe(n);
+    // Another place is tried, and after it the first one once more.
+    await s.setLook(LON + 5000 / M_LON, LAT);
+    expect(look.filled).toBe(true);
+    const m = asked.length;
+    await s.setLook(beyond.lon, beyond.lat);
+    expect(asked.length).toBeGreaterThan(m);
+    // Put down, the telescope forgets what it could not get.
+    s.clearLook();
+    const k = asked.length;
+    await s.setLook(beyond.lon, beyond.lat);
+    expect(asked.length).toBeGreaterThan(k);
   });
 
   test('the windows arrive the coarsest first: the picture sharpens in steps instead of jumping from the eye\'s level to the finest', async () => {

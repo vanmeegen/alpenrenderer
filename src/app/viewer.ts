@@ -23,7 +23,7 @@ import { LOOK_FADE_MS, LookFade } from '../engine/core/lookfade';
 import { FrameScanner, FrameView } from '../engine/render/framescan';
 import { lookRange, lookRanges, meshTopNear, ringTable } from '../engine/render/mesh';
 import { DEG, destination, localRadius } from '../engine/core/geodesy';
-import { ClipmapStreamer } from '../engine/sources/clipmap';
+import { ClipmapStreamer, LOOK_STEP } from '../engine/sources/clipmap';
 import { TerrariumSource } from '../engine/sources/terrarium';
 import { TileStore } from '../engine/sources/tilestore';
 import { Backend, GpuRenderer, RendererDiagnostics } from '../engine/render/gpu/renderer';
@@ -118,7 +118,9 @@ export interface ViewerStatus {
   sensors: { active: boolean; offsetYaw: number; offsetPitch: number };
   /**
    * `settled`: the targets are from the last rebuild (none pending) and all
-   * their sightlines are decided, so the labels stand where they will stay.
+   * their sightlines are decided, so the labels stand where they will stay;
+   * and, zoomed in, the scan of the frame is done and the telescope's
+   * windows have arrived and risen: the picture is the one this view has.
    */
   peaks: { total: number; visible: number; placed: number; unnamed: number; settled: boolean; layouts: number };
   /** The summit being sought (seek): whether it is in sight and in the frame, and how far to turn for it, degrees. */
@@ -497,8 +499,9 @@ export class Viewer {
     }
     const eye = hf.eyeLevels();
     const ranges = lookRanges(this.ringView.classes, looks.map((l) => ({
-      // What a window draws at full weight (heightfield.ts looksAt: the inner 80 %).
-      depth: 0.8 * l.w * l.res,
+      // What a window draws at full weight (heightfield.ts looksAt: the inner 80 %), less what
+      // its middle may lie off the point it is cut for (clipmap.ts LOOK_STEP).
+      depth: (0.8 - LOOK_STEP) * l.w * l.res,
       // Up to there the eye's own level of this zoom, or a finer one, draws the ground.
       from: eye.filter((e) => e.z >= l.z && e.filled).reduce((m, e) => Math.max(m, e.maxRange), 0),
     })));
@@ -509,9 +512,9 @@ export class Viewer {
 
   /**
    * The rings for the frame as it stands: what it shows of the ground is
-   * scanned anew only when it leaves what was scanned (FrameScanner), and
+   * scanned once for its cell on a lattice of views (FrameScanner), and
    * the table is made anew only for another scan, another step of zoom or
-   * other terrain. Null when the view is steep enough to sweep every
+   * other terrain: the same view, the same rings, however it was reached. Null when the view is steep enough to sweep every
    * bearing, and while the first scan runs: the wide view's own rings then.
    */
   private ringsForFrame(): Float64Array | null {
@@ -1024,7 +1027,8 @@ export class Viewer {
       },
       peaks: {
         total: this.peaks.length, visible: this.visibleCount, placed: this.placed.length, unnamed: this.unnamed, layouts: this.layouts,
-        settled: this.rebuildTimer === null && (this.visibility?.done ?? false) && !this.scanner.scanning,
+        settled: this.rebuildTimer === null && (this.visibility?.done ?? false)
+          && !this.scanner.scanning && !this.streamer.lookPending && !this.fading,
       },
       sought: (() => {
         const t = this.soughtTarget();

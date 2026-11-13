@@ -76,6 +76,11 @@ const QUANT = 0.25;
 const BIAS = -1000;
 /** A window follows the observer once they are farther than this share of its size from its centre. */
 const RECENTRE = 1 / 8;
+/**
+ * The lattice a look window's middle lies on, as a share of its width: a
+ * window is at most half of that off the point it was cut for.
+ */
+export const LOOK_STEP = 1 / 8;
 /** Pauses before a failed tile is asked again, milliseconds. */
 const RETRY_DELAYS = [400, 1500, 4000];
 /** A tile that did not arrive, however often it was asked for. */
@@ -117,6 +122,8 @@ export class ClipmapStreamer {
   /** The telescope's windows (config.look), cut around the point looked at; see setLook. */
   private lookLevels: Level[] = [];
   private lookLoaded: (string | null)[] = [];
+  /** The place each look window was last wanted at and could not be filled (a tile missing or failed). */
+  private lookDenied: (string | null)[] = [];
   private lookGeneration = 0;
   private lookAbort: AbortController | null = null;
 
@@ -152,13 +159,14 @@ export class ClipmapStreamer {
       }, new Uint16Array(size * size), false);
       this.lookLevels.push(lv);
       this.lookLoaded.push(null);
+      this.lookDenied.push(null);
     }
   }
 
   /**
    * Points the telescope: cuts each look window around (lon, lat) and fills
-   * it, unless the point is still within a quarter window of the current
-   * centre (panning across a summit must not refetch). Outside the eye's
+   * it, unless it lies there already (its middle is on a lattice, see
+   * LOOK_STEP: panning across a summit must not refetch). Outside the eye's
    * progress: the panorama is complete without it, the window only sharpens
    * what is looked at. The widest window is filled first: the picture
    * sharpens in steps of one zoom, each over more of the frame than the
@@ -180,10 +188,14 @@ export class ClipmapStreamer {
       const at = points[i];
       if (!at) return;
       const cx = lonToMercX(at.lon, lv.z), cy = latToMercY(at.lat, lv.z);
-      if (this.lookLoaded[i] && lv.filled
-        && Math.abs(cx - (lv.px0 + size / 2)) < size / 4 && Math.abs(cy - (lv.py0 + size / 2)) < size / 4) return;
-      const px0 = Math.round(cx) - (size >> 1), py0 = Math.round(cy) - (size >> 1);
-      if (this.lookLoaded[i] === `${lv.z}:${px0}:${py0}` && lv.filled) return;
+      // The window's middle on a lattice of LOOK_STEP of its width: panning inside a cell must not
+      // refetch, and where a window lies depends on the point alone, not on where it lay before.
+      const g = Math.max(1, Math.round(size * LOOK_STEP));
+      const px0 = Math.round(cx / g) * g - (size >> 1), py0 = Math.round(cy / g) * g - (size >> 1);
+      const place = `${lv.z}:${px0}:${py0}`;
+      if (this.lookLoaded[i] === place && lv.filled) return;
+      // A place that could not be filled is not asked for again with every frame.
+      if (this.lookDenied[i] === place) return;
       const T = this.source.tileSize, tz = tileZoom(lv.z, T);
       const keys: TileKey[] = [];
       for (let ty = Math.floor(py0 / T); ty <= Math.floor((py0 + size - 1) / T); ty++) {
@@ -199,12 +211,30 @@ export class ClipmapStreamer {
     this.lookAbort?.abort();
     this.lookAbort = new AbortController();
     const { signal } = this.lookAbort;
+    this.lookJobs++;
+    try {
+      await this.fillLooks(jobs, gen, signal);
+    } finally {
+      this.lookJobs--;
+    }
+  }
+
+  /** Whether look windows are on their way: the picture is not final yet. */
+  get lookPending(): boolean { return this.lookJobs > 0; }
+  private lookJobs = 0;
+
+  private async fillLooks(jobs: { index: number; keys: TileKey[]; px0: number; py0: number }[], gen: number, signal: AbortSignal) {
     for (const job of jobs.reverse()) {
       const lv = this.lookLevels[job.index];
       const tiles = await Promise.all(job.keys.map((key) => this.fetchTile(key, signal, this.retryDelays, () => gen !== this.lookGeneration)));
       if (gen !== this.lookGeneration) return;
-      // The telescope only sharpens: a window with a tile missing, failed or not there, is not shown.
-      if (tiles.some((t) => t === FAILED || t === null)) continue;
+      // The telescope only sharpens: a window with a tile missing, failed or not there, is not shown,
+      // and its place is remembered until the telescope points elsewhere or is put down.
+      if (tiles.some((t) => t === FAILED || t === null)) {
+        this.lookDenied[job.index] = `${lv.z}:${job.px0}:${job.py0}`;
+        continue;
+      }
+      this.lookDenied[job.index] = null;
       // A window moves as a whole: cut, filled, then shown, so no frame draws half of each.
       lv.px0 = job.px0;
       lv.py0 = job.py0;
@@ -228,6 +258,7 @@ export class ClipmapStreamer {
       this.lookLoaded[i] = null;
       changed = true;
     });
+    this.lookDenied.fill(null);
     if (this.lookAbort) { this.lookAbort.abort(); this.lookAbort = null; this.lookGeneration++; changed = true; }
     if (changed) this.onUpdate?.(this.levels.length);
   }

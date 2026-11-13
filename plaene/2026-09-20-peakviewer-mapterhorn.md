@@ -1768,10 +1768,13 @@ Bild zeigt, nicht davon, wohin seine Mitte zeigt.
   ein Fach erweitert) und einen **Bedarf**: um wie viel die Horizontlinie
   des Strahls in diesem Fach innerhalb des Bildes steigt (Tangens des
   Höhenwinkels, der größte aller Strahlen). Das ist die Bildhöhe, die
-  dort neu sichtbar wird. `FrameScanner` scannt nur neu, wenn das Bild
-  über die Hälfte des Randes hinaus ist, um ein Drittel kleiner wurde
-  oder Gelände ankam, und dann in Scheiben von 3 ms je Bild; bis der
-  neue Scan fertig ist, gilt der alte.
+  dort neu sichtbar wird. Gescannt wird nicht der Ausschnitt selbst,
+  sondern seine Zelle auf einem festen Raster aus Peilung, Neigung und
+  Zoom (`scanBox`: Spannen auf einer √2-Leiter aufgerundet, Mitte auf ein
+  Viertel der Spanne): Dieselbe Ansicht gibt denselben Scan, wie immer
+  man hingekommen ist. `FrameScanner` scannt je Zelle und Geländestand
+  einmal, in Scheiben von 3 ms je Bild, und behält die letzten sechs;
+  bis ein neuer Scan fertig ist, gilt der alte.
 - **Ringe (`mesh.ts ringTable`, ersetzt `bandFor`).** Ein Fach bekommt
   so viele Ringe, wie es Bildzeilen neu sichtbar macht, einen je zwei
   Pixel (mit Ringen übrig je einen). Zwischen zwei Ringen ist die Fläche
@@ -1799,12 +1802,23 @@ Bild zeigt, nicht davon, wohin seine Mitte zeigt.
   Scan als sichtbar meldet: das feinste auf dem nächsten sichtbaren
   Boden jenseits der Reichweite der eigenen Ebene gleichen Zooms, das
   nächste dahinter, Verdecktes übersprungen. Ein Fenster bedient die
-  Tiefe, die es mit vollem Gewicht zeichnet (80 % seiner Breite). Ohne
-  Scan (Blick steil nach oben oder unten) liegen sie wie bisher auf dem
-  Punkt der Bildmitte.
+  Tiefe, die es mit vollem Gewicht zeichnet (80 % seiner Breite, weniger
+  ein Achtel). Die Fenstermitte rastet auf ein Achtel der Fensterbreite
+  ein (`LOOK_STEP`) statt dem Blick mit Nachlauf zu folgen: Wo ein
+  Fenster liegt, hängt nur vom Punkt ab. Eine Lage, die sich nicht
+  füllen ließ (Kachel fehlt), wird nicht in jedem Bild neu angefragt.
+  Ohne Scan (Blick steil nach oben oder unten) liegen die Fenster wie
+  bisher auf dem Punkt der Bildmitte.
 - **Viewer.** `aimTelescope` setzt `renderer.rings` und die Fenster aus
   dem Scan; ändern sich die Ringe, werden die Label-Nadeln neu gesetzt;
-  `status().peaks.settled` wartet auf einen laufenden Scan.
+  `status().peaks.settled` wartet auf einen laufenden Scan, auf Fenster
+  unterwegs und auf ihr Einblenden.
+- **Dieselbe Ansicht, dasselbe Bild.** Der erste Stand dieses Schritts
+  behielt Scan und Fensterlage, solange das Bild in der Nähe blieb
+  (Nachlauf). Damit hing das Bild vom Weg ab: In CI stand der Gipfel
+  nach dem Neuladen derselben Ansicht 3 px anders („the wheel zooms in
+  to 2.7° … a reload shows the same picture“). Scan-Zelle und
+  Fensterraster sind deshalb reine Funktionen der Ansicht.
 
 **Ergebnis an den beiden Ansichten.** Fenster sind bei 137° und 136°
 dieselben: 7–10 km (6,4 m), 10–17 km (12,8 m), 14–27 km (25,6 m). Die
@@ -1821,16 +1835,19 @@ um den Schwenk verschoben.
   Fenster bekommt: Montscheinspitze 25,6 m statt 6,4 m. Zwei weitere
   Fenster (Atlas dreispaltig) würden das ausgleichen; nicht Teil dieses
   Schritts.
-- Nach einem neuen Scan (Schwenk um mehr als ein Achtel der Bildbreite)
+- Beim Schwenk in die nächste Scan-Zelle (ein Viertel der Bildbreite)
   können einzelne Fächer eine Stufe auf der Leiter wechseln: Ihre Ringe
-  rücken dann, ein Grat um höchstens ein, zwei Pixel.
+  rücken dann, ein Grat um höchstens ein, zwei Pixel; zurück in der
+  alten Zelle steht wieder das alte Bild.
 - Der Scan tastet 25 Peilungen ab. Ein Streifen, den kein Strahl sieht,
   hat nur den Grundabstand (ein Ring je Fach).
 
 Tests rot → grün: `framescan.test.ts` (neu: Fächer, sichtbar/verdeckt/
 nicht im Bild, Erweiterung, „need: how much of the frame's height comes
 into view…“, „a plain seen from above needs the frame's height once“,
-Scan in Scheiben, früher Beginn, Wiederverwendung), `mesh.test.ts`
+„scanBox: … depends on the frame alone“, „the same frame gets the same
+scan whatever was looked at before“, Scan in Scheiben, Wiederverwendung),
+`mesh.test.ts`
 („zoomed in, a mountain is drawn with the same rings wherever the
 centre of the view points“, „the ring table holds every row once“, „a
 plain in the frame does not take the rings from the crests behind it“,
@@ -1840,7 +1857,8 @@ its rings“, „few rows go to waste“, „the telescope's data windows lie
 one behind the other“, „on a table rowAt inverts radiusAt“, „three
 bytes of the logarithm“), `camera.test.ts` (`elevationSpan`),
 `clipmap.test.ts` („each window can be cut around a point of its
-own“), `wgsl.test.ts` („both dialects read a ring's radius from the
+own“, Fenstermitte auf dem Raster, „a window whose tiles are not there
+is asked for once, not again with every frame“), `wgsl.test.ts` („both dialects read a ring's radius from the
 table“), `labels.spec.ts` („zoomed in, a summit is drawn as the terrain
 has it wherever it stands in the frame“: an drei Standpunkten, gegen
 den alten Stand 7,3 px daneben; der Fernrohr- und der Einblend-Test an
@@ -1849,7 +1867,7 @@ und sind entschärft: die Hundertstel in der URL nach dem Nachgleiten
 („wheel zooms in to 2.7°“) und der Mittelwert über drei Spalten, wo
 die Himmelslinie eine Zeile springt („two ridges 10 % apart“).
 
-Messung: 459 Unit-Tests grün; volle E2E-Suite 88/88 grün in 11,2 min.
+Messung: 461 Unit-Tests grün; volle E2E-Suite 88/88 grün in 11,6 min.
 Scan 6–16 ms, verteilt auf
 zwei bis drei Bilder; Bildzeit im Software-Renderer unverändert (265 ms
 gezoomt, 290 ms weit).
