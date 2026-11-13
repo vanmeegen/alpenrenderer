@@ -26,7 +26,7 @@
 
 import { WATER_SHINE } from '../shading';
 import { OUTLINE_CONSTS, SHADE_CONSTS, glslConsts, shaderFloat } from './consts';
-import { ATLAS_COLUMNS, MAX_LEVELS } from '../atlas';
+import { ATLAS_COLUMNS, MAX_LEVELS, MAX_LOOK } from '../atlas';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -114,31 +114,25 @@ int levelFor(float r) {
 }
 
 /**
- * The telescope's window this point lies in (finest first), or -1. A look
- * level is cut around the point looked at, not the observer, so it is taken
- * by position: inside the window with room for the bilinear taps.
+ * How much of level i, if it is one of the telescope's windows, shows at
+ * this point: 0 for an observer level and outside the window. A look level
+ * is cut around the point looked at, not the observer, so it is taken by
+ * position: inside the window with room for the bilinear taps, all of it
+ * well inside, blended out toward its edge. Its flag holds its weight,
+ * negated: a window that has just arrived rises into the picture
+ * (core/lookfade.ts). The windows are the first levels, the finest first
+ * (atlas.ts MAX_LOOK); each takes its share of what the finer ones left,
+ * so a fine window's edge runs into the coarser window around it.
  */
-int lookLevel(float dLon, float dIso) {
-  for (int i = 0; i < ${MAX_LEVELS}; i++) {
-    if (float(i) >= uLevelCount) { break; }
-    if (uLvlA[i].w >= 0.0) { continue; }
-    vec4 A = uLvlA[i];
-    vec4 B = uLvlB[i];
-    float u = A.x + dLon * A.z;
-    float v = A.y - dIso * A.z;
-    if (u > 1.5 && u < B.z - 2.5 && v > 1.5 && v < B.w - 2.5) { return i; }
-  }
-  return -1;
-}
-
-/** 0 well inside a look window, 1 at its edge: the blend back into the observer's levels. */
-float lookFade(int lk, float dLon, float dIso) {
-  vec4 A = uLvlA[lk];
-  vec4 B = uLvlB[lk];
+float lookShare(int i, float dLon, float dIso) {
+  vec4 A = uLvlA[i];
+  if (A.w >= 0.0) { return 0.0; }
+  vec4 B = uLvlB[i];
   float u = A.x + dLon * A.z;
   float v = A.y - dIso * A.z;
+  if (!(u > 1.5 && u < B.z - 2.5 && v > 1.5 && v < B.w - 2.5)) { return 0.0; }
   float d = max(abs(u - 0.5 * B.z) / (0.5 * B.z), abs(v - 0.5 * B.w) / (0.5 * B.w));
-  return smoothstep(0.80, 0.95, d);
+  return (1.0 - smoothstep(0.80, 0.95, d)) * min(1.0, -A.w);
 }
 `;
 
@@ -231,9 +225,20 @@ void main(void) {
     float fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) { h = mix(h, sampleLevel(lv + 1, dLon, dIso), fade); }
   }
-  // Inside the telescope's window its finer posts take over, blended out at the window's edge.
-  int lk = lookLevel(dLon, dIso);
-  if (lk >= 0) { h = mix(sampleLevel(lk, dLon, dIso), h, lookFade(lk, dLon, dIso)); }
+  // Inside the telescope's windows their finer posts take over: the finest
+  // takes its share, the next its share of the rest, the observer's levels
+  // what is left. Well inside the finest window no other is read.
+  float rest = 1.0;
+  float hl = 0.0;
+  for (int i = 0; i < ${MAX_LOOK}; i++) {
+    if (float(i) >= uLevelCount || rest < 0.001) { break; }
+    float share = lookShare(i, dLon, dIso);
+    if (share > 0.0) {
+      hl += rest * share * sampleLevel(i, dLon, dIso);
+      rest *= 1.0 - share;
+    }
+  }
+  h = hl + rest * h;
 
   float horiz = (uRadius + h) * sinD;
   float s = sin(r / (2.0 * uRefRadius));
@@ -449,12 +454,21 @@ void main(void) {
       if (uImagery.x > 0.5) { picture = mix(picture, imageryAt(lv + 1, dLon, dIso), fade); }
     }
   }
-  int lk = lookLevel(dLon, dIso);
-  if (lk >= 0) {
-    float lf = lookFade(lk, dLon, dIso);
-    sf = mix(surfaceAt(lk, dLon, dIso), sf, lf);
-    wet = mix(waterAt(lk, dLon, dIso), wet, lf);
+  // The telescope's windows, as in the vertex stage: the finest first, each its share of the rest.
+  float rest = 1.0;
+  vec3 sfl = vec3(0.0);
+  float wetl = 0.0;
+  for (int i = 0; i < ${MAX_LOOK}; i++) {
+    if (float(i) >= uLevelCount || rest < 0.001) { break; }
+    float share = lookShare(i, dLon, dIso);
+    if (share > 0.0) {
+      sfl += rest * share * surfaceAt(i, dLon, dIso);
+      wetl += rest * share * waterAt(i, dLon, dIso);
+      rest *= 1.0 - share;
+    }
   }
+  sf = sfl + rest * sf;
+  wet = wetl + rest * wet;
   vec2 nh = sf.xy * 2.0 - vec2(1.0, 1.0);
   vec3 n = normalize(vec3(nh, sqrt(max(1.0e-4, 1.0 - dot(nh, nh)))));
   float slope = 1.0 - n.z;               // 0 flat .. 1 vertical

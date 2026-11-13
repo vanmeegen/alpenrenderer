@@ -26,7 +26,7 @@
 
 import { WATER_SHINE } from '../shading';
 import { OUTLINE_CONSTS, SHADE_CONSTS, shaderFloat, wgslConsts } from './consts';
-import { ATLAS_COLUMNS, MAX_LEVELS } from '../atlas';
+import { ATLAS_COLUMNS, MAX_LEVELS, MAX_LOOK } from '../atlas';
 
 /** Water shine constants, written into the shader text so formula and GPU cannot drift apart. */
 const F0 = WATER_SHINE.f0.toFixed(3);
@@ -141,28 +141,23 @@ fn levelFor(r : f32) -> i32 {
   return lv;
 }
 
-/** The telescope's window this point lies in (finest first), or -1: taken by position, not range. */
-fn lookLevel(dLon : f32, dIso : f32) -> i32 {
-  for (var i : i32 = 0; i < ${MAX_LEVELS}; i = i + 1) {
-    if (f32(i) >= uniforms.uLevelCount) { break; }
-    if (uniforms.uLvlA[i].w >= 0.0) { continue; }
-    let A = uniforms.uLvlA[i];
-    let B = uniforms.uLvlB[i];
-    let u = A.x + dLon * A.z;
-    let v = A.y - dIso * A.z;
-    if (u > 1.5 && u < B.z - 2.5 && v > 1.5 && v < B.w - 2.5) { return i; }
-  }
-  return -1;
-}
-
-/** 0 well inside a look window, 1 at its edge: the blend back into the observer's levels. */
-fn lookFade(lk : i32, dLon : f32, dIso : f32) -> f32 {
-  let A = uniforms.uLvlA[lk];
-  let B = uniforms.uLvlB[lk];
+/**
+ * How much of level i, if it is one of the telescope's windows, shows at
+ * this point (0 for an observer level and outside the window): taken by
+ * position, blended out toward the window's edge, times its weight, which
+ * its flag holds negated. The windows are the first levels, the finest
+ * first; each takes its share of what the finer ones left (see the GLSL
+ * twin).
+ */
+fn lookShare(i : i32, dLon : f32, dIso : f32) -> f32 {
+  let A = uniforms.uLvlA[i];
+  if (A.w >= 0.0) { return 0.0; }
+  let B = uniforms.uLvlB[i];
   let u = A.x + dLon * A.z;
   let v = A.y - dIso * A.z;
+  if (!(u > 1.5 && u < B.z - 2.5 && v > 1.5 && v < B.w - 2.5)) { return 0.0; }
   let d = max(abs(u - 0.5 * B.z) / (0.5 * B.z), abs(v - 0.5 * B.w) / (0.5 * B.w));
-  return smoothstep(0.80, 0.95, d);
+  return (1.0 - smoothstep(0.80, 0.95, d)) * min(1.0, -A.w);
 }
 `;
 
@@ -255,9 +250,20 @@ fn main(input : VertexInputs) -> FragmentInputs {
     let fade = smoothstep(outer * 0.86, outer, r);
     if (fade > 0.0) { h = mix(h, sampleLevel(lv + 1, dLon, dIso), fade); }
   }
-  // Inside the telescope's window its finer posts take over, blended out at the window's edge.
-  let lk = lookLevel(dLon, dIso);
-  if (lk >= 0) { h = mix(sampleLevel(lk, dLon, dIso), h, lookFade(lk, dLon, dIso)); }
+  // Inside the telescope's windows their finer posts take over: the finest
+  // takes its share, the next its share of the rest, the observer's levels
+  // what is left. Well inside the finest window no other is read.
+  var rest : f32 = 1.0;
+  var hl : f32 = 0.0;
+  for (var i : i32 = 0; i < ${MAX_LOOK}; i = i + 1) {
+    if (f32(i) >= uniforms.uLevelCount || rest < 0.001) { break; }
+    let share = lookShare(i, dLon, dIso);
+    if (share > 0.0) {
+      hl = hl + rest * share * sampleLevel(i, dLon, dIso);
+      rest = rest * (1.0 - share);
+    }
+  }
+  h = hl + rest * h;
 
   let horiz = (uniforms.uRadius + h) * sinD;
   let s = sin(r / (2.0 * uniforms.uRefRadius));
@@ -460,12 +466,21 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
       if (uniforms.uImagery.x > 0.5) { picture = mix(picture, imageryAt(lv + 1, dLon, dIso), fade); }
     }
   }
-  let lk = lookLevel(dLon, dIso);
-  if (lk >= 0) {
-    let lf = lookFade(lk, dLon, dIso);
-    sf = mix(surfaceAt(lk, dLon, dIso), sf, lf);
-    wet = mix(waterAt(lk, dLon, dIso), wet, lf);
+  // The telescope's windows, as in the vertex stage: the finest first, each its share of the rest.
+  var rest : f32 = 1.0;
+  var sfl = vec3<f32>(0.0, 0.0, 0.0);
+  var wetl : f32 = 0.0;
+  for (var i : i32 = 0; i < ${MAX_LOOK}; i = i + 1) {
+    if (f32(i) >= uniforms.uLevelCount || rest < 0.001) { break; }
+    let share = lookShare(i, dLon, dIso);
+    if (share > 0.0) {
+      sfl = sfl + rest * share * surfaceAt(i, dLon, dIso);
+      wetl = wetl + rest * share * waterAt(i, dLon, dIso);
+      rest = rest * (1.0 - share);
+    }
   }
+  sf = sfl + rest * sf;
+  wet = wetl + rest * wet;
   let nh = sf.xy * 2.0 - vec2<f32>(1.0, 1.0);
   let n = normalize(vec3<f32>(nh, sqrt(max(1.0e-4, 1.0 - dot(nh, nh)))));
   let slope = 1.0 - n.z;                 // 0 flat .. 1 vertical

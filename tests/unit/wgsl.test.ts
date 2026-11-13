@@ -314,6 +314,31 @@ describe('the aerial picture in the shade pass', () => {
   });
 });
 
+describe('the telescope\'s windows in the shaders', () => {
+  test('both dialects lay the look levels over the eye\'s, each by its share (its fade at the edge times its weight): the finest takes its share, the next its share of the rest', async () => {
+    // One window used to be picked (the finest holding the point) and
+    // blended with the eye's level: at its edge the surface fell to the
+    // eye's coarse level although a coarser window had it finer. Laid from
+    // the finest down with what is left over, the result is the same as
+    // from the coarsest up, and a point well inside the finest window
+    // reads no other: under a software rasterizer a loop over all twelve
+    // levels nearly doubled the time of a zoomed frame (235 to 435 ms).
+    const GL = await import('../../src/engine/render/gpu/glsl');
+    const { MAX_LOOK } = await import('../../src/engine/render/atlas');
+    const { DEFAULT_CLIPMAP, LOW_CLIPMAP } = await import('../../src/engine/sources/clipmap');
+    expect(DEFAULT_CLIPMAP.look!.length).toBeLessThanOrEqual(MAX_LOOK);
+    expect(LOW_CLIPMAP.look!.length).toBeLessThanOrEqual(MAX_LOOK);
+    for (const src of [GL.TERRAIN_VERTEX_GL, GL.TERRAIN_SHADE_FRAGMENT_GL, S.TERRAIN_VERTEX, S.TERRAIN_SHADE_FRAGMENT]) {
+      expect(src).toMatch(/fn lookShare\(|float lookShare\(/);
+      expect(src).not.toMatch(/lookLevel\(/);
+      // Only the first MAX_LOOK levels: look levels are listed first, the finest first.
+      expect(src).toMatch(new RegExp(`i < ${MAX_LOOK}; i(\\+\\+| = i \\+ 1)`));
+      expect(src).toMatch(/rest \* share/);
+      expect(src).toMatch(/rest (\*=|= rest \*) \(?1\.0 - share/);
+    }
+  });
+});
+
 describe('shader text Babylon can take apart', () => {
   test('no comment behind code holds a semicolon: the preprocessor cuts declarations there', async () => {
     // "uniform float uRim;   // …; 0 = off" compiled to a lone "0 = off" and a black screen (WebGL2).

@@ -97,12 +97,13 @@ describe('how finely heights are held', () => {
 });
 
 describe('clipmap configurations', () => {
-  test('default has nine levels 15..7 and two look levels 14, 13; low six levels 13..8 and look levels 13, 12', () => {
+  test('default has nine levels 15..7 and three look levels 14, 13, 12; low six levels 13..8 and look levels 13, 12, 11', () => {
     // Pixel zoom 15 is 3.3 m posts for the kilometre around the standpoint, where a survey has them.
     expect(DEFAULT_CLIPMAP.levels.map((l) => l.z)).toEqual([15, 14, 13, 12, 11, 10, 9, 8, 7]);
-    expect(DEFAULT_CLIPMAP.look?.map((l) => l.z)).toEqual([14, 13]);
+    // Three windows round the point looked at, each twice as wide as the one inside it.
+    expect(DEFAULT_CLIPMAP.look?.map((l) => l.z)).toEqual([14, 13, 12]);
     expect(LOW_CLIPMAP.levels.map((l) => l.z)).toEqual([13, 12, 11, 10, 9, 8]);
-    expect(LOW_CLIPMAP.look?.map((l) => l.z)).toEqual([13, 12]);
+    expect(LOW_CLIPMAP.look?.map((l) => l.z)).toEqual([13, 12, 11]);
   });
 
   test('recentring only refetches levels whose window moved', async () => {
@@ -171,6 +172,19 @@ describe('look levels: the telescope\'s fine windows around the point looked at'
 
     s.clearLook();
     expect(look.filled).toBe(false);
+  });
+
+  test('the windows arrive the coarsest first: the picture sharpens in steps instead of jumping from the eye\'s level to the finest', async () => {
+    const cfg = { size: 640, levels: [{ z: 12 }, { z: 9 }], look: [{ z: 14 }, { z: 13 }, { z: 12 }] };
+    const s = new ClipmapStreamer(syntheticSource(512), cfg, LON, LAT);
+    await s.setCenter(LON, LAT);
+    const hf = s.heightField;
+    const order: number[] = [];
+    s.onUpdate = () => {
+      for (const l of hf.levels) if (l.role === 'look' && l.filled && !order.includes(l.z)) order.push(l.z);
+    };
+    await s.setLook(LON + 10000 / M_LON, LAT);
+    expect(order).toEqual([12, 13, 14]);
   });
 });
 

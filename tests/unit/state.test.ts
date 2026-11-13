@@ -78,8 +78,16 @@ describe('readOptions', () => {
     expect(readOptions('')).toEqual({
       backend: 'webgl2', quality: 'auto', tiles: undefined, peaks: 'peaks/{x}_{y}.json', lakes: 'lakes/{x}_{y}.json',
       cover: 'landcover/{z}/{x}/{y}.png',
-      imagery: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/g/{z}/{y}/{x}.jpg', shade: true,
+      imagery: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/g/{z}/{y}/{x}.jpg', shade: true, fade: true,
     });
+  });
+
+  test('fade=0 lets the telescope\'s windows show at once; absent or anything else, they rise into the picture', () => {
+    // The rise is some twenty frames; under the software rasterizer of the
+    // E2E tests that is ten seconds a zoomed page.
+    expect(readOptions('?fade=0').fade).toBe(false);
+    expect(readOptions('').fade).toBe(true);
+    expect(readOptions('?fade=1').fade).toBe(true);
   });
 
   test('shade=0 switches the lit shade pass off; absent, 1 or garbage leave it on', () => {

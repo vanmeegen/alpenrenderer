@@ -23,7 +23,7 @@ export interface LevelSpec {
   /**
    * 'look': a telescope window cut around the point looked at rather than
    * around the observer (sources/clipmap.ts setLook). Drawn by the GPU where
-   * it covers the ground (lookAt); on the CPU read only for the surface as
+   * it covers the ground (looksAt); on the CPU read only for the surface as
    * drawn (render/mesh.ts vertexHeight, where the label pins go). Sightlines,
    * the ground and the summits stay on the observer-centred levels, whatever
    * is looked at.
@@ -53,6 +53,13 @@ export interface Level extends LevelSpec {
    * wrong for that whole window.
    */
   filled: boolean;
+  /**
+   * How much of a look window shows, 0..1; absent = all of it. A window
+   * that arrives rises into the picture over a moment (core/lookfade.ts)
+   * instead of jumping: its crests stand tens of metres above the eye's
+   * coarser level, at a narrow view tens of pixels.
+   */
+  weight?: number;
   /** Lake mask on the same grid, 255 = water (core/water.ts); absent = all dry. */
   water?: Uint8Array;
   /** Bumped whenever `water` is replaced, so the renderer re-uploads. */
@@ -129,22 +136,31 @@ export class HeightField {
   }
 
   /**
-   * The telescope's window a point is drawn from, finest first, with the
-   * blend back into the observer's levels: 0 well inside, 1 from 95 % of the
-   * half width out, smoothstep from 80 %. The shader's lookLevel/lookFade
-   * (gpu/glsl.ts, gpu/wgsl.ts) in one: a window counts where it is filled and
-   * has room for the bilinear taps. Null when no window holds the point.
+   * The telescope's windows a point is drawn from, the coarsest first, each
+   * with its share: laid over what is under it (the eye's levels, then the
+   * coarser windows) by that much. A window's share is its weight well
+   * inside, nothing from 95 % of the half width out, smoothstep from 80 %.
+   * Nested like this, the edge of a fine window runs into the coarser
+   * window around it and not down to the eye's level, which at the range
+   * looked at has posts four to eight times as far apart. The shader's
+   * lookShare (gpu/glsl.ts, gpu/wgsl.ts): a window counts where it is
+   * filled and has room for the bilinear taps. Empty when none holds the
+   * point.
    */
-  lookAt(lon: number, lat: number): { level: Level; fade: number } | null {
-    for (const l of this.levels) {
+  looksAt(lon: number, lat: number): { level: Level; share: number }[] {
+    const out: { level: Level; share: number }[] = [];
+    // Look levels are listed the finest first.
+    for (let i = this.levels.length - 1; i >= 0; i--) {
+      const l = this.levels[i];
       if (l.role !== 'look' || !l.filled) continue;
       const { u, v } = this.project(l, lon, lat);
       if (!(u > 1.5 && u < l.w - 2.5 && v > 1.5 && v < l.h - 2.5)) continue;
       const d = Math.max(Math.abs(u - 0.5 * l.w) / (0.5 * l.w), Math.abs(v - 0.5 * l.h) / (0.5 * l.h));
       const t = Math.min(1, Math.max(0, (d - 0.8) / 0.15));
-      return { level: l, fade: t * t * (3 - 2 * t) };
+      const share = (1 - t * t * (3 - 2 * t)) * Math.min(1, Math.max(0, l.weight ?? 1));
+      if (share > 0) out.push({ level: l, share });
     }
-    return null;
+    return out;
   }
 
   /** `filled` is false for a level that is allocated now and streamed later. */
@@ -266,13 +282,13 @@ export class HeightField {
    * shoulder of this DEM and stays as it is, at the ground there.
    *
    * Searched on the surface as drawn: inside the telescope's window on the
-   * window's posts (lookAt), else on the finest observer level that covers
+   * finest window's posts (looksAt), else on the finest observer level that covers
    * the point. A pin whose summit was found on the coarser level sits a
    * post or two beside the drawn apex.
    */
   summitAt(lon: number, lat: number, radius = 60): { lon: number; lat: number; h: number } {
-    const look = this.lookAt(lon, lat);
-    const l = (look && look.fade < 1 ? look.level : undefined)
+    const looks = this.looksAt(lon, lat);
+    const l = (looks.length ? looks[looks.length - 1].level : undefined)
       ?? this.levels.find((lv) => lv.role !== 'look' && lv.filled && !Number.isNaN(this.heightIn(lv, lon, lat)));
     if (!l) return { lon, lat, h: 0 };
     const { u, v } = this.project(l, lon, lat);

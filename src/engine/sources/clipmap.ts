@@ -34,9 +34,10 @@ export interface ClipmapConfig {
   levels: ClipmapLevelSpec[];
   /**
    * The telescope's windows: levels cut around the point looked at instead
-   * of the observer (setLook), finest first. Zoomed in, the summit looked
-   * at is drawn from 6.6 m posts instead of the 26–53 m of the level that
-   * reaches it from the observer.
+   * of the observer (setLook), finest first, each twice as wide as the one
+   * inside it. Zoomed in, the summit looked at is drawn from 6.6 m posts
+   * instead of the 26–53 m of the level that reaches it from the observer,
+   * and the ground around it steps down to that through the wider windows.
    */
   look?: ClipmapLevelSpec[];
 }
@@ -44,7 +45,7 @@ export interface ClipmapConfig {
 /**
  * Nine levels, pixel zoom 15 down to 7: 3.3 m posts for the kilometre
  * around the standpoint, doubling each step to ~850 m posts at 272 km. With
- * the two telescope windows that is eleven of the twelve the shaders hold
+ * the three telescope windows that is all twelve the shaders hold
  * (render/atlas.ts MAX_LEVELS). Mapterhorn serves LiDAR-grade data down to
  * tile zoom 17 where a survey exists, so the finest levels are where the
  * ground at your feet and the summit shapes come from; the coarse ones are
@@ -54,15 +55,15 @@ export interface ClipmapConfig {
 export const DEFAULT_CLIPMAP: ClipmapConfig = {
   size: 640,
   levels: [{ z: 15 }, { z: 14 }, { z: 13 }, { z: 12 }, { z: 11 }, { z: 10 }, { z: 9 }, { z: 8 }, { z: 7 }],
-  // The telescope: 6.6 m and 13 m posts around the summit looked at, zoomed in.
-  look: [{ z: 14 }, { z: 13 }],
+  // The telescope: 6.6 m, 13 m and 26 m posts around the summit looked at, zoomed in.
+  look: [{ z: 14 }, { z: 13 }, { z: 12 }],
 };
 
 /** Six levels for phones: 13 m posts out to ~4 km, half the reach (~135 km). */
 export const LOW_CLIPMAP: ClipmapConfig = {
   size: 640,
   levels: [{ z: 13 }, { z: 12 }, { z: 11 }, { z: 10 }, { z: 9 }, { z: 8 }],
-  look: [{ z: 13 }, { z: 12 }],
+  look: [{ z: 13 }, { z: 12 }, { z: 11 }],
 };
 
 /**
@@ -159,7 +160,9 @@ export class ClipmapStreamer {
    * it, unless the point is still within a quarter window of the current
    * centre (panning across a summit must not refetch). Outside the eye's
    * progress: the panorama is complete without it, the window only sharpens
-   * what is looked at.
+   * what is looked at. The widest window is filled first: the picture
+   * sharpens in steps of one zoom, each over more of the frame than the
+   * next, instead of jumping from the eye's level to the finest posts.
    */
   async setLook(lon: number, lat: number): Promise<void> {
     const size = this.config.size;
@@ -185,7 +188,7 @@ export class ClipmapStreamer {
     this.lookAbort?.abort();
     this.lookAbort = new AbortController();
     const { signal } = this.lookAbort;
-    for (const job of jobs) {
+    for (const job of jobs.reverse()) {
       const lv = this.lookLevels[job.index];
       const tiles = await Promise.all(job.keys.map((key) => this.fetchTile(key, signal, this.retryDelays, () => gen !== this.lookGeneration)));
       if (gen !== this.lookGeneration) return;

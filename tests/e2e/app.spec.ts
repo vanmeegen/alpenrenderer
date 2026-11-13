@@ -13,7 +13,7 @@ const R_EFF_M = 6371008.8 / (1 - 0.13);
 const W = 1000, H = 600;
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', imagery: '/tests/e2e/fixtures/imagery/', q: 'low', shade: '0', ...query });
+  const q = new URLSearchParams({ tiles: TILES, peaks: '/tests/e2e/fixtures/peaks/', lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', imagery: '/tests/e2e/fixtures/imagery/', q: 'low', shade: '0', fade: '0', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;
@@ -119,7 +119,7 @@ test.describe('loading', () => {
     await page.goto(url());
     const s = await ready(page);
     // The low quality the E2E tests run at (see url): six levels around the
-    // eye, the telescope's two windows not counted. The high quality's eight
+    // eye, the telescope's three windows not counted. The high quality's nine
     // are characterised in tests/unit/clipmap.test.ts.
     expect(s.levels).toBe(6);
     expect(s.tilesTotal).toBeGreaterThan(0);
@@ -128,10 +128,10 @@ test.describe('loading', () => {
     expect(s.diagnostics).toMatchObject({ terrainReady: true, shadeReady: true, compositeReady: true, frameErrors: 0 });
     expect(s.diagnostics.shaderErrors).toEqual([]);
     await expect(page.getByText('6 Level')).toBeVisible();
-    // The eight levels (six and the telescope's two) lie two abreast in the
+    // The nine levels (six and the telescope's three) lie two abreast in the
     // height atlas: no side over the 4096 px every phone takes. In one
-    // column they were 640 × 5120.
-    expect((s.diagnostics as any).atlas).toBe('1280×2560 rgba8');
+    // column they would be 640 × 5760.
+    expect((s.diagnostics as any).atlas).toBe('1280×3200 rgba8');
   });
 
   test('the eye stands 1.7 m above the ground under it, ripple or not', async ({ page }) => {

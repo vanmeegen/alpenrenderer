@@ -720,9 +720,12 @@ export class GpuRenderer {
       // Otherwise a cold start draws the empty raster's uniform bias as a plain
       // at -1000 m in the foreground, with a cliff up to the real terrain
       // wherever the next level takes over.
-      // A look level (the telescope's window) is flagged -1: the shader takes
-      // it wherever the point lies inside its window, not by range.
-      this.lvlA.set([l.cx, l.cy, pxPerRad, l.role === 'look' ? (l.filled ? -1 : 0) : (l.filled ? l.maxRange : 0)], i * 4);
+      // A look level (the telescope's window) is flagged below zero: the
+      // shader takes it wherever the point lies inside its window, not by
+      // range, and by as much as the flag says (minus its weight, -1 once it
+      // has risen all the way: core/lookfade.ts).
+      const weight = Math.min(1, Math.max(0, l.weight ?? 1));
+      this.lvlA.set([l.cx, l.cy, pxPerRad, l.role === 'look' ? (l.filled ? -weight : 0) : (l.filled ? l.maxRange : 0)], i * 4);
       // Heights were re-expressed in the atlas's steps when it was packed.
       this.lvlB.set([HEIGHT_QUANT, HEIGHT_BIAS, l.w, l.h], i * 4);
     });
@@ -805,7 +808,7 @@ export class GpuRenderer {
       origin: [hf.lon, hf.lat] as [number, number],
       levels: hf.levels.map((l) => ({
         version: l.version, waterVersion: l.waterVersion, coverVersion: l.coverVersion, imageryVersion: l.imageryVersion,
-        filled: l.filled, px0: l.px0, py0: l.py0,
+        weight: l.weight, filled: l.filled, px0: l.px0, py0: l.py0,
       })),
       knobs: {
         shaded: this.shaded, aerial: this.aerial, outline: this.outline, detail: this.detail, snowLine: this.snowLine, fogRange: this.fogRange,
@@ -886,6 +889,8 @@ export class GpuRenderer {
 
   private updateTerrainUniforms() {
     const hf = this.heightField!;
+    // A look window's weight changes from frame to frame while it rises.
+    this.syncLevels(hf);
     const p = this.radialParams(hf);
     const latR = hf.lat * DEG;
 

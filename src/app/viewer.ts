@@ -19,6 +19,7 @@ import { LakeCatalog, lakeFetcher } from '../engine/sources/lakecatalog';
 import { LandCover, urlCoverLoader } from '../engine/sources/landcover';
 import { Imagery, urlImageryLoader } from '../engine/sources/imagery';
 import { Lake, lakeLabel, rasterizeLakes } from '../engine/core/water';
+import { LOOK_FADE_MS, LookFade } from '../engine/core/lookfade';
 import { bandFor, lookRange, meshTopNear } from '../engine/render/mesh';
 import { DEG, destination, localRadius } from '../engine/core/geodesy';
 import { ClipmapStreamer } from '../engine/sources/clipmap';
@@ -203,6 +204,7 @@ export class Viewer {
     // switch it off (state.ts AppOptions.shade); the camera and photo modes
     // switch it off while they run and restore this.
     this.shadeAllowed = opt.shade;
+    this.lookFade = new LookFade(opt.fade ? LOOK_FADE_MS : 0);
     this.style = readStyle();
     this.shadeView = opt.shade && this.style !== 'lines';
     renderer.shaded = this.shadeView;
@@ -246,6 +248,7 @@ export class Viewer {
       if (this.sensors.tick(performance.now())) this.viewChanged();
       this.keepLongFov();
       this.aimTelescope();
+      this.fadeLooks(performance.now());
       if (this.feed.status.active) this.applyLensFov();
       if (this.visibility && !this.visibility.done) {
         this.visibility.step(VISIBILITY_BUDGET_MS);
@@ -260,7 +263,10 @@ export class Viewer {
       this.renderer.detail = this.adaptation.rim ? 1 : 0;
       if (this.renderer.render()) {
         this.frames++;
-        if (this.drawnAt) this.adaptation.frame(now - this.drawnAt, now);
+        // Frames drawn for a window that rises in a resting view are at
+        // every pixel: they say nothing about what a moving view can afford.
+        const resting = this.fading && now - this.movedAt >= REST_MS;
+        if (this.drawnAt && !resting) this.adaptation.frame(now - this.drawnAt, now);
         this.drawnAt = now;
       }
       this.drawLabels();
@@ -469,6 +475,26 @@ export class Viewer {
   }
 
   private looking: Promise<void> | null = null;
+
+  /**
+   * The telescope's windows rise into the picture instead of jumping
+   * (core/lookfade.ts): their weight is in the renderer's fingerprint, so
+   * the frames of the rise are drawn. The label pins sit on the surface as
+   * drawn; they are set anew once it has come to rest, not in between.
+   */
+  private fadeLooks(now: number) {
+    const fading = this.lookFade.step(this.streamer.heightField.levels, now);
+    if (fading) {
+      if (this.rebuildTimer !== null) this.scheduleRebuildTargets();
+    } else if (this.fading) {
+      if (this.rebuildTimer !== null) { clearTimeout(this.rebuildTimer); this.rebuildTimer = null; }
+      this.rebuildTargets();
+    }
+    this.fading = fading;
+  }
+
+  private lookFade: LookFade;
+  private fading = false;
 
   /** Set by the browser's orientation change; the next frame whose aspect has flipped converts the field of view. */
   private flipPending = false;

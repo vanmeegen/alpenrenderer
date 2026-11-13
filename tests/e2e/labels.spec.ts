@@ -12,7 +12,7 @@ const W = 1000, H = 600;
 const R_EFF_M = 6371008.8 / (1 - 0.13);
 
 function url(hash: Record<string, number | string> = {}, query: Record<string, string> = {}) {
-  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', imagery: '/tests/e2e/fixtures/imagery/', q: 'low', shade: '0', ...query });
+  const q = new URLSearchParams({ tiles: TILES, peaks: PEAK_CELLS, lakes: '/tests/e2e/fixtures/lakes/', cover: '/tests/e2e/fixtures/cover/', imagery: '/tests/e2e/fixtures/imagery/', q: 'low', shade: '0', fade: '0', ...query });
   const h = new URLSearchParams(Object.entries({ lon: STAND.lon, lat: STAND.lat, yaw: 90, pitch: 0, fov: 60, ...hash })
     .map(([k, v]) => [k, String(v)]));
   return `/dist/?${q}#${h}`;
@@ -198,16 +198,17 @@ test.describe('summit labels', () => {
   });
 
   test('zoomed in, the telescope cuts its fine windows around the Testhorn and draws the apex where the formula puts it', async ({ page }) => {
-    // Below 30° the two look levels (z14 and z13; z13 and z12 at the low
-    // quality the tests run at) are cut around the point the centre of the
-    // view meets, and a dense band of rings sits there: the apex is drawn
-    // from 13 m posts on rings 9 m apart, instead of from 26 m posts on
-    // rings 42 m apart (1/120 of 5 km).
+    // Below 30° the three look levels (z14, z13 and z12; z13, z12 and z11 at
+    // the low quality the tests run at) are cut around the point the centre
+    // of the view meets, and a dense band of rings sits there: the apex is
+    // drawn from 13 m posts on rings 9 m apart, instead of from 26 m posts
+    // on rings 42 m apart (1/120 of 5 km). The windows lie in one another;
+    // the picture is read when all are in (weight 1: at once here, fade=0).
     await page.goto(url({ pitch: 26, fov: 5 }));
     const s = await ready(page);
     const looks = () => page.evaluate(() => (window as any).alp.streamer.heightField.levels
-      .filter((l: any) => l.role === 'look' && l.filled).map((l: any) => ({ z: l.z, px0: l.px0, py0: l.py0, w: l.w })));
-    await expect.poll(async () => (await looks()).length, { timeout: 60_000 }).toBe(2);
+      .filter((l: any) => l.role === 'look' && l.filled && l.weight === 1).map((l: any) => ({ z: l.z, px0: l.px0, py0: l.py0, w: l.w })));
+    await expect.poll(async () => (await looks()).map((l: any) => l.z).sort(), { timeout: 60_000 }).toEqual([11, 12, 13]);
     const fine = (await looks()).sort((a: any, b: any) => b.z - a.z)[0];
     expect(fine.z).toBe(13);
     // Cut around the Testhorn, not around the standpoint: its centre within a quarter window of the summit.
@@ -220,6 +221,40 @@ test.describe('summit labels', () => {
     // 13 m posts round the cone's apex by up to 9 m: 0.1° here, 13 px of 600.
     // Without the telescope the apex comes 30–40 m low: 0.4°, 48 px.
     await expect.poll(async () => Math.abs((await drawnApex(page)).y - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.025);
+  });
+
+  test('a window of the telescope rises into the picture instead of jumping: its weight goes from nothing to all over the frames of a third of a second', async ({ page }) => {
+    // The fine window holds crests the eye's coarser level averages away,
+    // tens of metres at 15 km and tens of pixels at 2.7°: shown at once, the
+    // ridge jumps. The other tests switch the rise off (fade=0 in url): it
+    // is some twenty frames a page under the software rasterizer.
+    await page.goto(url({ pitch: 26, fov: 5 }, { fade: '1' }));
+    // Every look window's weight at every animation frame, from its first filled frame on.
+    const seen = await page.evaluate(() => new Promise<Record<number, number[]>>((resolve) => {
+      const out: Record<number, number[]> = {};
+      const t0 = performance.now();
+      const tick = () => {
+        const v = (window as any).alp;
+        const looks = v ? v.streamer.heightField.levels.filter((l: any) => l.role === 'look') : [];
+        for (const l of looks) if (l.filled) (out[l.z] ??= []).push(l.weight ?? 1);
+        const done = looks.length === 3 && looks.every((l: any) => l.filled && l.weight === 1);
+        if (done || performance.now() - t0 > 90_000) resolve(out); else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }));
+    expect(Object.keys(seen).map(Number).sort((a, b) => a - b)).toEqual([11, 12, 13]);
+    for (const z of [11, 12, 13]) {
+      const w = seen[z];
+      // The frame it arrives in may be sampled before the viewer has seen
+      // it, and a window cut anew while the terrain loads starts over: from
+      // the last time it was at its lowest on. However slow the frames, a
+      // window comes up a quarter at most in each (lookfade.ts LOOK_FADE_STEP).
+      const rise = w.slice(w.lastIndexOf(Math.min(...w)));
+      expect(rise[0]).toBeLessThan(0.2);
+      expect(rise.filter((x) => x > 0.05 && x < 0.95).length).toBeGreaterThanOrEqual(2);
+      expect(rise.every((x, i) => i === 0 || x >= rise[i - 1])).toBe(true);
+      expect(rise[rise.length - 1]).toBe(1);
+    }
   });
 
   test('the wheel zooms in to 2.7°, three times closer than it used to; the Testhorn label sits on the apex as drawn, and a reload shows the same picture', async ({ page }) => {

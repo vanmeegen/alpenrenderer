@@ -1646,6 +1646,89 @@ Bild mit echten Kacheln: vom Gornergrat füllt der Gipfelaufbau des
 Matterhorns (10 km) bei 2,7° das Bild, mit sauberer Silhouette; in der
 hohen Qualität mit sichtbar mehr Einzelheiten.
 
+### 8.al Fernrohr-Fenster: verschachtelt und eingeblendet (2026-11-13)
+
+**Beobachtung des Benutzers.** Stark gezoomt (SO 137°, 2,7°, Standpunkt
+47.6394/11.3761) wird das Gelände erst grob gezeichnet und springt dann
+auf fein; das Feine liege „viel höher, das passt nicht genau“. Verdacht:
+Rundungsfehler.
+
+**Befund (gemessen mit echten Kacheln).** Kein Rundungs- oder Lagefehler:
+Über demselben Boden liegt das feine Fenster (Zoom 14, 6,4-m-Posten) im
+Mittel 0,1 m neben der Ebene, die das Auge in 15 km zeichnet (Zoom 11,
+51-m-Posten), Streuung 4,7 m. An Graten aber bis +20 m und −36 m: die
+grobe Ebene mittelt Spitzen weg. Bei 2,7° sind 20 m in 15 km rund 17
+Pixel; im Bild lag der Kotzen-Gipfel (16 km) ohne Fenster 22 Pixel
+tiefer. Der Sprung war also echt, er kam aus den Daten. Dazu ein
+wirklicher Fehler: Das feinste Fenster wurde an seinem Rand (80 bis 95 %
+der halben Breite) in die Ebene des **Auges** überblendet, obwohl das
+gröbere Fenster darum herum den Boden feiner hatte. Am Rand entstand so
+ein Ring, in dem der Grat auf die grobe Höhe absackte: die kleine Stufe
+im Grat rechts im Bild.
+
+**Umsetzung.**
+
+- **Verschachtelt.** Die Fenster liegen übereinander, jedes mit seinem
+  Anteil (`lookShare` in GLSL und WGSL, für Höhe, Flächennormale und
+  Wasser; auf der CPU `HeightField.looksAt` und `mesh.ts vertexHeight`).
+  Der Rand des feinen Fensters läuft jetzt in das gröbere Fenster aus.
+  Die CPU legt von grob nach fein; die Shader rechnen dasselbe von fein
+  nach grob („das feinste nimmt seinen Anteil, das nächste seinen Anteil
+  am Rest“) und nur über die ersten drei Ebenen (`atlas.ts MAX_LOOK`),
+  mit Abbruch, sobald nichts mehr übrig ist. Die erste Fassung, eine
+  Schleife über alle zwölf Ebenen, kostete im Software-Renderer der Tests
+  fast das Doppelte je gezoomtem Bild (435 statt 235 ms); jetzt 255 ms.
+- **Drittes Fenster.** `DEFAULT_CLIPMAP.look` = Zoom 14, 13, 12 (Handy
+  13, 12, 11), jedes doppelt so breit wie das innere. Mit den neun Ebenen
+  des Auges sind das genau die zwölf, die die Shader halten
+  (`MAX_LEVELS`). `setLook` füllt das weiteste zuerst: Das Bild wird in
+  Stufen von je einem Zoom schärfer statt in einem Sprung über drei.
+- **Eingeblendet.** `core/lookfade.ts LookFade`: Ein Fenster, das zum
+  ersten Mal zeigt (oder um anderen Boden geschnitten wurde, oder nach
+  dem Absetzen des Fernrohrs wiederkommt), steigt in 350 ms von 0 auf 1
+  (`Level.weight`, weich an- und auslaufend), je Bild höchstens um ein
+  Viertel des Wegs (`LOOK_FADE_STEP`): Das Bild, in dem ein Fenster
+  ankommt, ist selbst ein langsames (Kacheln packen, Atlas hochladen),
+  und nach der Uhr allein wäre der Anstieg halb vorbei, bevor etwas
+  davon gezeichnet ist. Folgt es nur dem Blick
+  (die Mitte des alten Schnitts liegt noch im neuen), behält es sein
+  Gewicht: Was fein war, bleibt fein. Der Renderer gibt das Gewicht
+  negiert in `uLvlA.w` an die Shader und führt es im Fingerabdruck des
+  Bildes, damit die Bilder des Anstiegs gezeichnet werden. Die
+  Label-Nadeln werden gesetzt, wenn die Fläche zur Ruhe gekommen ist,
+  nicht dazwischen; die Bilder des Anstiegs zählen nicht in die
+  Laufzeit-Anpassung (sie werden in voller Auflösung gezeichnet).
+  `?fade=0` (`AppOptions.fade`) zeigt die Fenster sofort: Die E2E-Tests
+  setzen es, weil der Anstieg rund 25 Bilder je gezoomter Seite sind (im
+  Software-Renderer zehn Sekunden); ein eigener Test prüft ihn.
+
+Was bleibt: Wo das Fenster beim Mitschwenken neuen Boden erreicht, wird
+dieser Streifen ohne Anstieg fein (dort greift nur die Überblendung am
+Fensterrand). Und der Unterschied selbst bleibt: Was fern grob gezeichnet
+wird, ist niedriger als in Wirklichkeit, bis das Fernrohr es holt.
+
+Tests rot → grün: `mesh.test.ts` („windows nest: at the fine window's
+edge the height runs into the coarser window's, not down to the eye
+level's and up again“, „a window that is still fading in is drawn by its
+weight“), `lookfade.test.ts` (sieben Tests: Anstieg, „a hitch does not
+swallow the rise“, Mitschwenken behält das Gewicht, anderer Boden
+beginnt neu, Wiederkehr beginnt neu, Dauer 0 zeigt sofort, jedes Fenster
+auf eigener Uhr), `clipmap.test.ts` (drei Fenster je
+Konfiguration; „the windows arrive the coarsest first“), `wgsl.test.ts`
+(„both dialects lay the look levels over the eye's, the coarsest
+first, each by its share“), `redraw.test.ts` (Gewicht im
+Fingerabdruck), `labels.spec.ts` („zoomed in, the telescope cuts its
+fine windows around the Testhorn…“: drei Fenster, alle aufgestiegen,
+der Gipfel dort, wo die Formel ihn hinlegt; gegen den alten Stand rot;
+neu „a window of the telescope rises into the picture instead of
+jumping“: rot mit `fade=0`, grün mit dem Anstieg), `state.test.ts`
+(`fade=0`), `app.spec.ts` (Atlas 1280×3200 mit dem dritten Fenster).
+
+Messung: 438 Unit-Tests grün; volle E2E-Suite 87/87 grün in 11,0 min
+(vorher 11,8). Bild mit echten Kacheln am Standpunkt
+des Benutzers: die Stufe im Grat des Grammersbergs am rechten Bildrand
+ist weg; 8,1 statt 7,5 MB Gelände im Speicher.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):

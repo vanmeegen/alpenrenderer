@@ -311,6 +311,35 @@ describe('inside the telescope\'s window the mesh is sampled from the look level
     expect(probe(320 + 0.96 * 320)).toBeCloseTo(PLAIN, 4);
   });
 
+  test('windows nest: at the fine window\'s edge the height runs into the coarser window\'s, not down to the eye level\'s and up again', () => {
+    // Zoomed in on a ridge 15 km off, the eye's level there has 51 m posts
+    // and holds a crest twenty metres lower than the 6 m window does. The
+    // fine window used to fade into that at its edge, although the coarser
+    // window around it had the crest: a dent in the ridge along the edge.
+    const { hf, centre, probe } = withWindow();
+    const z = 13, w = 640, h = 640, COARSER = PLAIN + 120;
+    hf.addLevel({
+      z, px0: Math.round(lonToMercX(centre.lon, z)) - w / 2, py0: Math.round(latToMercY(centre.lat, z)) - h / 2, w, h, quant: 1, bias: -1000, role: 'look',
+    }, new Uint16Array(w * h).fill(COARSER + 1000), true);
+    expect(probe(320)).toBeCloseTo(LOOK, 6);                          // the fine window's own
+    expect(probe(320 + 0.875 * 320)).toBeCloseTo((LOOK + COARSER) / 2, 4);   // half fine, half coarser window
+    expect(probe(320 + 0.97 * 320)).toBeCloseTo(COARSER, 4);          // past the fine window: the coarser one, whole
+    // The coarser window's own edge runs into the eye level (its centre is a post off the fine one's).
+    expect(Math.abs(probe(320 + 1.75 * 320) - (COARSER + PLAIN) / 2)).toBeLessThan(3);
+    expect(probe(320 + 2.2 * 320)).toBeCloseTo(PLAIN, 6);
+  });
+
+  test('a window that is still fading in is drawn by its weight: half in, half the eye level\'s height', () => {
+    const { hf, probe } = withWindow();
+    const look = hf.levels.find((l) => l.role === 'look')!;
+    look.weight = 0.5;
+    expect(probe(320)).toBeCloseTo(PLAIN + 100, 6);
+    look.weight = 0;
+    expect(probe(320)).toBeCloseTo(PLAIN, 6);
+    look.weight = undefined;
+    expect(probe(320)).toBeCloseTo(LOOK, 6);
+  });
+
   test('an empty window is not read, and the pin follows the window: meshTopNear at its centre is on the look level', () => {
     const empty = withWindow(false);
     expect(empty.probe(320)).toBeCloseTo(PLAIN, 6);

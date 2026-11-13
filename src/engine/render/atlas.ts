@@ -9,11 +9,18 @@
  */
 
 /**
- * Levels the shaders hold: nine around the observer (pixel zoom 15 to 7),
- * two telescope windows, one to spare. At 640 px, two abreast, twelve are
+ * Levels the shaders hold: nine around the observer (pixel zoom 15 to 7)
+ * and three telescope windows. At 640 px, two abreast, twelve are
  * 1280 × 3840.
  */
 export const MAX_LEVELS = 12;
+/**
+ * How many of those may be the telescope's windows (clipmap.ts look). They
+ * are listed first, the finest first (HeightField sorts by reach, and a
+ * window has none), so the shaders look for windows in the first MAX_LOOK
+ * levels only.
+ */
+export const MAX_LOOK = 3;
 
 /** Levels side by side in the atlas. */
 export const ATLAS_COLUMNS = 2;

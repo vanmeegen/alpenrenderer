@@ -243,6 +243,11 @@ export interface AppOptions {
    */
   shade: boolean;
   /**
+   * Whether the telescope's windows rise into the picture (core/lookfade.ts)
+   * or show at once (`fade=0`). For tests: the rise is some twenty frames.
+   */
+  fade: boolean;
+  /**
    * Forces the adaptation to slow frames on (`adapt=1`) or off (`adapt=0`);
    * without it the device class decides, and an explicit `q` switches it off.
    */
@@ -267,6 +272,7 @@ export function readOptions(search = location.search): AppOptions {
     cover: (cover.endsWith('/') ? cover : cover + '/') + '{z}/{x}/{y}.png',
     imagery: imagery ? (imagery.endsWith('/') ? imagery : imagery + '/') + '{z}/{y}/{x}.jpg' : IMAGERY_TEMPLATE,
     shade: q.get('shade') !== '0',
+    fade: q.get('fade') !== '0',
     ...(q.get('adapt') === '1' ? { adapt: true } : q.get('adapt') === '0' ? { adapt: false } : {}),
   };
 }
