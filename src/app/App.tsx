@@ -410,7 +410,7 @@ export function App() {
           <div className="flex flex-wrap items-baseline gap-x-3">
             <span className="tabular-nums font-semibold">{compass(view.yaw)} {view.yaw.toFixed(0)}°</span>
             <span className="tabular-nums">{view.pitch >= 0 ? '+' : ''}{view.pitch.toFixed(0)}°</span>
-            <span className="tabular-nums">FOV {view.fov.toFixed(0)}°</span>
+            <span className="tabular-nums">FOV {view.fov < 10 ? view.fov.toFixed(1).replace('.', ',') : view.fov.toFixed(0)}°</span>
             {status && <span className="tabular-nums text-neutral-500">{status.fps} fps</span>}
           </div>
           <div className="text-neutral-600">

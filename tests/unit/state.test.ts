@@ -10,7 +10,10 @@ describe('readHash', () => {
 
   test('reads every field and clamps pitch and fov', () => {
     const v = readHash('#lon=10.5&lat=47.25&alt=2500&yaw=370&pitch=200&fov=1');
-    expect(v).toEqual({ lon: 10.5, lat: 47.25, alt: 2500, yaw: 10, pitch: 89, fov: 5 });
+    expect(v).toEqual({ lon: 10.5, lat: 47.25, alt: 2500, yaw: 10, pitch: 89, fov: 2.7 });
+    // As far in as the zoom goes (gestures.ts MIN_FOV), a link is read as it was written.
+    expect(readHash('#lon=10.5&lat=47.25&fov=2.7').fov).toBe(2.7);
+    expect(readHash('#lon=10.5&lat=47.25&fov=3.4').fov).toBe(3.4);
   });
 
   test('a place id sets position and bearing, explicit fields win', () => {
@@ -52,6 +55,17 @@ describe('formatHash', () => {
   test('round-trips through readHash', () => {
     const v = { lon: 7.78472, lat: 45.98333, alt: 3135, yaw: 232.4, pitch: -3.5, fov: 60 };
     expect(readHash(formatHash(v))).toEqual(v);
+  });
+
+  test('zoomed in, a link holds the view to the pixel: hundredths of a degree, and the field of view to a tenth below 10°', () => {
+    // At 2.7° a tenth of a degree is 22 pixels of a 600 px frame.
+    const v = { lon: 7.78472, lat: 45.98333, yaw: 232.43, pitch: -3.57, fov: 2.7 };
+    expect(formatHash(v)).toBe('#lon=7.78472&lat=45.98333&yaw=232.43&pitch=-3.57&fov=2.7');
+    expect(readHash(formatHash(v))).toEqual({ ...v, alt: undefined });
+    expect(formatHash({ ...v, fov: 8.44 })).toContain('fov=8.4');
+    // From 10° on the field of view is whole degrees, as links have always had it.
+    expect(formatHash({ ...v, fov: 60 })).toContain('fov=60');
+    expect(formatHash({ ...v, fov: 10.4 })).toMatch(/fov=10$/);
   });
 
   test('omits alt when standing on the ground', () => {

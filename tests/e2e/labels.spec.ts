@@ -222,6 +222,34 @@ test.describe('summit labels', () => {
     await expect.poll(async () => Math.abs((await drawnApex(page)).y - expectedY), { timeout: 30_000 }).toBeLessThan(H * 0.025);
   });
 
+  test('the wheel zooms in to 2.7°, three times closer than it used to; the Testhorn label sits on the apex as drawn, and a reload shows the same picture', async ({ page }) => {
+    await page.goto(url({ pitch: 26.4, fov: 8 }));
+    await ready(page);
+    const hash = async () => new URLSearchParams((await page.evaluate(() => location.hash)).slice(1));
+    await page.mouse.move(500, 300);
+    await page.mouse.wheel(0, -3000);                      // far more than it takes: the zoom stops at its end
+    await expect.poll(async () => (await hash()).get('fov'), { timeout: 30_000 }).toBe('2.7');
+    // A pixel is now 0.0045°, 40 cm on the summit 5 km off; the pin is on the apex the mesh draws.
+    await expect.poll(() => labels(page).then((l) => l.map((p) => p.name)), { timeout: 30_000 }).toEqual(['Testhorn']);
+    await expect.poll(() => pinOffApex(page), { timeout: 30_000 }).toBeLessThan(1);
+
+    // Turned a little by hand, so that direction and tilt are no round numbers; then the same link, loaded anew.
+    await page.mouse.down();
+    await page.mouse.move(537, 277, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(async () => Number((await hash()).get('yaw')), { timeout: 30_000 }).not.toBe(90);
+    await page.waitForTimeout(700);                        // the URL follows the view within 400 ms
+    const before = { apex: await drawnApex(page), yaw: (await hash()).get('yaw'), pitch: (await hash()).get('pitch') };
+    expect(before.yaw).toMatch(/^\d+\.\d\d$/);             // hundredths of a degree
+    await page.reload();
+    await ready(page);
+    expect((await hash()).get('fov')).toBe('2.7');
+    await expect.poll(async () => {
+      const apex = await drawnApex(page);
+      return Math.max(Math.abs(apex.x - before.apex.x), Math.abs(apex.y - before.apex.y));
+    }, { timeout: 30_000 }).toBeLessThan(3);
+  });
+
   test('a summit catalogued on its flank gets its pin on the drawn top, not in the air beside it or in the slope', async ({ page }) => {
     // OSM points often sit some tens of metres off the top. Here the Testhorn
     // is catalogued 60 m north of its apex, on the flank: the pin belongs on

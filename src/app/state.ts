@@ -7,6 +7,7 @@
  */
 
 import { IMAGERY_TEMPLATE } from '../engine/sources/imagery';
+import { MIN_FOV } from './gestures';
 import { fovForAspect } from '../engine/core/camera';
 
 export interface ViewState {
@@ -73,7 +74,7 @@ export function readHash(hash = location.hash, fallback = DEFAULT_VIEW): ViewSta
     alt: alt === null ? undefined : num(alt, NaN) || undefined,
     yaw: wrap360(num(q.get('yaw'), base.yaw)),
     pitch: Math.max(-89, Math.min(89, num(q.get('pitch'), base.pitch))),
-    fov: Math.max(5, Math.min(110, num(q.get('fov'), base.fov))),
+    fov: Math.max(MIN_FOV, Math.min(110, num(q.get('fov'), base.fov))),
   };
 }
 
@@ -208,11 +209,15 @@ export function trailing<T>(fn: (v: T) => void, ms: number, timers: Timers = rea
   return push;
 }
 
+/** A number to at most `digits` decimals, without trailing zeros. */
+const trim = (x: number, digits: number) => String(Number(x.toFixed(digits)));
+
 export function formatHash(v: ViewState): string {
   const parts = [
     `lon=${v.lon.toFixed(5)}`, `lat=${v.lat.toFixed(5)}`,
     ...(v.alt !== undefined ? [`alt=${Math.round(v.alt)}`] : []),
-    `yaw=${v.yaw.toFixed(1)}`, `pitch=${v.pitch.toFixed(1)}`, `fov=${v.fov.toFixed(0)}`,
+    // Hundredths of a degree: zoomed in to 2.7° a tenth is 22 pixels. The field of view to a tenth below 10°.
+    `yaw=${trim(v.yaw, 2)}`, `pitch=${trim(v.pitch, 2)}`, `fov=${v.fov < 10 ? trim(v.fov, 1) : v.fov.toFixed(0)}`,
   ];
   return '#' + parts.join('&');
 }

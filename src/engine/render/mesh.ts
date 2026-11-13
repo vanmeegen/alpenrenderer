@@ -99,16 +99,29 @@ export function radialParams(
 /** Ground ranges a dense band of rings covers (the telescope). */
 export interface Band { r1: number; r2: number }
 
+/** At this field of view (vertical, degrees) and wider the band has its full width. */
+const BAND_FOV = 8;
+
 /**
  * The band for a distance looked at: the distance quantised in steps of
  * ×1.25 (so panning across a slope leaves the rings where they are) with
  * room on both sides, 0.8× to 1.5625× of the quantised value. Nothing within
  * a kilometre: the near rings are dense already. Null for the sky.
+ *
+ * Zoomed in below 8° the step, and with it the band, narrows in proportion
+ * to the field of view (1 + 0.25·fov/8). The rows the band may take are
+ * fixed, so a band a third as wide has its rings a third as far apart: at
+ * 2.7° a pixel is 1.6 m at 20 km, and the wide band's rings were 37 m apart
+ * there on a phone, where the terrain has 13 m posts.
  */
-export function bandFor(lookRange: number | null): Band | null {
+export function bandFor(lookRange: number | null, fov = BAND_FOV): Band | null {
   if (lookRange === null || !(lookRange >= 1000)) return null;
-  const q = 1000 * 1.25 ** Math.floor(Math.log(lookRange / 1000) / Math.log(1.25));
-  return { r1: 0.8 * q, r2: 1.5625 * q };
+  // The field of view on a ladder of quarter octaves below 8°, so that zooming a little leaves the rings alone too.
+  const f = Math.min(BAND_FOV, Math.max(1, fov));
+  const laddered = BAND_FOV * 2 ** (-Math.floor(Math.log2(BAND_FOV / f) * 4 + 1e-9) / 4);
+  const step = 1 + 0.25 * (laddered / BAND_FOV);
+  const q = 1000 * step ** Math.floor(Math.log(lookRange / 1000) / Math.log(step));
+  return { r1: q / step, r2: q * step * step };
 }
 
 /**

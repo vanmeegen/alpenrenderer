@@ -454,7 +454,7 @@ export class Viewer {
     const hf = this.streamer.heightField;
     const zoomed = this.camera.fov < Viewer.TELESCOPE_FOV && hf.levels.length > 0;
     const r = zoomed ? lookRange(hf, this.renderer.eyeAltitude, this.camera.yaw, this.camera.pitch) : null;
-    const band = bandFor(r);
+    const band = bandFor(r, this.camera.fov);
     const cur = this.renderer.band;
     if ((band?.r1 ?? -1) !== (cur?.r1 ?? -1) || (band?.r2 ?? -1) !== (cur?.r2 ?? -1)) this.renderer.band = band;
     // The fine data windows (clipmap.ts look levels) go to the same point; one fetch at a time.

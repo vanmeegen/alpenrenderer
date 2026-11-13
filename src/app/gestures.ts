@@ -37,6 +37,13 @@ const KEY_STEP = 0.08;
 const TAP_PX = 8;
 const TAP_MS = 300;
 
+/**
+ * How far in the zoom goes: the vertical field of view, degrees. A third of
+ * the 8° it used to end at. Below that a DEM post is tens of pixels wide
+ * and there is nothing more to see.
+ */
+export const MIN_FOV = 2.7;
+
 export class GestureModel {
   onChange: (() => void) | null = null;
   /**
@@ -47,7 +54,7 @@ export class GestureModel {
   turnHandler: ((dYaw: number, dPitch: number) => void) | null = null;
   /** A short single touch that did not move: a tap at that point. */
   onTap: ((x: number, y: number) => void) | null = null;
-  minFov = 8;
+  minFov = MIN_FOV;
   maxFov = 100;
 
   private pointers = new Map<number, Pointer>();

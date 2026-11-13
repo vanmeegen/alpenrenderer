@@ -228,6 +228,29 @@ describe('the telescope: a dense band of rings around the distance looked at', (
     expect(bandFor(null)).toBeNull();
   });
 
+  test('zoomed in below 8° the band narrows with the field of view: the rings stay a post apart when a pixel is a metre', () => {
+    // At 8° and wider, and without a field of view, the band is what it was.
+    expect(bandFor(20000, 8)).toEqual(bandFor(20000));
+    expect(bandFor(20000, 30)).toEqual(bandFor(20000));
+    const wide = bandFor(20000)!, narrow = bandFor(20000, 2.7)!;
+    expect((narrow.r2 - narrow.r1) / (wide.r2 - wide.r1)).toBeLessThan(0.4);            // about a third, as the field of view is
+    // 405 rings (a phone's 45 % of 900 rows) across it: a 13 m post apart, where the wide band had 37 m.
+    expect((narrow.r2 - narrow.r1) / 405).toBeLessThan(14);
+    expect((wide.r2 - wide.r1) / 405).toBeGreaterThan(30);
+    // What is looked at lies in the band, with room on both sides, at any distance and zoom.
+    for (const fov of [2.7, 3.5, 5, 7, 8, 20]) {
+      for (let r = 1000; r < 150000; r *= 1.013) {
+        const b = bandFor(r, fov)!;
+        expect(b.r1).toBeLessThan(r);
+        expect(b.r2).toBeGreaterThan(r * 1.05);
+      }
+    }
+    // Panning across a slope still leaves the rings where they are, and so does a little zooming.
+    expect(bandFor(20000, 2.7)).toEqual(bandFor(20300, 2.7));
+    expect(bandFor(20000, 2.7)).toEqual(bandFor(20000, 2.8));
+    expect(bandFor(20000, 2.7)).not.toEqual(bandFor(20000, 5));
+  });
+
   test('with a band the rings there are a post apart or finer, and rowAt still inverts radiusAt everywhere', () => {
     const { hf } = field([]);
     const band = { r1: 7000, r2: 13000 };

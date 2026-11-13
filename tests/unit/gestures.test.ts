@@ -11,7 +11,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { Camera } from '../../src/engine/core/camera';
-import { GestureModel } from '../../src/app/gestures';
+import { GestureModel, MIN_FOV } from '../../src/app/gestures';
 
 function setup(fov = 60, w = 1000, h = 500) {
   const cam = new Camera();
@@ -141,6 +141,21 @@ describe('two fingers: pinch zoom', () => {
     g.tick(16);
     expect(cam.fov).toBeCloseTo(60, 6);
     expect(cam.yaw).toBeCloseTo(90 - cam.hfov * 0.1, 6);
+  });
+
+  test('the zoom ends at 2.7°, three times closer than the 8° it used to end at; the wheel and the plus key stop there', () => {
+    expect(MIN_FOV).toBe(2.7);
+    expect(8 / MIN_FOV).toBeCloseTo(3, 1);
+    const { cam, g } = setup(8, 1000, 500);
+    expect(g.minFov).toBe(MIN_FOV);
+    g.wheel(-400);
+    expect(cam.fov).toBeLessThan(8);
+    expect(cam.fov).toBeGreaterThan(MIN_FOV);
+    for (let i = 0; i < 10; i++) g.wheel(-400);
+    expect(cam.fov).toBe(MIN_FOV);
+    cam.set({ fov: 4 });
+    for (let i = 0; i < 5; i++) g.key('+');
+    expect(cam.fov).toBe(MIN_FOV);
   });
 
   test('fov stays within its limits', () => {

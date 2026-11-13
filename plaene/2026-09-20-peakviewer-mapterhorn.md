@@ -1600,6 +1600,52 @@ Altschnee; es ist ein Bild von 2017. Ob der Demo-Dienst die Last einer
 öffentlichen Seite trägt, zeigt der Betrieb; fällt er aus, bleibt das
 Relief.
 
+### 8.ak Dreimal weiter hineinzoomen (2026-11-13)
+
+**Wunsch.** Weiter hineinzoomen können, „nochmal dreimal so weit“. Der
+Zoom endete bei einem Bildwinkel von 8° (vertikal); jetzt bei 2,7°
+(`gestures.ts MIN_FOV`). Ein Pixel ist dort 0,0045°: 80 cm in 10 km.
+
+Der Grenzwert allein hätte nicht gereicht:
+
+- **URL.** `formatHash` schrieb Richtung und Neigung auf 0,1° und den
+  Bildwinkel ganzzahlig. Bei 2,7° ist 0,1° schon 22 Pixel, und aus 2,7°
+  wäre 3° geworden. Jetzt Hundertstel Grad und der Bildwinkel unter 10°
+  mit einer Nachkommastelle (ohne angehängte Nullen; ab 10° ganzzahlig
+  wie bisher). `readHash` kappt bei 2,7° statt bei 5°.
+- **Band im Fernrohr (`mesh.ts bandFor`).** Das dichte Band von Ringen um
+  die angeschaute Entfernung reichte fest vom 0,8- bis zum 1,56-Fachen.
+  In 20 km sind das 15 km auf höchstens 405 Ringe (Handy): 37 m Abstand,
+  wo das Gelände 13-m-Posten hat. Unter 8° wird die Stufe der
+  Quantisierung, und mit ihr das Band, im Verhältnis des Bildwinkels
+  schmaler (`1 + 0,25·fov/8`, der Bildwinkel auf Viertel-Oktaven
+  gerastet, damit etwas Zoomen die Ringe so wenig verschiebt wie etwas
+  Schwenken). Bei 2,7° sind die Ringe in 20 km wieder 13 m auseinander.
+- **Anzeige.** Der HUD zeigt den Bildwinkel unter 10° mit einer
+  Nachkommastelle.
+
+Gesten, Rad und Tasten skalieren mit dem Bildwinkel, das Label-Raster
+arbeitet in √2-Stufen des Bildwinkels: dort war nichts zu tun.
+
+Was sich nicht ändert, ist die Auflösung der Daten: 13-m-Posten auf dem
+Handy, 6,6 m im Fernrohr-Fenster auf Tablet und Desktop. Die glatten
+Normalen aus E5 halten das Bild ruhig, aber mehr Einzelheiten, als das
+Geländemodell hat, zeigt auch der tiefere Zoom nicht.
+
+Tests rot → grün: `gestures.test.ts` („the zoom ends at 2.7°, three
+times closer than the 8° it used to end at; the wheel and the plus key
+stop there“), `state.test.ts` (Hash mit `fov=2.7` gelesen, darunter
+gekappt; „zoomed in, a link holds the view to the pixel…“),
+`mesh.test.ts` („zoomed in below 8° the band narrows with the field of
+view: the rings stay a post apart when a pixel is a metre“),
+`labels.spec.ts` („the wheel zooms in to 2.7°…; the Testhorn label sits
+on the apex as drawn, and a reload shows the same picture“).
+
+Messung: 426 Unit-Tests grün; volle E2E-Suite 86/86 grün in 11,8 min.
+Bild mit echten Kacheln: vom Gornergrat füllt der Gipfelaufbau des
+Matterhorns (10 km) bei 2,7° das Bild, mit sauberer Silhouette; in der
+hohen Qualität mit sichtbar mehr Einzelheiten.
+
 ## 9. Arbeitsweise: Test first, automatisiert, deterministisch
 
 Seit 2026-09-20 verbindlich (Details in `CLAUDE.md`):
